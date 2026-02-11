@@ -1,34 +1,37 @@
-# 기여 가이드
+# Contributing Guide
 
-AAT 프로젝트에 기여해 주셔서 감사합니다. 이 문서는 개발 환경 설정부터 PR 제출까지의 과정을 설명합니다.
+Thank you for contributing to AAT! This guide covers everything from setting up your development environment to submitting a PR.
+
+[한국어 가이드](CONTRIBUTING.ko.md)
 
 ---
 
-## 개발 환경 설정
+## Development Setup
 
-### 필수 조건
+### Prerequisites
 
-- Python 3.11 이상
-- Tesseract OCR (`brew install tesseract` 또는 `apt-get install tesseract-ocr`)
+- Python 3.11+
+- Tesseract OCR (`brew install tesseract` or `apt-get install tesseract-ocr`)
 - Git
 
-### 설치
+### Installation
 
 ```bash
-git clone <repo-url> && cd AI_Auto_Tester
+git clone https://github.com/ksgisang/AI-Watch-Tester.git
+cd AI-Watch-Tester
 make dev
 ```
 
-`make dev`는 다음을 수행한다:
+`make dev` runs:
 
 ```makefile
 dev:
-    pip install -e ".[dev]"    # 패키지 + 개발 의존성 설치
-    playwright install chromium # Chromium 브라우저 설치
-    pre-commit install          # pre-commit 훅 설치
+    pip install -e ".[dev]"    # Install package + dev dependencies
+    playwright install chromium # Install Chromium browser
+    pre-commit install          # Install pre-commit hooks
 ```
 
-### 가상 환경 (권장)
+### Virtual Environment (Recommended)
 
 ```bash
 python -m venv .venv
@@ -38,11 +41,11 @@ make dev
 
 ---
 
-## 코드 스타일
+## Code Style
 
-### ruff (린터 + 포매터)
+### ruff (Linter + Formatter)
 
-프로젝트는 ruff를 린터와 포매터로 사용한다. 설정은 `pyproject.toml`에 정의되어 있다.
+The project uses ruff as its linter and formatter. Configuration is in `pyproject.toml`.
 
 ```toml
 [tool.ruff]
@@ -54,29 +57,29 @@ src = ["src"]
 select = ["E", "F", "I", "N", "UP", "B", "SIM", "TCH"]
 ```
 
-주요 규칙:
+Key rules:
 
-| 코드 | 설명 |
-|------|------|
-| `E`, `F` | pyflakes, pycodestyle 기본 규칙 |
-| `I` | import 정렬 (isort) |
-| `N` | 네이밍 컨벤션 |
-| `UP` | Python 3.11+ 문법으로 업그레이드 |
-| `B` | bugbear (잠재적 버그) |
-| `SIM` | 코드 단순화 |
-| `TCH` | TYPE_CHECKING 블록 사용 |
+| Code | Description |
+|------|-------------|
+| `E`, `F` | pyflakes, pycodestyle basics |
+| `I` | Import sorting (isort) |
+| `N` | Naming conventions |
+| `UP` | Upgrade to Python 3.11+ syntax |
+| `B` | Bugbear (potential bugs) |
+| `SIM` | Code simplification |
+| `TCH` | TYPE_CHECKING block usage |
 
 ```bash
-# 린트 검사
+# Lint check
 make lint
 
-# 자동 포맷 + 자동 수정
+# Auto-format + auto-fix
 make format
 ```
 
-### mypy (타입 검사)
+### mypy (Type Checking)
 
-strict 모드로 동작한다. 모든 함수에 타입 힌트를 작성해야 한다.
+Runs in strict mode. All functions must have type annotations.
 
 ```toml
 [tool.mypy]
@@ -92,30 +95,30 @@ make typecheck
 
 ### pre-commit
 
-커밋 시 ruff 린트와 포맷이 자동으로 실행된다. `.pre-commit-config.yaml`에 정의되어 있다.
+Ruff lint and format run automatically on commit. Defined in `.pre-commit-config.yaml`.
 
 ```bash
-# 수동 실행 (전체 파일)
+# Manual run (all files)
 pre-commit run --all-files
 ```
 
 ---
 
-## 테스트
+## Testing
 
-### 테스트 실행
+### Running Tests
 
 ```bash
-# 전체 테스트
+# All tests
 make test
 
-# 커버리지 포함
+# With coverage
 make test-cov
 ```
 
-`make test-cov`는 터미널 리포트와 HTML 리포트(`htmlcov/`)를 모두 생성한다.
+`make test-cov` generates both terminal and HTML reports (`htmlcov/`).
 
-### 테스트 설정
+### Test Configuration
 
 ```toml
 [tool.pytest.ini_options]
@@ -124,55 +127,55 @@ asyncio_mode = "auto"
 addopts = "-v --tb=short"
 ```
 
-- `asyncio_mode = "auto"` -- async 테스트 함수를 자동으로 감지한다. `@pytest.mark.asyncio` 데코레이터가 필요 없다.
-- `addopts = "-v --tb=short"` -- 상세 출력, 짧은 트레이스백.
+- `asyncio_mode = "auto"` — Automatically detects async test functions. No `@pytest.mark.asyncio` decorator needed.
+- `addopts = "-v --tb=short"` — Verbose output, short tracebacks.
 
-### 테스트 구조
+### Test Structure
 
 ```
 tests/
-├── conftest.py            # 공통 fixtures
-├── test_engine/           # engine 모듈 테스트
-├── test_matchers/         # matchers 모듈 테스트
-├── test_adapters/         # adapters 모듈 테스트
-├── test_learning/         # learning 모듈 테스트
-└── integration/           # 통합 테스트
+├── conftest.py            # Shared fixtures
+├── test_engine/           # Engine module tests
+├── test_matchers/         # Matchers module tests
+├── test_adapters/         # Adapters module tests
+├── test_learning/         # Learning module tests
+└── integration/           # Integration tests
 ```
 
-### 테스트 작성 규칙
+### Test Writing Rules
 
-- 파일명: `test_<모듈명>.py`
-- 함수명: `test_<동작>_<조건>_<기대결과>` (예: `test_match_with_low_confidence_returns_none`)
-- fixture 활용: 공통 setup은 `conftest.py`에 정의한다.
-- 외부 의존성(API, 브라우저)은 mock으로 대체한다.
+- File name: `test_<module>.py`
+- Function name: `test_<action>_<condition>_<expected>` (e.g., `test_match_with_low_confidence_returns_none`)
+- Use fixtures: Define common setup in `conftest.py`.
+- Mock external dependencies (APIs, browsers).
 
 ---
 
-## PR 프로세스
+## PR Process
 
-### 1. 브랜치 생성
-
-```bash
-git checkout -b feat/<기능명>    # 기능 추가
-git checkout -b fix/<버그명>     # 버그 수정
-git checkout -b refactor/<대상>  # 리팩토링
-```
-
-### 2. 개발 및 검증
+### 1. Create a Branch
 
 ```bash
-# 코드 작성 후
-make format      # 포맷 + 린트 자동 수정
-make lint        # 린트 검사
-make typecheck   # 타입 검사
-make test        # 테스트
+git checkout -b feat/<feature>      # New feature
+git checkout -b fix/<bug>           # Bug fix
+git checkout -b refactor/<target>   # Refactoring
 ```
 
-네 가지 검사를 모두 통과해야 PR을 제출할 수 있다.
+### 2. Develop and Verify
 
-### 3. 커밋
+```bash
+# After writing code
+make format      # Format + auto-fix
+make lint        # Lint check
+make typecheck   # Type check
+make test        # Tests
+```
 
-커밋 메시지 형식:
+All four checks must pass before submitting a PR.
+
+### 3. Commit
+
+Commit message format:
 
 ```
 <type>(<scope>): <subject>
@@ -180,47 +183,47 @@ make test        # 테스트
 <body>
 ```
 
-| type | 설명 |
-|------|------|
-| `feat` | 새 기능 |
-| `fix` | 버그 수정 |
-| `refactor` | 리팩토링 (기능 변경 없음) |
-| `test` | 테스트 추가/수정 |
-| `docs` | 문서 변경 |
-| `chore` | 빌드, CI, 의존성 등 |
+| Type | Description |
+|------|-------------|
+| `feat` | New feature |
+| `fix` | Bug fix |
+| `refactor` | Refactoring (no behavior change) |
+| `test` | Add/modify tests |
+| `docs` | Documentation changes |
+| `chore` | Build, CI, dependencies, etc. |
 
-예시:
+Example:
 
 ```
 feat(matchers): add FeatureMatcher with ORB descriptor
 
-ORB 기반 특징점 매칭을 구현한다. 스케일/회전 변환에 강건한 매칭이 가능해진다.
+Implements ORB-based feature matching for scale/rotation invariant matching.
 ```
 
-### 4. PR 제출
+### 4. Submit PR
 
-- PR 제목은 커밋 메시지와 동일한 형식을 따른다.
-- 변경 내용, 테스트 방법, 관련 이슈를 본문에 기술한다.
-- 가능하면 스크린샷이나 로그를 첨부한다.
+- PR title follows the same format as commit messages.
+- Describe changes, test methods, and related issues in the body.
+- Attach screenshots or logs when possible.
 
 ---
 
-## 아키텍처 개요
+## Architecture Overview
 
-AAT는 플러그인 기반 아키텍처를 따른다. 각 모듈은 ABC(추상 기본 클래스)를 상속받아 구현하며, Registry에 등록하여 사용한다.
+AAT follows a plugin-based architecture. Each module extends an ABC (Abstract Base Class) and is registered in a Registry.
 
-### 플러그인 구조
+### Plugin Structure
 
 ```
 BaseEngine (ABC)         --> ENGINE_REGISTRY
 ├── WebEngine            (Playwright)
-└── (향후) DesktopEngine
+└── (future) DesktopEngine
 
 BaseMatcher (ABC)        --> MATCHER_REGISTRY
 ├── TemplateMatcher      (cv2.matchTemplate)
 ├── OCRMatcher           (pytesseract)
 ├── FeatureMatcher       (ORB/SIFT)
-└── HybridMatcher        (체인 오케스트레이터)
+└── HybridMatcher        (chain orchestrator)
 
 AIAdapter (ABC)          --> ADAPTER_REGISTRY
 └── ClaudeAdapter        (anthropic SDK)
@@ -232,13 +235,13 @@ BaseReporter (ABC)       --> REPORTER_REGISTRY
 └── MarkdownReporter     (Jinja2)
 ```
 
-### 새 플러그인 추가 방법
+### Adding a New Plugin
 
-1. 해당 모듈의 ABC를 상속받는 클래스를 작성한다.
-2. 모듈의 `__init__.py`에 정의된 Registry에 등록한다.
-3. 테스트를 작성한다.
+1. Create a class extending the module's ABC.
+2. Register it in the module's `__init__.py` Registry.
+3. Write tests.
 
-예시 -- 새 Matcher 추가:
+Example — Adding a new Matcher:
 
 ```python
 # src/aat/matchers/my_matcher.py
@@ -248,7 +251,7 @@ class MyMatcher(BaseMatcher):
     name = "my_matcher"
 
     async def match(self, screenshot: bytes, target: MatchTarget) -> MatchResult | None:
-        # 구현
+        # Implementation
         ...
 ```
 
@@ -259,28 +262,28 @@ from aat.matchers.my_matcher import MyMatcher
 MATCHER_REGISTRY["my_matcher"] = MyMatcher
 ```
 
-### 핵심 흐름
+### Core Flow
 
-1. **CLI** -- Typer가 사용자 명령을 파싱한다.
-2. **ScenarioLoader** -- YAML 파일을 Pydantic 모델(`Scenario`)로 변환한다.
-3. **StepExecutor** -- 시나리오의 각 스텝을 순서대로 실행한다.
-4. **Engine** -- 브라우저를 제어한다 (navigate, click, type 등).
-5. **Matcher** -- 스크린샷에서 대상 UI 요소의 좌표를 찾는다.
-6. **Comparator** -- 기대 결과와 실제 결과를 비교하여 Pass/Fail을 판정한다.
-7. **DevQA Loop** -- 실패 시 AI Adapter를 호출하여 수정안을 받고 재실행한다.
-8. **Reporter** -- 실행 결과를 Markdown 리포트로 생성한다.
+1. **CLI** — Typer parses user commands.
+2. **ScenarioLoader** — Converts YAML files to Pydantic models (`Scenario`).
+3. **StepExecutor** — Runs each step in the scenario sequentially.
+4. **Engine** — Controls the browser (navigate, click, type, etc.).
+5. **Matcher** — Finds target UI element coordinates in screenshots.
+6. **Comparator** — Compares expected vs actual results to determine Pass/Fail.
+7. **DevQA Loop** — On failure, calls AI Adapter for a fix and re-runs.
+8. **Reporter** — Generates Markdown reports from execution results.
 
 ---
 
-## Make 명령어 요약
+## Make Commands
 
-| 명령어 | 설명 |
-|--------|------|
-| `make install` | 런타임 의존성만 설치 |
-| `make dev` | 개발 환경 전체 설정 |
-| `make lint` | ruff 린트 검사 |
-| `make format` | ruff 포맷 + 자동 수정 |
-| `make typecheck` | mypy strict 타입 검사 |
-| `make test` | pytest 전체 실행 |
-| `make test-cov` | pytest + 커버리지 리포트 |
-| `make clean` | 캐시, 빌드 산출물 정리 |
+| Command | Description |
+|---------|-------------|
+| `make install` | Install runtime dependencies only |
+| `make dev` | Full development environment setup |
+| `make lint` | ruff lint check |
+| `make format` | ruff format + auto-fix |
+| `make typecheck` | mypy strict type check |
+| `make test` | Run all pytest tests |
+| `make test-cov` | pytest + coverage report |
+| `make clean` | Clean caches and build artifacts |

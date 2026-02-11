@@ -330,7 +330,7 @@ class TestFindAndClickAction:
         step = make_step(ActionType.FIND_AND_CLICK, target=target)
         result = await executor.execute_step(step)
         assert result.status == StepStatus.FAILED
-        assert "찾을 수 없습니다" in (result.error_message or "")
+        assert "not found" in (result.error_message or "")
 
 
 class TestFindAndDoubleClickAction:

@@ -253,7 +253,7 @@ class StepExecutor:
         result = await self._matcher.find(target, screenshot)
         if result is None or not result.found:
             target_desc = target.image or target.text or "unknown"
-            msg = f"'{target_desc}'을 찾을 수 없습니다"
+            msg = f"Target '{target_desc}' not found"
             raise MatchError(msg)
 
         # Perform action at matched location

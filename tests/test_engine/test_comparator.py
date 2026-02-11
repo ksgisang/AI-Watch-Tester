@@ -47,7 +47,7 @@ class TestComparatorTextVisible:
         comparator = Comparator()
         engine = MockEngine(page_text="Welcome to the dashboard")
         expected = ExpectedResult(type=AssertType.TEXT_VISIBLE, value="login")
-        with pytest.raises(StepExecutionError, match="화면에 보이지 않습니다"):
+        with pytest.raises(StepExecutionError, match="not visible on page"):
             await comparator.check(expected, engine)
 
 
@@ -64,7 +64,7 @@ class TestComparatorTextEquals:
         comparator = Comparator()
         engine = MockEngine(page_text="Hello World")
         expected = ExpectedResult(type=AssertType.TEXT_EQUALS, value="Goodbye")
-        with pytest.raises(StepExecutionError, match="일치하지 않습니다"):
+        with pytest.raises(StepExecutionError, match="does not match"):
             await comparator.check(expected, engine)
 
 
@@ -81,7 +81,7 @@ class TestComparatorUrlContains:
         comparator = Comparator()
         engine = MockEngine(url="https://example.com/login")
         expected = ExpectedResult(type=AssertType.URL_CONTAINS, value="dashboard")
-        with pytest.raises(StepExecutionError, match="포함되어 있지 않습니다"):
+        with pytest.raises(StepExecutionError, match="does not contain"):
             await comparator.check(expected, engine)
 
 
@@ -105,7 +105,7 @@ class TestComparatorScreenshotMatch:
             value="/nonexistent/ref.png",
             tolerance=0.1,
         )
-        with pytest.raises(StepExecutionError, match="찾을 수 없습니다"):
+        with pytest.raises(StepExecutionError, match="not found"):
             await comparator.check(expected, engine)
 
 
@@ -132,5 +132,5 @@ class TestComparatorCheckAssert:
 
 class TestCompareScreenshots:
     def test_compare_screenshots_missing_reference(self) -> None:
-        with pytest.raises(StepExecutionError, match="찾을 수 없습니다"):
+        with pytest.raises(StepExecutionError, match="not found"):
             Comparator._compare_screenshots(b"fake_png", "/nonexistent.png")

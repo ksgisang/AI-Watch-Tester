@@ -33,7 +33,7 @@ class Comparator:
             page_text = await engine.get_page_text()
             if expected.value not in page_text:
                 raise StepExecutionError(
-                    f"텍스트 '{expected.value}'가 화면에 보이지 않습니다",
+                    f"Text '{expected.value}' not visible on page",
                     step=0,
                     action="assert",
                 )
@@ -42,7 +42,7 @@ class Comparator:
             page_text = await engine.get_page_text()
             if expected.value != page_text.strip():
                 raise StepExecutionError(
-                    f"텍스트가 '{expected.value}'와 일치하지 않습니다",
+                    f"Text does not match '{expected.value}'",
                     step=0,
                     action="assert",
                 )
@@ -51,8 +51,8 @@ class Comparator:
             current_url = await engine.get_url()
             if expected.value not in current_url:
                 raise StepExecutionError(
-                    f"URL에 '{expected.value}'가 포함되어 있지 않습니다. "
-                    f"현재: {current_url}",
+                    f"URL does not contain '{expected.value}'. "
+                    f"Current: {current_url}",
                     step=0,
                     action="assert",
                 )
@@ -68,8 +68,8 @@ class Comparator:
             threshold = 1.0 - expected.tolerance
             if similarity < threshold:
                 raise StepExecutionError(
-                    f"스크린샷 유사도 {similarity:.2%}가 "
-                    f"기준 {threshold:.2%} 미만입니다",
+                    f"Screenshot similarity {similarity:.2%} "
+                    f"below threshold {threshold:.2%}",
                     step=0,
                     action="assert",
                 )
@@ -104,13 +104,13 @@ class Comparator:
         img2 = cv2.imread(reference_path, cv2.IMREAD_GRAYSCALE)
         if img2 is None:
             raise StepExecutionError(
-                f"기준 스크린샷 '{reference_path}'를 찾을 수 없습니다",
+                f"Reference screenshot '{reference_path}' not found",
                 step=0,
                 action="assert",
             )
         if img1 is None:
             raise StepExecutionError(
-                "현재 스크린샷을 디코딩할 수 없습니다",
+                "Failed to decode current screenshot",
                 step=0,
                 action="assert",
             )
