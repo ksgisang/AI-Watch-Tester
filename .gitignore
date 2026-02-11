@@ -1,0 +1,41 @@
+# PM documents (internal)
+PM/
+
+# Project config (may contain API keys)
+aat.config.yaml
+
+# Claude Code project guide (internal)
+CLAUDE.md
+
+# AAT data (may contain sensitive info)
+.aat/config.yaml
+.aat/learned.db
+.aat/screenshots/
+
+# Reports (large files)
+reports/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.venv/
+venv/
