@@ -22,6 +22,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+
       - name: Setup Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
@@ -33,6 +38,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+          playwright install --with-deps chromium
 
       - name: Lint with Ruff
         run: ruff check src/ tests/
