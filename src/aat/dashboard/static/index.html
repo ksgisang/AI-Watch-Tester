@@ -690,6 +690,11 @@ function handleEvent(data) {
     case 'server_log':
       addServerLog(data.line);
       break;
+    case 'server_exit':
+      setServerRunning(false);
+      addLog(data.return_code === 0 ? 'info' : 'warning',
+        `Server exited (code=${data.return_code})`);
+      break;
     case 'run_start':
     case 'loop_start':
       setRunning(true);

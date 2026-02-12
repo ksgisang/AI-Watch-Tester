@@ -138,3 +138,37 @@ class TestSubprocessManager:
     def test_pid_property(self) -> None:
         mgr = SubprocessManager()
         assert mgr.pid is None
+
+    async def test_start_shell(self) -> None:
+        mgr = SubprocessManager()
+        await mgr.start_shell("echo shell_works")
+        code = await mgr.wait()
+        assert code == 0
+        assert "shell_works" in mgr.log_lines
+
+    async def test_start_shell_with_cwd(self, tmp_path: Path) -> None:
+        mgr = SubprocessManager()
+        await mgr.start_shell("pwd", cwd=tmp_path)
+        await mgr.wait()
+        assert str(tmp_path) in mgr.log_lines[0]
+
+    async def test_on_exit_callback(self) -> None:
+        exit_info: list[tuple[int, ProcessStatus]] = []
+        mgr = SubprocessManager(
+            on_exit=lambda rc, st: exit_info.append((rc, st)),
+        )
+        await mgr.start_shell("echo done")
+        await mgr.wait()
+        assert len(exit_info) == 1
+        assert exit_info[0] == (0, ProcessStatus.FINISHED)
+
+    async def test_on_exit_callback_error(self) -> None:
+        exit_info: list[tuple[int, ProcessStatus]] = []
+        mgr = SubprocessManager(
+            on_exit=lambda rc, st: exit_info.append((rc, st)),
+        )
+        await mgr.start_shell("exit 42")
+        await mgr.wait()
+        assert len(exit_info) == 1
+        assert exit_info[0][0] == 42
+        assert exit_info[0][1] == ProcessStatus.ERROR

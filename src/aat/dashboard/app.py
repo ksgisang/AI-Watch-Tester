@@ -34,7 +34,7 @@ except ImportError as e:
     raise ImportError(msg) from e
 
 from aat.dashboard.events_ws import ConnectionManager, WebSocketEventHandler
-from aat.dashboard.subprocess_manager import SubprocessManager
+from aat.dashboard.subprocess_manager import ProcessStatus, SubprocessManager
 
 # ---------------------------------------------------------------------------
 # Module state
@@ -56,7 +56,32 @@ def _on_server_line(line: str) -> None:
         pass  # no event loop
 
 
-_server_subprocess = SubprocessManager(on_line=_on_server_line)
+def _on_server_exit(return_code: int, status: ProcessStatus) -> None:
+    """Broadcast server process exit via WebSocket."""
+    try:
+        loop = asyncio.get_running_loop()
+        msg = f"Server process exited (code={return_code})"
+        event_type = "info" if return_code == 0 else "warning"
+        loop.create_task(
+            _manager.broadcast(
+                {
+                    "type": "server_exit",
+                    "return_code": return_code,
+                    "status": status.value,
+                }
+            ),
+        )
+        loop.create_task(
+            _manager.broadcast({"type": event_type, "message": msg}),
+        )
+    except RuntimeError:
+        pass
+
+
+_server_subprocess = SubprocessManager(
+    on_line=_on_server_line,
+    on_exit=_on_server_exit,
+)
 
 _current_config: Config | None = None
 _config_path: Path | None = None
@@ -421,21 +446,10 @@ async def _start_server(request: Request) -> JSONResponse:
             status_code=400,
         )
 
-    # Split command string into args
-    import shlex
-
-    try:
-        cmd_parts = shlex.split(command)
-    except ValueError as exc:
-        return JSONResponse(
-            content={"error": f"Invalid command: {exc}"},
-            status_code=400,
-        )
-
     cwd_path = Path(cwd) if cwd else None
 
     try:
-        await _server_subprocess.start_raw(cmd_parts, cwd=cwd_path)
+        await _server_subprocess.start_shell(command, cwd=cwd_path)
     except Exception as exc:  # noqa: BLE001
         return JSONResponse(
             content={"error": f"Failed to start server: {exc}"},

@@ -34,6 +34,7 @@ class SubprocessManager:
         self,
         max_log_lines: int = 2000,
         on_line: Callable[[str], None] | None = None,
+        on_exit: Callable[[int, ProcessStatus], None] | None = None,
     ) -> None:
         self._process: asyncio.subprocess.Process | None = None
         self._status = ProcessStatus.IDLE
@@ -41,6 +42,7 @@ class SubprocessManager:
         self._log: deque[str] = deque(maxlen=max_log_lines)
         self._read_task: asyncio.Task[None] | None = None
         self._on_line = on_line
+        self._on_exit = on_exit
 
     @property
     def status(self) -> ProcessStatus:
@@ -79,18 +81,35 @@ class SubprocessManager:
         cmd: list[str],
         cwd: str | Path | None = None,
     ) -> None:
-        """Start an arbitrary subprocess.
+        """Start an arbitrary subprocess (exec mode).
 
         Args:
             cmd: Command and arguments, e.g. ["npm", "run", "dev"].
             cwd: Working directory for the subprocess.
         """
-        await self._start_process(cmd, cwd=cwd)
+        await self._start_process(cmd, cwd=cwd, shell=False)
+
+    async def start_shell(
+        self,
+        cmd: str,
+        cwd: str | Path | None = None,
+    ) -> None:
+        """Start a subprocess via the system shell.
+
+        More compatible with user-entered commands (PATH, env vars, aliases).
+
+        Args:
+            cmd: Command string, e.g. "npm run dev --port 3000".
+            cwd: Working directory for the subprocess.
+        """
+        await self._start_process(cmd, cwd=cwd, shell=True)
 
     async def _start_process(
         self,
-        cmd: list[str],
+        cmd: list[str] | str,
         cwd: str | Path | None = None,
+        *,
+        shell: bool = False,
     ) -> None:
         """Internal: start a subprocess with the given command and cwd."""
         if self.is_running:
@@ -102,12 +121,22 @@ class SubprocessManager:
         self._status = ProcessStatus.RUNNING
 
         cwd_str = str(cwd) if cwd else None
-        self._process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            cwd=cwd_str,
-        )
+        if shell:
+            assert isinstance(cmd, str)
+            self._process = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=cwd_str,
+            )
+        else:
+            assert isinstance(cmd, list)
+            self._process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=cwd_str,
+            )
         self._read_task = asyncio.create_task(self._read_output())
 
     async def stop(self) -> None:
@@ -153,3 +182,5 @@ class SubprocessManager:
             self._status = (
                 ProcessStatus.FINISHED if self._return_code == 0 else ProcessStatus.ERROR
             )
+            if self._on_exit is not None:
+                self._on_exit(self._return_code or 0, self._status)
