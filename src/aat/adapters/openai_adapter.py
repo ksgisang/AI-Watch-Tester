@@ -278,9 +278,9 @@ class OpenAIAdapter(AIAdapter):
                 model=self._config.model,
                 max_tokens=self._config.max_tokens,
                 temperature=self._config.temperature,
-                messages=[  # type: ignore[list-item]
+                messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content},
+                    {"role": "user", "content": user_content},  # type: ignore[list-item, misc]
                 ],
             )
         except Exception as exc:
