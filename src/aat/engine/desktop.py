@@ -10,7 +10,7 @@ import asyncio
 import io
 from pathlib import Path  # noqa: TC003
 
-import pyautogui
+import pyautogui  # type: ignore[import-untyped]
 from playwright.async_api import (
     Browser,
     BrowserContext,

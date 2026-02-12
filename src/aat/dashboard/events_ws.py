@@ -11,7 +11,7 @@ from typing import Any
 from aat.core.events import EventEmitter
 
 try:
-    from fastapi import WebSocket  # noqa: TC002
+    from fastapi import WebSocket  # noqa: TC002  # type: ignore[import-not-found]
     from PIL import Image
 except ImportError as e:
     msg = "Dashboard requires 'web' extras: pip install aat-devqa[web]"
@@ -155,7 +155,7 @@ class WebSocketEventHandler(EventEmitter):
         Resizes to 960x540 and compresses to JPEG 60% quality.
         """
         img = Image.open(BytesIO(image_data))
-        img = img.resize(self._screenshot_size, Image.LANCZOS)
+        img = img.resize(self._screenshot_size, Image.Resampling.LANCZOS)
 
         buf = BytesIO()
         img.save(buf, format="JPEG", quality=self._jpeg_quality)

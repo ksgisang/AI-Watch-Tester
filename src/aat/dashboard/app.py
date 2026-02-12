@@ -16,9 +16,18 @@ from aat.core.exceptions import AATError, DashboardError
 from aat.core.models import ApprovalMode, Config, StepStatus
 
 try:
-    from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
-    from fastapi.staticfiles import StaticFiles
+    from fastapi import (  # type: ignore[import-not-found]
+        FastAPI,
+        Request,
+        WebSocket,
+        WebSocketDisconnect,
+    )
+    from fastapi.responses import (  # type: ignore[import-not-found]
+        FileResponse,
+        HTMLResponse,
+        JSONResponse,
+    )
+    from fastapi.staticfiles import StaticFiles  # type: ignore[import-not-found]
 except ImportError as e:
     msg = "Dashboard requires 'web' extras: pip install aat-devqa[web]"
     raise ImportError(msg) from e
@@ -73,7 +82,8 @@ def create_app(config_path: Path | None = None) -> FastAPI:
     app.add_api_route("/api/status", _get_status, methods=["GET"])
     app.add_api_route("/api/logs", _get_logs, methods=["GET"])
     app.add_api_route(
-        "/api/screenshots/{filename:path}", _get_screenshot, methods=["GET"],
+        "/api/screenshots/{filename:path}", _get_screenshot,
+        methods=["GET"], response_model=None,
     )
     app.add_api_websocket_route("/ws", _websocket_endpoint)
 
@@ -269,10 +279,10 @@ async def _get_logs() -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 
-async def _get_screenshot(filename: str) -> FileResponse:
+async def _get_screenshot(filename: str) -> FileResponse | JSONResponse:
     """Serve a screenshot file."""
     if _current_config is None:
-        return JSONResponse(  # type: ignore[return-value]
+        return JSONResponse(
             content={"error": "No config"}, status_code=404,
         )
 
@@ -280,7 +290,7 @@ async def _get_screenshot(filename: str) -> FileResponse:
     filepath = screenshot_dir / filename
 
     if not filepath.exists() or not filepath.is_file():
-        return JSONResponse(  # type: ignore[return-value]
+        return JSONResponse(
             content={"error": "Screenshot not found"}, status_code=404,
         )
 
@@ -288,7 +298,7 @@ async def _get_screenshot(filename: str) -> FileResponse:
     try:
         filepath.resolve().relative_to(screenshot_dir.resolve())
     except ValueError:
-        return JSONResponse(  # type: ignore[return-value]
+        return JSONResponse(
             content={"error": "Invalid path"}, status_code=403,
         )
 
@@ -353,7 +363,7 @@ async def _execute_run(scenario_path: str) -> None:
 
         # Assemble matchers
         matchers = [
-            MATCHER_REGISTRY[m.value](_current_config.matching)
+            MATCHER_REGISTRY[m.value](_current_config.matching)  # type: ignore[call-arg]
             for m in _current_config.matching.chain_order
             if m.value in MATCHER_REGISTRY
         ]
@@ -476,7 +486,7 @@ async def _execute_loop(
         engine = engine_cls(config.engine)
 
         matchers = [
-            MATCHER_REGISTRY[m.value](config.matching)
+            MATCHER_REGISTRY[m.value](config.matching)  # type: ignore[call-arg]
             for m in config.matching.chain_order
             if m.value in MATCHER_REGISTRY
         ]

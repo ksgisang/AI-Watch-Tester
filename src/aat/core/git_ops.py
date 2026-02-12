@@ -132,7 +132,7 @@ class GitOps:
     # ------------------------------------------------------------------
 
     @asynccontextmanager
-    async def on_fix_branch(self, name: str) -> AsyncIterator[None]:  # type: ignore[return-type]
+    async def on_fix_branch(self, name: str) -> AsyncIterator[None]:
         """Create a fix branch, yield, then checkout back to original branch.
 
         On exit, always returns to the original branch regardless of success
