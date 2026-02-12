@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -13,6 +13,7 @@ from aat.core.loop import DevQALoop
 from aat.core.models import (
     ActionType,
     AnalysisResult,
+    ApprovalMode,
     Config,
     FileChange,
     FixResult,
@@ -28,8 +29,17 @@ from aat.core.models import (
 # ---------------------------------------------------------------------------
 
 
-def _make_config(max_loops: int = 3) -> Config:
-    return Config(max_loops=max_loops, reports_dir="/tmp/aat_test_reports")
+def _make_config(
+    max_loops: int = 3,
+    approval_mode: ApprovalMode = ApprovalMode.MANUAL,
+    source_path: str = ".",
+) -> Config:
+    return Config(
+        max_loops=max_loops,
+        reports_dir="/tmp/aat_test_reports",
+        approval_mode=approval_mode,
+        source_path=source_path,
+    )
 
 
 def _make_scenario() -> Scenario:
@@ -116,7 +126,7 @@ def _make_mocks(
 
 
 # ---------------------------------------------------------------------------
-# Tests: all-pass scenario
+# Tests: all-pass scenario (manual mode, default)
 # ---------------------------------------------------------------------------
 
 
@@ -150,7 +160,7 @@ async def test_all_pass_single_iteration() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tests: fail -> analyze -> approve -> fix -> re-test pass
+# Tests: fail -> analyze -> approve -> fix -> re-test pass (manual)
 # ---------------------------------------------------------------------------
 
 
@@ -202,7 +212,7 @@ async def test_fail_then_fix_then_pass() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tests: fail -> deny
+# Tests: fail -> deny (manual)
 # ---------------------------------------------------------------------------
 
 
@@ -235,7 +245,7 @@ async def test_fail_deny_fix() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tests: max_loops exceeded
+# Tests: max_loops exceeded (manual)
 # ---------------------------------------------------------------------------
 
 
@@ -293,3 +303,181 @@ async def test_engine_stop_called_on_error() -> None:
         await loop.run([_make_scenario()])
 
     engine.stop.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Tests: skip_engine_lifecycle
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_skip_engine_lifecycle() -> None:
+    """skip_engine_lifecycle=True skips engine.start() and engine.stop()."""
+    executor, adapter, reporter, engine = _make_mocks(
+        step_results=[[_make_passed_step()]]
+    )
+
+    loop = DevQALoop(
+        config=_make_config(),
+        executor=executor,
+        adapter=adapter,
+        reporter=reporter,
+        engine=engine,
+    )
+
+    result = await loop.run([_make_scenario()], skip_engine_lifecycle=True)
+
+    assert result.success is True
+    engine.start.assert_not_called()
+    engine.stop.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tests: branch mode
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_branch_mode_creates_branch_and_commits() -> None:
+    """Branch mode: creates branch, applies fix, commits, retests."""
+    # iteration 1: fail, then retest on branch: pass
+    # iteration 2 (after branch handler returns retest pass): loop sees pass
+    executor, adapter, reporter, engine = _make_mocks(
+        step_results=[
+            [_make_failed_step()],   # initial test: fail
+            [_make_passed_step()],   # retest on branch: pass
+        ]
+    )
+
+    git_ops = AsyncMock()
+    git_ops.is_git_repo.return_value = True
+    git_ops.has_uncommitted_changes.return_value = False
+    git_ops.apply_file_changes.return_value = [Path("/tmp/src/server.py")]
+    git_ops.commit_changes.return_value = "abc1234"
+
+    # Make on_fix_branch work as an async context manager
+    git_ops.on_fix_branch = MagicMock()
+    ctx = AsyncMock()
+    git_ops.on_fix_branch.return_value = ctx
+
+    loop = DevQALoop(
+        config=_make_config(approval_mode=ApprovalMode.BRANCH),
+        executor=executor,
+        adapter=adapter,
+        reporter=reporter,
+        engine=engine,
+        git_ops=git_ops,
+    )
+
+    result = await loop.run([_make_scenario()])
+
+    # The retest passed, so the iteration records pass
+    assert len(result.iterations) == 1
+    it = result.iterations[0]
+    assert it.branch_name == "aat/fix-001"
+    assert it.commit_hash == "abc1234"
+    assert it.fix is not None
+    assert it.analysis is not None
+
+    git_ops.on_fix_branch.assert_called_once_with("aat/fix-001")
+    git_ops.apply_file_changes.assert_called_once()
+    git_ops.commit_changes.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_branch_mode_no_git_repo_raises() -> None:
+    """Branch mode without git repo raises LoopError."""
+    executor, adapter, reporter, engine = _make_mocks()
+
+    git_ops = AsyncMock()
+    git_ops.is_git_repo.return_value = False
+
+    loop = DevQALoop(
+        config=_make_config(approval_mode=ApprovalMode.BRANCH),
+        executor=executor,
+        adapter=adapter,
+        reporter=reporter,
+        engine=engine,
+        git_ops=git_ops,
+    )
+
+    with pytest.raises(LoopError, match="requires a git repository"):
+        await loop.run([_make_scenario()])
+
+
+@pytest.mark.asyncio
+async def test_branch_mode_no_git_ops_raises() -> None:
+    """Branch mode without GitOps instance raises LoopError."""
+    executor, adapter, reporter, engine = _make_mocks()
+
+    loop = DevQALoop(
+        config=_make_config(approval_mode=ApprovalMode.BRANCH),
+        executor=executor,
+        adapter=adapter,
+        reporter=reporter,
+        engine=engine,
+        # git_ops not provided
+    )
+
+    with pytest.raises(LoopError, match="requires GitOps instance"):
+        await loop.run([_make_scenario()])
+
+
+@pytest.mark.asyncio
+async def test_branch_mode_uncommitted_changes_raises() -> None:
+    """Branch mode with uncommitted changes raises LoopError."""
+    executor, adapter, reporter, engine = _make_mocks()
+
+    git_ops = AsyncMock()
+    git_ops.is_git_repo.return_value = True
+    git_ops.has_uncommitted_changes.return_value = True
+
+    loop = DevQALoop(
+        config=_make_config(approval_mode=ApprovalMode.BRANCH),
+        executor=executor,
+        adapter=adapter,
+        reporter=reporter,
+        engine=engine,
+        git_ops=git_ops,
+    )
+
+    with pytest.raises(LoopError, match="clean working tree"):
+        await loop.run([_make_scenario()])
+
+
+# ---------------------------------------------------------------------------
+# Tests: auto mode
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_auto_mode_applies_fix_directly(tmp_path: Path) -> None:
+    """Auto mode: applies fix directly to disk, retests."""
+    executor, adapter, reporter, engine = _make_mocks(
+        step_results=[
+            [_make_failed_step()],   # initial test: fail
+            [_make_passed_step()],   # retest after fix: pass
+        ]
+    )
+
+    loop = DevQALoop(
+        config=_make_config(
+            approval_mode=ApprovalMode.AUTO,
+            source_path=str(tmp_path),
+        ),
+        executor=executor,
+        adapter=adapter,
+        reporter=reporter,
+        engine=engine,
+    )
+
+    result = await loop.run([_make_scenario()])
+
+    # Retest passed, so iteration has pass result
+    assert len(result.iterations) == 1
+    it = result.iterations[0]
+    assert it.approved is True
+    assert it.fix is not None
+
+    # File should have been written
+    assert (tmp_path / "src" / "server.py").read_text() == "new"

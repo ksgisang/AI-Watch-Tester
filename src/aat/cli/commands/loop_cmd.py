@@ -10,13 +10,15 @@ import typer
 from aat.adapters import ADAPTER_REGISTRY
 from aat.core.config import load_config
 from aat.core.exceptions import AATError
+from aat.core.git_ops import GitOps
 from aat.core.loop import DevQALoop
+from aat.core.models import ApprovalMode
 from aat.core.scenario_loader import load_scenarios
+from aat.engine import ENGINE_REGISTRY
 from aat.engine.comparator import Comparator
 from aat.engine.executor import StepExecutor
 from aat.engine.humanizer import Humanizer
 from aat.engine.waiter import Waiter
-from aat.engine.web import WebEngine
 from aat.matchers import MATCHER_REGISTRY
 from aat.matchers.hybrid import HybridMatcher
 from aat.reporters import REPORTER_REGISTRY
@@ -30,10 +32,14 @@ def loop_command(
     max_loops: int | None = typer.Option(
         None, "--max-loops", "-m", help="Maximum loop iterations."
     ),
+    approval_mode: str = typer.Option(
+        "manual", "--approval-mode", "-a",
+        help="Approval mode: manual | branch | auto.",
+    ),
 ) -> None:
     """Run the DevQA Loop: test -> analyze -> fix -> re-test."""
     try:
-        asyncio.run(_loop(scenarios_path, config_path, max_loops))
+        asyncio.run(_loop(scenarios_path, config_path, max_loops, approval_mode))
     except AATError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1) from None
@@ -43,11 +49,19 @@ async def _loop(
     scenarios_path: str,
     config_path: str | None,
     max_loops: int | None,
+    approval_mode_str: str,
 ) -> None:
     """Execute the DevQA Loop asynchronously."""
+    # Validate approval mode
+    try:
+        mode = ApprovalMode(approval_mode_str)
+    except ValueError:
+        msg = f"Invalid approval mode: {approval_mode_str}. Use: manual, branch, auto"
+        raise AATError(msg) from None
+
     # Load config
     cfg_path = Path(config_path) if config_path else None
-    overrides: dict[str, object] = {}
+    overrides: dict[str, object] = {"approval_mode": mode}
     if max_loops is not None:
         overrides["max_loops"] = max_loops
     config = load_config(config_path=cfg_path, overrides=overrides)
@@ -57,7 +71,11 @@ async def _loop(
     scenarios = load_scenarios(path)
 
     # Assemble engine
-    engine = WebEngine(config.engine)
+    engine_cls = ENGINE_REGISTRY.get(config.engine.type)
+    if engine_cls is None:
+        msg = f"Unknown engine type: {config.engine.type}"
+        raise AATError(msg)
+    engine = engine_cls(config.engine)
 
     # Assemble matchers
     matchers = [
@@ -87,6 +105,11 @@ async def _loop(
         raise AATError(msg)
     reporter = reporter_cls()
 
+    # GitOps for branch mode
+    git_ops: GitOps | None = None
+    if mode == ApprovalMode.BRANCH:
+        git_ops = GitOps(Path(config.source_path))
+
     # Create and run loop
     loop = DevQALoop(
         config=config,
@@ -94,6 +117,7 @@ async def _loop(
         adapter=adapter,
         reporter=reporter,
         engine=engine,
+        git_ops=git_ops,
     )
 
     result = await loop.run(scenarios)

@@ -50,5 +50,9 @@ class LoopError(AATError):
     """DevQA Loop error."""
 
 
+class GitOpsError(AATError):
+    """Git operations error (branch, commit, checkout, etc.)."""
+
+
 class LearningError(AATError):
     """Learning data storage/query error."""

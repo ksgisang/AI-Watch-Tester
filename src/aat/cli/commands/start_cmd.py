@@ -22,11 +22,11 @@ from aat.core.exceptions import AATError
 from aat.core.loop import DevQALoop
 from aat.core.models import Config
 from aat.core.scenario_loader import load_scenarios
+from aat.engine import ENGINE_REGISTRY
 from aat.engine.comparator import Comparator
 from aat.engine.executor import StepExecutor
 from aat.engine.humanizer import Humanizer
 from aat.engine.waiter import Waiter
-from aat.engine.web import WebEngine
 from aat.matchers import MATCHER_REGISTRY
 from aat.matchers.hybrid import HybridMatcher
 from aat.reporters import REPORTER_REGISTRY
@@ -287,7 +287,11 @@ async def _start_guided(config_path: str | None) -> None:
     signal.signal(signal.SIGINT, _on_cancel)
     _cancelled = False
 
-    engine = WebEngine(config.engine)
+    engine_cls = ENGINE_REGISTRY.get(config.engine.type)
+    if engine_cls is None:
+        ev.error(f"Unknown engine type: {config.engine.type}")
+        raise typer.Exit(code=1)
+    engine = engine_cls(config.engine)
 
     matchers = [
         MATCHER_REGISTRY[m.value](config.matching)  # type: ignore[call-arg]
@@ -409,9 +413,9 @@ async def _start_guided(config_path: str | None) -> None:
                     approval_callback=_approval_callback,
                 )
 
-                # Engine already started, prevent double start
-                loop_result = await _run_loop_no_engine_restart(
-                    loop, scenarios,
+                # Engine already started — use skip_engine_lifecycle
+                loop_result = await loop.run(
+                    scenarios, skip_engine_lifecycle=True,
                 )
 
                 ev.section("DevQA Loop Results")
@@ -434,60 +438,3 @@ async def _start_guided(config_path: str | None) -> None:
     ev.info("  Test session complete. Thank you for using AAT!")
 
 
-async def _run_loop_no_engine_restart(
-    loop: DevQALoop,
-    scenarios: list[Any],
-) -> Any:
-    """Run DevQA loop without re-starting the engine (already running)."""
-    import time
-
-    from aat.core.models import LoopIteration, LoopResult
-
-    loop_start = time.monotonic()
-    iterations: list[LoopIteration] = []
-    max_loops = loop._config.max_loops
-
-    for iteration_num in range(1, max_loops + 1):
-        if _cancelled:
-            break
-
-        test_result = await loop._execute_scenarios(scenarios)
-
-        if test_result.passed:
-            iterations.append(LoopIteration(iteration=iteration_num, test_result=test_result))
-            await loop._generate_report(test_result)
-            elapsed = (time.monotonic() - loop_start) * 1000
-            return LoopResult(
-                success=True,
-                total_iterations=iteration_num,
-                iterations=iterations,
-                duration_ms=elapsed,
-            )
-
-        analysis = await loop._adapter.analyze_failure(test_result)
-        approved = loop._approval_callback(f"{analysis.cause} — {analysis.suggestion}")
-
-        if not approved:
-            iterations.append(LoopIteration(
-                iteration=iteration_num, test_result=test_result,
-                analysis=analysis, approved=False,
-            ))
-            elapsed = (time.monotonic() - loop_start) * 1000
-            return LoopResult(
-                success=False, total_iterations=iteration_num,
-                iterations=iterations, reason="user denied fix", duration_ms=elapsed,
-            )
-
-        source_files: dict[str, str] = {}
-        fix = await loop._adapter.generate_fix(analysis, source_files)
-        iterations.append(LoopIteration(
-            iteration=iteration_num, test_result=test_result,
-            analysis=analysis, fix=fix, approved=True,
-        ))
-        await loop._generate_report(test_result)
-
-    elapsed = (time.monotonic() - loop_start) * 1000
-    return LoopResult(
-        success=False, total_iterations=max_loops,
-        iterations=iterations, reason="max loops exceeded", duration_ms=elapsed,
-    )

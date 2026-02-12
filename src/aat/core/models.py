@@ -82,6 +82,14 @@ class Severity(StrEnum):
     INFO = "info"
 
 
+class ApprovalMode(StrEnum):
+    """DevQA Loop approval mode for AI-generated fixes."""
+
+    MANUAL = "manual"
+    BRANCH = "branch"
+    AUTO = "auto"
+
+
 class StepStatus(StrEnum):
     """Individual step execution status."""
 
@@ -175,6 +183,7 @@ class Config(BaseSettings):
     assets_dir: str = Field(default="assets")
     data_dir: str = Field(default=".aat")
     max_loops: int = Field(default=10, ge=1, le=100)
+    approval_mode: ApprovalMode = Field(default=ApprovalMode.MANUAL)
 
 
 # ============================================================
@@ -349,6 +358,8 @@ class LoopIteration(BaseModel):
     analysis: AnalysisResult | None = None
     fix: FixResult | None = None
     approved: bool | None = None
+    branch_name: str | None = None
+    commit_hash: str | None = None
     timestamp: datetime = Field(default_factory=datetime.now)
 
 

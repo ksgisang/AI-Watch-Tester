@@ -42,3 +42,11 @@ def test_loop_help_shows_config() -> None:
     result = runner.invoke(app, ["loop", "--help"])
     assert result.exit_code == 0
     assert "--config" in _strip_ansi(result.output)
+
+
+def test_loop_help_shows_approval_mode() -> None:
+    """aat loop --help shows --approval-mode option."""
+    result = runner.invoke(app, ["loop", "--help"])
+    assert result.exit_code == 0
+    output = _strip_ansi(result.output)
+    assert "--approval-mode" in output

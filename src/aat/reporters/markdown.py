@@ -171,6 +171,14 @@ class MarkdownReporter(BaseReporter):
                 )
                 lines.append("")
 
+            if iteration.branch_name or iteration.commit_hash:
+                lines.append("### Git Info")
+                if iteration.branch_name:
+                    lines.append(f"- **Branch:** `{iteration.branch_name}`")
+                if iteration.commit_hash:
+                    lines.append(f"- **Commit:** `{iteration.commit_hash}`")
+                lines.append("")
+
             if iteration.approved is not None:
                 lines.append(
                     f"**Approved:** {'Yes' if iteration.approved else 'No'}"
