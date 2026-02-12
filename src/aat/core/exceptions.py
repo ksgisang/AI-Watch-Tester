@@ -56,3 +56,7 @@ class GitOpsError(AATError):
 
 class LearningError(AATError):
     """Learning data storage/query error."""
+
+
+class DashboardError(AATError):
+    """Web dashboard error (server start, WebSocket, etc.)."""
