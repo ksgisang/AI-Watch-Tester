@@ -9,8 +9,8 @@ from __future__ import annotations
 import asyncio
 import io
 from pathlib import Path  # noqa: TC003
+from typing import TYPE_CHECKING, Any
 
-import pyautogui  # type: ignore[import-untyped]
 from playwright.async_api import (
     Browser,
     BrowserContext,
@@ -22,6 +22,19 @@ from playwright.async_api import (
 from aat.core.exceptions import EngineError
 from aat.core.models import EngineConfig
 from aat.engine.base import BaseEngine
+
+if TYPE_CHECKING:
+    import types
+
+
+def _get_pyautogui() -> Any:
+    """Lazy import pyautogui to avoid DISPLAY errors on headless Linux."""
+    try:
+        import pyautogui  # type: ignore[import-untyped]
+    except KeyError as e:
+        msg = f"pyautogui requires a display (DISPLAY env var): {e}"
+        raise EngineError(msg) from e
+    return pyautogui
 
 
 class DesktopEngine(BaseEngine):
@@ -39,6 +52,7 @@ class DesktopEngine(BaseEngine):
         self._page: Page | None = None
         self._mouse_x: int = 0
         self._mouse_y: int = 0
+        self._pag: types.ModuleType | None = None
 
     @property
     def page(self) -> Page:
@@ -49,16 +63,24 @@ class DesktopEngine(BaseEngine):
         return self._page
 
     @property
+    def pag(self) -> Any:
+        """Lazy-loaded pyautogui module."""
+        if self._pag is None:
+            self._pag = _get_pyautogui()
+        return self._pag
+
+    @property
     def mouse_position(self) -> tuple[int, int]:
         """Current mouse position from PyAutoGUI."""
-        pos = pyautogui.position()
+        pos = self.pag.position()
         return (pos.x, pos.y)
 
     async def start(self) -> None:
         """Launch browser via Playwright and configure PyAutoGUI."""
         try:
-            pyautogui.FAILSAFE = True
-            pyautogui.PAUSE = 0.0
+            pag = self.pag
+            pag.FAILSAFE = True
+            pag.PAUSE = 0.0
 
             pw = await async_playwright().start()
             self._playwright = pw
@@ -108,7 +130,7 @@ class DesktopEngine(BaseEngine):
     async def screenshot(self) -> bytes:
         """Capture full screen as PNG bytes via PyAutoGUI."""
         try:
-            img = await asyncio.to_thread(pyautogui.screenshot)
+            img = await asyncio.to_thread(self.pag.screenshot)
             buf = io.BytesIO()
             img.save(buf, format="PNG")
             return buf.getvalue()
@@ -119,7 +141,7 @@ class DesktopEngine(BaseEngine):
     async def save_screenshot(self, path: Path) -> Path:
         """Save full screen screenshot to file via PyAutoGUI."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        await asyncio.to_thread(pyautogui.screenshot, str(path))
+        await asyncio.to_thread(self.pag.screenshot, str(path))
         return path
 
     # ------------------------------------------------------------------
@@ -128,29 +150,29 @@ class DesktopEngine(BaseEngine):
 
     async def click(self, x: int, y: int) -> None:
         """Click at coordinates via PyAutoGUI."""
-        await asyncio.to_thread(pyautogui.click, x, y)
+        await asyncio.to_thread(self.pag.click, x, y)
         self._mouse_x, self._mouse_y = x, y
 
     async def double_click(self, x: int, y: int) -> None:
         """Double-click at coordinates via PyAutoGUI."""
-        await asyncio.to_thread(pyautogui.doubleClick, x, y)
+        await asyncio.to_thread(self.pag.doubleClick, x, y)
         self._mouse_x, self._mouse_y = x, y
 
     async def right_click(self, x: int, y: int) -> None:
         """Right-click at coordinates via PyAutoGUI."""
-        await asyncio.to_thread(pyautogui.rightClick, x, y)
+        await asyncio.to_thread(self.pag.rightClick, x, y)
         self._mouse_x, self._mouse_y = x, y
 
     async def move_mouse(self, x: int, y: int) -> None:
         """Move mouse pointer via PyAutoGUI (no click)."""
-        await asyncio.to_thread(pyautogui.moveTo, x, y)
+        await asyncio.to_thread(self.pag.moveTo, x, y)
         self._mouse_x, self._mouse_y = x, y
 
     async def scroll(self, x: int, y: int, delta: int) -> None:
         """Scroll at coordinates via PyAutoGUI. delta > 0: down, delta < 0: up."""
-        await asyncio.to_thread(pyautogui.moveTo, x, y)
+        await asyncio.to_thread(self.pag.moveTo, x, y)
         # PyAutoGUI scroll: positive = up, negative = down (opposite convention)
-        await asyncio.to_thread(pyautogui.scroll, -delta)
+        await asyncio.to_thread(self.pag.scroll, -delta)
         self._mouse_x, self._mouse_y = x, y
 
     # ------------------------------------------------------------------
@@ -159,15 +181,15 @@ class DesktopEngine(BaseEngine):
 
     async def type_text(self, text: str) -> None:
         """Type text via PyAutoGUI with slight interval."""
-        await asyncio.to_thread(pyautogui.write, text, interval=0.05)
+        await asyncio.to_thread(self.pag.write, text, interval=0.05)
 
     async def press_key(self, key: str) -> None:
         """Press a single key via PyAutoGUI."""
-        await asyncio.to_thread(pyautogui.press, key.lower())
+        await asyncio.to_thread(self.pag.press, key.lower())
 
     async def key_combo(self, *keys: str) -> None:
         """Press key combination via PyAutoGUI."""
-        await asyncio.to_thread(pyautogui.hotkey, *[k.lower() for k in keys])
+        await asyncio.to_thread(self.pag.hotkey, *[k.lower() for k in keys])
 
     # ------------------------------------------------------------------
     # Navigation — Playwright (browser control)

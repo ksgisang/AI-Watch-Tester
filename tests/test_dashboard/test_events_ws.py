@@ -5,6 +5,10 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+import pytest
+
+pytest.importorskip("fastapi")
+
 from aat.dashboard.events_ws import ConnectionManager, WebSocketEventHandler
 
 

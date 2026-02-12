@@ -6,14 +6,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+pytest.importorskip("fastapi")
+
 if TYPE_CHECKING:
     from pathlib import Path
 
-from aat.dashboard.app import create_app
-
-pytest.importorskip("fastapi")
-
 from fastapi.testclient import TestClient
+
+from aat.dashboard.app import create_app
 
 
 @pytest.fixture
@@ -99,7 +99,6 @@ class TestDashboardApp:
     def test_websocket_prompt_response(self, client: TestClient) -> None:
         with client.websocket_connect("/ws") as ws:
             ws.send_json({"type": "prompt_response", "response": "approve"})
-            # Should not error — just resolves any pending prompt
             ws.send_json({"type": "ping"})
             data = ws.receive_json()
             assert data["type"] == "pong"
