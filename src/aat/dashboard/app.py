@@ -216,14 +216,15 @@ async def _list_scenarios() -> JSONResponse:
     if _current_config is None:
         return JSONResponse(content={"scenarios": []})
 
-    scenarios_dir = Path(_current_config.scenarios_dir)
+    scenarios_dir = _resolve_scenario_path(_current_config.scenarios_dir)
     if not scenarios_dir.exists():
         return JSONResponse(content={"scenarios": []})
 
     try:
         from aat.core.scenario_loader import load_scenarios
 
-        scenarios = load_scenarios(scenarios_dir)
+        variables = _build_variables()
+        scenarios = load_scenarios(scenarios_dir, variables=variables)
         result = []
         for sc in scenarios:
             result.append(
@@ -607,6 +608,29 @@ async def _list_documents() -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 
+def _resolve_scenario_path(scenario_path: str) -> Path:
+    """Resolve scenario path relative to config file directory."""
+    path = Path(scenario_path)
+    if path.is_absolute():
+        return path
+    # Resolve relative to config file's parent directory
+    if _config_path and _config_path.parent.exists():
+        resolved = _config_path.parent / path
+        if resolved.exists():
+            return resolved
+    return path
+
+
+def _build_variables() -> dict[str, str]:
+    """Build template variables from current config."""
+    variables: dict[str, str] = {}
+    if _current_config:
+        if _current_config.url:
+            variables["url"] = _current_config.url.rstrip("/")
+        variables["project_name"] = _current_config.project_name
+    return variables
+
+
 async def _execute_run(scenario_path: str) -> None:
     """Execute a test run with WebSocket event broadcasting."""
     assert _current_config is not None
@@ -624,8 +648,9 @@ async def _execute_run(scenario_path: str) -> None:
         await _manager.broadcast({"type": "run_start"})
         _ws_handler.info("Loading scenarios...")
 
-        path = Path(scenario_path)
-        scenarios = load_scenarios(path)
+        path = _resolve_scenario_path(scenario_path)
+        variables = _build_variables()
+        scenarios = load_scenarios(path, variables=variables)
         _ws_handler.info(f"Loaded {len(scenarios)} scenario(s)")
 
         # Assemble engine
@@ -756,8 +781,9 @@ async def _execute_loop(
             config.max_loops = max_loops
 
         # Load scenarios
-        path = Path(scenario_path)
-        scenarios = load_scenarios(path)
+        path = _resolve_scenario_path(scenario_path)
+        variables = _build_variables()
+        scenarios = load_scenarios(path, variables=variables)
         _ws_handler.info(f"Loaded {len(scenarios)} scenario(s)")
 
         # Assemble components
