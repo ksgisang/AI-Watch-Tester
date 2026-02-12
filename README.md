@@ -21,6 +21,7 @@
 - **Image Matching Pipeline** — Combines Template, OCR, Feature, and Hybrid matchers to locate UI elements.
 - **DevQA Loop** — When a test fails, AI (Claude) analyzes the root cause, patches the code, and re-tests automatically.
 - **YAML Scenarios** — Write test scenarios declaratively in YAML.
+- **Dual Engine** — `WebEngine` (Playwright) for headless/headed browser testing; `DesktopEngine` (PyAutoGUI + Playwright) for OS-level mouse/keyboard with real screen capture.
 - **Plugin Architecture** — Engine, Matcher, Adapter, Parser, and Reporter are all swappable plugins.
 - **Humanized Actions** — Bezier curve mouse movements and variable-speed typing to avoid bot detection.
 - **Learning DB** — Stores successful match history in SQLite for faster re-matching.
@@ -42,7 +43,7 @@ CLI (Typer)
                     |             |              |
                +----+----+  +----+----+  +------+------+
                | Engine  |  | Matcher |  | Comparator  |
-               | (Web)   |  | (Hybrid)|  | (assertion) |
+               | Web|Desk|  | (Hybrid)|  | (assertion) |
                +---------+  +---------+  +-------------+
                     |
                     v
@@ -182,6 +183,23 @@ aat loop scenarios/SC-001_login.yaml --max-iterations 5
 
 When a test fails, AI analyzes the failure, fixes the code, and re-runs. Use `--max-iterations` to limit loop count.
 
+### Engine Selection
+
+AAT provides two engine types:
+
+| Engine | Config | Description |
+|--------|--------|-------------|
+| **WebEngine** | `engine.type: web` | Playwright-only. Mouse/keyboard/screenshots inside the browser viewport. Default. |
+| **DesktopEngine** | `engine.type: desktop` | PyAutoGUI for OS-level mouse/keyboard/screenshots + Playwright for browser navigation. Captures the full screen, not just the browser. |
+
+```yaml
+# .aat/config.yaml
+engine:
+  type: desktop   # or "web" (default)
+  browser: chromium
+  headless: false  # DesktopEngine always uses headless=false
+```
+
 ---
 
 ## CLI Commands
@@ -209,7 +227,7 @@ After `aat init`, a `.aat/config.yaml` file is created. Settings can also be ove
 | `ai.provider` | `AAT_AI_PROVIDER` | `claude` | AI adapter: `claude`, `openai`, or `ollama` |
 | `ai.api_key` | `AAT_AI_API_KEY` | -- | API key (Claude/OpenAI) or Ollama URL |
 | `ai.model` | `AAT_AI_MODEL` | `claude-sonnet-4-20250514` | Model to use (e.g. `gpt-4o`, `codellama:7b`) |
-| `engine.type` | `AAT_ENGINE_TYPE` | `web` | Engine type (currently web only) |
+| `engine.type` | `AAT_ENGINE_TYPE` | `web` | Engine type: `web` (Playwright) or `desktop` (PyAutoGUI + Playwright) |
 | `engine.headless` | `AAT_ENGINE_HEADLESS` | `false` | Headless mode |
 | `matching.confidence_threshold` | `AAT_MATCHING_CONFIDENCE` | `0.85` | Minimum match confidence (0.0-1.0) |
 
@@ -251,6 +269,7 @@ AI-Watch-Tester/
 │   ├── engine/                      # Test engine (plugin)
 │   │   ├── base.py                  # BaseEngine ABC
 │   │   ├── web.py                   # WebEngine (Playwright)
+│   │   ├── desktop.py               # DesktopEngine (PyAutoGUI + Playwright)
 │   │   ├── executor.py              # StepExecutor
 │   │   ├── humanizer.py             # Humanized actions
 │   │   ├── waiter.py                # Polling + stability detection
@@ -306,6 +325,7 @@ AI-Watch-Tester/
 | `pydantic >=2.5` / `pydantic-settings >=2.1` | Data models, config management |
 | `pyyaml >=6.0` | YAML scenario parsing |
 | `playwright >=1.40` | Web browser automation engine |
+| `pyautogui >=0.9.54` | OS-level mouse/keyboard control (DesktopEngine) |
 | `opencv-python-headless >=4.8` | Template matching, feature matching |
 | `numpy >=1.24` | Image array operations |
 | `pillow >=10.0` | Image loading/conversion |

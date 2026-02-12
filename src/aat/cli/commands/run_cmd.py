@@ -12,11 +12,11 @@ from aat.core.config import load_config
 from aat.core.exceptions import AATError
 from aat.core.models import StepStatus
 from aat.core.scenario_loader import load_scenarios
+from aat.engine import ENGINE_REGISTRY
 from aat.engine.comparator import Comparator
 from aat.engine.executor import StepExecutor
 from aat.engine.humanizer import Humanizer
 from aat.engine.waiter import Waiter
-from aat.engine.web import WebEngine
 from aat.matchers import MATCHER_REGISTRY
 from aat.matchers.hybrid import HybridMatcher
 
@@ -45,8 +45,12 @@ async def _run(scenarios_path: str, config_path: str | None) -> None:
     path = Path(scenarios_path)
     scenarios = load_scenarios(path)
 
-    # Assemble components
-    engine = WebEngine(config.engine)
+    # Assemble engine
+    engine_cls = ENGINE_REGISTRY.get(config.engine.type)
+    if engine_cls is None:
+        msg = f"Unknown engine type: {config.engine.type}"
+        raise AATError(msg)
+    engine = engine_cls(config.engine)
     matchers = [
         MATCHER_REGISTRY[m.value](config.matching)  # type: ignore[call-arg]
         for m in config.matching.chain_order
