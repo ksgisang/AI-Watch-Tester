@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import re
+
 from typer.testing import CliRunner
 
 from aat.cli.main import app
 
 runner = CliRunner()
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from text."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 
 def test_loop_command_exists() -> None:
@@ -27,11 +34,11 @@ def test_loop_help_shows_max_loops() -> None:
     """aat loop --help shows --max-loops option."""
     result = runner.invoke(app, ["loop", "--help"])
     assert result.exit_code == 0
-    assert "--max-loops" in result.output
+    assert "--max-loops" in _strip_ansi(result.output)
 
 
 def test_loop_help_shows_config() -> None:
     """aat loop --help shows --config option."""
     result = runner.invoke(app, ["loop", "--help"])
     assert result.exit_code == 0
-    assert "--config" in result.output
+    assert "--config" in _strip_ansi(result.output)
