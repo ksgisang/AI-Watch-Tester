@@ -218,3 +218,91 @@ class TestDocuments:
         data = response.json()
         names = [d["name"] for d in data["documents"]]
         assert "doc.md" in names
+
+
+class TestScenarioManagement:
+    """Scenario management endpoint tests."""
+
+    def test_list_scenarios_with_custom_path(self, client: TestClient) -> None:
+        """Custom path query param is accepted (may return empty if dir missing)."""
+        response = client.get("/api/scenarios?path=custom/nonexistent")
+        assert response.status_code == 200
+        data = response.json()
+        assert "scenarios" in data
+        assert data["scenarios"] == []
+
+    def test_upload_scenario_yaml(self, tmp_path: Path, client: TestClient) -> None:
+        """Upload a .yaml scenario file succeeds."""
+        yaml_content = b"id: SC-001\nname: Test\nsteps:\n  - action: navigate\n    url: http://x\n"
+        response = client.post(
+            "/api/scenarios/upload",
+            files=[("file", ("test_scenario.yaml", yaml_content, "application/yaml"))],
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["uploaded"] == "test_scenario.yaml"
+
+    def test_upload_scenario_yml(self, client: TestClient) -> None:
+        """Upload a .yml scenario file succeeds."""
+        yaml_content = b"id: SC-002\nname: Test2\nsteps:\n  - action: navigate\n    url: http://x\n"
+        response = client.post(
+            "/api/scenarios/upload",
+            files=[("file", ("test.yml", yaml_content, "application/yaml"))],
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "ok"
+
+    def test_upload_scenario_non_yaml_rejected(self, client: TestClient) -> None:
+        """Non-YAML file upload is rejected."""
+        response = client.post(
+            "/api/scenarios/upload",
+            files=[("file", ("test.txt", b"not yaml", "text/plain"))],
+        )
+        assert response.status_code == 400
+        assert "Only .yaml/.yml" in response.json()["error"]
+
+    def test_upload_scenario_no_file(self, client: TestClient) -> None:
+        """Upload with no file returns error."""
+        response = client.post("/api/scenarios/upload", files=[])
+        assert response.status_code == 400
+
+    def test_start_run_with_scenario_ids(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """POST /api/run accepts scenario_ids parameter."""
+        import aat.dashboard.app as app_mod
+
+        async def _noop_run(*_args: object, **_kwargs: object) -> None:
+            pass
+
+        monkeypatch.setattr(app_mod, "_execute_run", _noop_run)
+
+        response = client.post(
+            "/api/run",
+            json={"scenario_ids": ["SC-001", "SC-002"]},
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "started"
+        # Clean up
+        client.post("/api/stop")
+
+    def test_start_loop_with_scenario_ids(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """POST /api/loop accepts scenario_ids parameter."""
+        import aat.dashboard.app as app_mod
+
+        async def _noop_loop(*_args: object, **_kwargs: object) -> None:
+            pass
+
+        monkeypatch.setattr(app_mod, "_execute_loop", _noop_loop)
+
+        response = client.post(
+            "/api/loop",
+            json={"approval_mode": "manual", "scenario_ids": ["SC-001"]},
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "started"
+        # Clean up
+        client.post("/api/stop")

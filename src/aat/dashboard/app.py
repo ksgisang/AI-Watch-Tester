@@ -116,6 +116,7 @@ def create_app(config_path: Path | None = None) -> FastAPI:
     app.add_api_route("/api/config", _get_config, methods=["GET"])
     app.add_api_route("/api/config", _update_config, methods=["PUT"])
     app.add_api_route("/api/scenarios", _list_scenarios, methods=["GET"])
+    app.add_api_route("/api/scenarios/upload", _upload_scenario, methods=["POST"])
     app.add_api_route("/api/run", _start_run, methods=["POST"])
     app.add_api_route("/api/loop", _start_loop, methods=["POST"])
     app.add_api_route("/api/stop", _stop_run, methods=["POST"])
@@ -211,12 +212,18 @@ async def _update_config(request: Request) -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 
-async def _list_scenarios() -> JSONResponse:
-    """List available scenarios."""
+async def _list_scenarios(request: Request) -> JSONResponse:
+    """List available scenarios.
+
+    Query params:
+        path: Custom scenario directory path (optional).
+    """
     if _current_config is None:
         return JSONResponse(content={"scenarios": []})
 
-    scenarios_dir = _resolve_scenario_path(_current_config.scenarios_dir)
+    custom_path = request.query_params.get("path", "")
+    base_dir = custom_path if custom_path else _current_config.scenarios_dir
+    scenarios_dir = _resolve_scenario_path(base_dir)
     if not scenarios_dir.exists():
         return JSONResponse(content={"scenarios": []})
 
@@ -236,9 +243,84 @@ async def _list_scenarios() -> JSONResponse:
                     "steps_count": len(sc.steps),
                 }
             )
-        return JSONResponse(content={"scenarios": result})
+        return JSONResponse(content={"scenarios": result, "path": str(scenarios_dir)})
     except AATError as exc:
         return JSONResponse(content={"scenarios": [], "error": str(exc)})
+
+
+async def _upload_scenario(request: Request) -> JSONResponse:
+    """Upload a YAML scenario file."""
+    if _current_config is None:
+        return JSONResponse(
+            content={"error": "No config loaded"},
+            status_code=400,
+        )
+
+    scenarios_dir = _resolve_scenario_path(_current_config.scenarios_dir)
+    scenarios_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        form = await request.form()
+    except Exception:  # noqa: BLE001
+        return JSONResponse(
+            content={"error": "No file provided"},
+            status_code=400,
+        )
+
+    file = form.get("file")
+    if not file or not hasattr(file, "read"):
+        return JSONResponse(
+            content={"error": "No file provided"},
+            status_code=400,
+        )
+
+    filename = getattr(file, "filename", None)
+    if not filename or not isinstance(filename, str):
+        return JSONResponse(
+            content={"error": "Invalid filename"},
+            status_code=400,
+        )
+
+    # Only allow .yaml / .yml
+    safe_name = Path(filename).name
+    suffix = Path(safe_name).suffix.lower()
+    if suffix not in (".yaml", ".yml"):
+        return JSONResponse(
+            content={"error": f"Only .yaml/.yml files allowed, got '{suffix}'"},
+            status_code=400,
+        )
+
+    dest = scenarios_dir / safe_name
+    content = await file.read()
+    dest.write_bytes(content)
+
+    await _manager.broadcast(
+        {"type": "info", "message": f"Scenario uploaded: {safe_name}"}
+    )
+
+    # Return updated scenario list
+    try:
+        from aat.core.scenario_loader import load_scenarios
+
+        variables = _build_variables()
+        scenarios = load_scenarios(scenarios_dir, variables=variables)
+        result = [
+            {
+                "id": sc.id,
+                "name": sc.name,
+                "description": sc.description,
+                "tags": sc.tags,
+                "steps_count": len(sc.steps),
+            }
+            for sc in scenarios
+        ]
+        return JSONResponse(
+            content={"status": "ok", "uploaded": safe_name, "scenarios": result}
+        )
+    except AATError:
+        return JSONResponse(
+            content={"status": "ok", "uploaded": safe_name, "scenarios": []}
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -271,8 +353,10 @@ async def _start_run(request: Request) -> JSONResponse:
             status_code=400,
         )
 
+    scenario_ids: list[str] = body.get("scenario_ids", [])
+
     _run_task = asyncio.create_task(
-        _execute_run(scenario_path),
+        _execute_run(scenario_path, scenario_ids),
     )
     return JSONResponse(content={"status": "started"})
 
@@ -304,9 +388,10 @@ async def _start_loop(request: Request) -> JSONResponse:
 
     approval_mode = body.get("approval_mode", "manual")
     max_loops = body.get("max_loops")
+    scenario_ids: list[str] = body.get("scenario_ids", [])
 
     _run_task = asyncio.create_task(
-        _execute_loop(scenario_path, approval_mode, max_loops),
+        _execute_loop(scenario_path, approval_mode, max_loops, scenario_ids),
     )
     return JSONResponse(content={"status": "started"})
 
@@ -631,7 +716,10 @@ def _build_variables() -> dict[str, str]:
     return variables
 
 
-async def _execute_run(scenario_path: str) -> None:
+async def _execute_run(
+    scenario_path: str,
+    scenario_ids: list[str] | None = None,
+) -> None:
     """Execute a test run with WebSocket event broadcasting."""
     assert _current_config is not None
 
@@ -651,6 +739,11 @@ async def _execute_run(scenario_path: str) -> None:
         path = _resolve_scenario_path(scenario_path)
         variables = _build_variables()
         scenarios = load_scenarios(path, variables=variables)
+
+        if scenario_ids:
+            id_set = set(scenario_ids)
+            scenarios = [s for s in scenarios if s.id in id_set]
+
         _ws_handler.info(f"Loaded {len(scenarios)} scenario(s)")
 
         # Assemble engine
@@ -750,6 +843,7 @@ async def _execute_loop(
     scenario_path: str,
     approval_mode_str: str,
     max_loops: int | None,
+    scenario_ids: list[str] | None = None,
 ) -> None:
     """Execute a DevQA Loop with WebSocket event broadcasting."""
     assert _current_config is not None
@@ -784,6 +878,11 @@ async def _execute_loop(
         path = _resolve_scenario_path(scenario_path)
         variables = _build_variables()
         scenarios = load_scenarios(path, variables=variables)
+
+        if scenario_ids:
+            id_set = set(scenario_ids)
+            scenarios = [s for s in scenarios if s.id in id_set]
+
         _ws_handler.info(f"Loaded {len(scenarios)} scenario(s)")
 
         # Assemble components

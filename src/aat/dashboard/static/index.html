@@ -532,12 +532,24 @@
 
       <!-- Scenarios -->
       <div class="sub-section">
-        <div class="sub-section-title">Scenarios</div>
+        <div class="sub-section-title">Scenarios <span id="scenarioCount" style="font-weight:400; color: var(--text-secondary); text-transform: none; letter-spacing: 0;"></span></div>
+        <div class="field-row">
+          <label>Path</label>
+          <input class="input" id="scenarioPath" placeholder="custom/scenarios/path">
+          <button class="btn btn-primary btn-sm" onclick="loadScenarios(document.getElementById('scenarioPath').value.trim())">Load</button>
+        </div>
         <div id="scenarioList">
           <div style="color: var(--text-secondary); font-size: 13px;">Loading...</div>
         </div>
         <div class="btn-group" style="margin-top:8px">
           <button class="btn btn-primary btn-sm" onclick="loadScenarios()">Refresh</button>
+          <button class="btn btn-outline btn-sm" onclick="selectAllScenarios()">Select All</button>
+          <button class="btn btn-outline btn-sm" onclick="clearScenarioSelection()">Clear</button>
+        </div>
+        <!-- Scenario YAML upload -->
+        <div style="margin-top: 8px; display: flex; gap: 8px; align-items: center;">
+          <input type="file" id="scenarioFileInput" accept=".yaml,.yml" style="font-size: 12px; color: var(--text-secondary);">
+          <button class="btn btn-outline btn-sm" onclick="uploadScenario()">Upload</button>
         </div>
       </div>
 
@@ -567,8 +579,8 @@
 
       <!-- Controls -->
       <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;">
-        <button class="btn btn-primary" id="btnRun" onclick="startRun()">Run Test</button>
-        <button class="btn btn-primary" id="btnLoop" onclick="startLoop()">DevQA Loop</button>
+        <button class="btn btn-primary" id="btnRun" onclick="startRun()">Run Test (All)</button>
+        <button class="btn btn-primary" id="btnLoop" onclick="startLoop()">DevQA Loop (All)</button>
         <button class="btn btn-danger" id="btnStop" onclick="stopRun()" disabled>Stop</button>
         <div id="summary" style="display: none; margin-left: 16px; padding: 8px 16px; background: var(--bg-secondary); border-radius: var(--radius); font-size: 13px;"></div>
       </div>
@@ -619,6 +631,8 @@ let ws = null;
 let isRunning = false;
 let serverRunning = false;
 let selectedScenarios = new Set();
+let totalScenarios = 0;
+let allScenarioIds = [];
 let pendingFiles = [];
 
 // -- WebSocket --
@@ -1093,17 +1107,26 @@ async function saveConfig() {
   }
 }
 
-async function loadScenarios() {
+async function loadScenarios(customPath) {
   try {
-    const res = await fetch('/api/scenarios');
+    let url = '/api/scenarios';
+    if (customPath) {
+      url += '?path=' + encodeURIComponent(customPath);
+    }
+    const res = await fetch(url);
     const data = await res.json();
     const list = document.getElementById('scenarioList');
+    allScenarioIds = [];
     if (!data.scenarios || data.scenarios.length === 0) {
       list.innerHTML = '<div style="color: var(--text-secondary); font-size: 13px;">No scenarios found</div>';
+      totalScenarios = 0;
+      updateScenarioCount();
       return;
     }
+    totalScenarios = data.scenarios.length;
     list.innerHTML = '';
     data.scenarios.forEach(sc => {
+      allScenarioIds.push(sc.id);
       const div = document.createElement('div');
       div.className = 'scenario-item' + (selectedScenarios.has(sc.id) ? ' selected' : '');
       div.innerHTML = `
@@ -1119,9 +1142,15 @@ async function loadScenarios() {
           selectedScenarios.add(sc.id);
           div.classList.add('selected');
         }
+        updateScenarioCount();
       };
       list.appendChild(div);
     });
+    // Remove selections not in current list
+    selectedScenarios.forEach(id => {
+      if (!allScenarioIds.includes(id)) selectedScenarios.delete(id);
+    });
+    updateScenarioCount();
     if (data.error) {
       addLog('warning', data.error);
     }
@@ -1130,18 +1159,76 @@ async function loadScenarios() {
   }
 }
 
-async function startRun() {
+function updateScenarioCount() {
+  const count = selectedScenarios.size;
+  const el = document.getElementById('scenarioCount');
+  if (totalScenarios > 0) {
+    el.textContent = count > 0 ? `(${count} / ${totalScenarios} selected)` : `(${totalScenarios} total)`;
+  } else {
+    el.textContent = '';
+  }
+  // Update button labels
+  const runLabel = count > 0 ? `Run Test (${count})` : 'Run Test (All)';
+  const loopLabel = count > 0 ? `DevQA Loop (${count})` : 'DevQA Loop (All)';
+  document.getElementById('btnRun').textContent = runLabel;
+  document.getElementById('btnLoop').textContent = loopLabel;
+}
+
+function selectAllScenarios() {
+  allScenarioIds.forEach(id => selectedScenarios.add(id));
+  // Re-render selection state
+  document.querySelectorAll('.scenario-item').forEach(el => el.classList.add('selected'));
+  updateScenarioCount();
+}
+
+function clearScenarioSelection() {
+  selectedScenarios.clear();
+  document.querySelectorAll('.scenario-item').forEach(el => el.classList.remove('selected'));
+  updateScenarioCount();
+}
+
+async function uploadScenario() {
+  const input = document.getElementById('scenarioFileInput');
+  if (!input.files || input.files.length === 0) {
+    addLog('warning', 'No scenario file selected');
+    return;
+  }
+  const file = input.files[0];
+  const formData = new FormData();
+  formData.append('file', file);
+
   try {
-    const res = await fetch('/api/run', {
+    const res = await fetch('/api/scenarios/upload', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
+      body: formData,
     });
     const data = await res.json();
     if (data.error) {
       addLog('error', data.error);
     } else {
-      addLog('info', 'Test run started');
+      addLog('success', `Scenario uploaded: ${data.uploaded}`);
+      input.value = '';
+      loadScenarios();
+    }
+  } catch (e) {
+    addLog('error', `Scenario upload failed: ${e.message}`);
+  }
+}
+
+async function startRun() {
+  const ids = [...selectedScenarios];
+  try {
+    const res = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenario_ids: ids }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      addLog('error', data.error);
+    } else {
+      const label = ids.length > 0 ? `${ids.length} scenario(s)` : 'all scenarios';
+      addLog('info', `Test run started (${label})`);
     }
   } catch (e) {
     addLog('error', `Failed to start run: ${e.message}`);
@@ -1150,17 +1237,19 @@ async function startRun() {
 
 async function startLoop() {
   const approvalMode = document.getElementById('cfgApproval').value;
+  const ids = [...selectedScenarios];
   try {
     const res = await fetch('/api/loop', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ approval_mode: approvalMode }),
+      body: JSON.stringify({ approval_mode: approvalMode, scenario_ids: ids }),
     });
     const data = await res.json();
     if (data.error) {
       addLog('error', data.error);
     } else {
-      addLog('info', 'DevQA Loop started');
+      const label = ids.length > 0 ? `${ids.length} scenario(s)` : 'all scenarios';
+      addLog('info', `DevQA Loop started (${label})`);
     }
   } catch (e) {
     addLog('error', `Failed to start loop: ${e.message}`);
