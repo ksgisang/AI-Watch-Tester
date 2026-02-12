@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,20 @@ from aat.dashboard.subprocess_manager import SubprocessManager
 _manager = ConnectionManager()
 _ws_handler = WebSocketEventHandler(_manager)
 _subprocess = SubprocessManager()
+
+
+def _on_server_line(line: str) -> None:
+    """Broadcast server subprocess output lines via WebSocket."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(
+            _manager.broadcast({"type": "server_log", "line": line}),
+        )
+    except RuntimeError:
+        pass  # no event loop
+
+
+_server_subprocess = SubprocessManager(on_line=_on_server_line)
 
 _current_config: Config | None = None
 _config_path: Path | None = None
@@ -82,9 +97,22 @@ def create_app(config_path: Path | None = None) -> FastAPI:
     app.add_api_route("/api/status", _get_status, methods=["GET"])
     app.add_api_route("/api/logs", _get_logs, methods=["GET"])
     app.add_api_route(
-        "/api/screenshots/{filename:path}", _get_screenshot,
-        methods=["GET"], response_model=None,
+        "/api/screenshots/{filename:path}",
+        _get_screenshot,
+        methods=["GET"],
+        response_model=None,
     )
+
+    # Server control
+    app.add_api_route("/api/server/start", _start_server, methods=["POST"])
+    app.add_api_route("/api/server/stop", _stop_server, methods=["POST"])
+    app.add_api_route("/api/server/status", _get_server_status, methods=["GET"])
+    app.add_api_route("/api/server/logs", _get_server_logs, methods=["GET"])
+
+    # Document management
+    app.add_api_route("/api/documents/upload", _upload_documents, methods=["POST"])
+    app.add_api_route("/api/documents", _list_documents, methods=["GET"])
+
     app.add_api_websocket_route("/ws", _websocket_endpoint)
 
     return app
@@ -129,7 +157,8 @@ async def _update_config(request: Request) -> JSONResponse:
         body = await request.json()
     except Exception as exc:
         return JSONResponse(
-            content={"error": f"Invalid JSON: {exc}"}, status_code=400,
+            content={"error": f"Invalid JSON: {exc}"},
+            status_code=400,
         )
 
     try:
@@ -147,7 +176,8 @@ async def _update_config(request: Request) -> JSONResponse:
         return JSONResponse(content={"status": "ok"})
     except Exception as exc:
         return JSONResponse(
-            content={"error": str(exc)}, status_code=400,
+            content={"error": str(exc)},
+            status_code=400,
         )
 
 
@@ -167,16 +197,19 @@ async def _list_scenarios() -> JSONResponse:
 
     try:
         from aat.core.scenario_loader import load_scenarios
+
         scenarios = load_scenarios(scenarios_dir)
         result = []
         for sc in scenarios:
-            result.append({
-                "id": sc.id,
-                "name": sc.name,
-                "description": sc.description,
-                "tags": sc.tags,
-                "steps_count": len(sc.steps),
-            })
+            result.append(
+                {
+                    "id": sc.id,
+                    "name": sc.name,
+                    "description": sc.description,
+                    "tags": sc.tags,
+                    "steps_count": len(sc.steps),
+                }
+            )
         return JSONResponse(content={"scenarios": result})
     except AATError as exc:
         return JSONResponse(content={"scenarios": [], "error": str(exc)})
@@ -193,7 +226,8 @@ async def _start_run(request: Request) -> JSONResponse:
 
     if _run_task and not _run_task.done():
         return JSONResponse(
-            content={"error": "A test is already running"}, status_code=409,
+            content={"error": "A test is already running"},
+            status_code=409,
         )
 
     try:
@@ -207,7 +241,8 @@ async def _start_run(request: Request) -> JSONResponse:
 
     if not scenario_path:
         return JSONResponse(
-            content={"error": "No scenario path specified"}, status_code=400,
+            content={"error": "No scenario path specified"},
+            status_code=400,
         )
 
     _run_task = asyncio.create_task(
@@ -222,7 +257,8 @@ async def _start_loop(request: Request) -> JSONResponse:
 
     if _run_task and not _run_task.done():
         return JSONResponse(
-            content={"error": "A test is already running"}, status_code=409,
+            content={"error": "A test is already running"},
+            status_code=409,
         )
 
     try:
@@ -236,7 +272,8 @@ async def _start_loop(request: Request) -> JSONResponse:
 
     if not scenario_path:
         return JSONResponse(
-            content={"error": "No scenario path specified"}, status_code=400,
+            content={"error": "No scenario path specified"},
+            status_code=400,
         )
 
     approval_mode = body.get("approval_mode", "manual")
@@ -262,11 +299,14 @@ async def _stop_run() -> JSONResponse:
 async def _get_status() -> JSONResponse:
     """Get current execution status."""
     running = _run_task is not None and not _run_task.done()
-    return JSONResponse(content={
-        "running": running,
-        "subprocess": _subprocess.status.value,
-        "ws_clients": _manager.count,
-    })
+    return JSONResponse(
+        content={
+            "running": running,
+            "subprocess": _subprocess.status.value,
+            "ws_clients": _manager.count,
+            "server_running": _server_subprocess.is_running,
+        }
+    )
 
 
 async def _get_logs() -> JSONResponse:
@@ -283,7 +323,8 @@ async def _get_screenshot(filename: str) -> FileResponse | JSONResponse:
     """Serve a screenshot file."""
     if _current_config is None:
         return JSONResponse(
-            content={"error": "No config"}, status_code=404,
+            content={"error": "No config"},
+            status_code=404,
         )
 
     screenshot_dir = Path(_current_config.data_dir) / "screenshots"
@@ -291,7 +332,8 @@ async def _get_screenshot(filename: str) -> FileResponse | JSONResponse:
 
     if not filepath.exists() or not filepath.is_file():
         return JSONResponse(
-            content={"error": "Screenshot not found"}, status_code=404,
+            content={"error": "Screenshot not found"},
+            status_code=404,
         )
 
     # Security: prevent path traversal
@@ -299,7 +341,8 @@ async def _get_screenshot(filename: str) -> FileResponse | JSONResponse:
         filepath.resolve().relative_to(screenshot_dir.resolve())
     except ValueError:
         return JSONResponse(
-            content={"error": "Invalid path"}, status_code=403,
+            content={"error": "Invalid path"},
+            status_code=403,
         )
 
     return FileResponse(str(filepath))
@@ -322,10 +365,227 @@ async def _websocket_endpoint(websocket: WebSocket) -> None:
                 _ws_handler.resolve_prompt(data.get("response", ""))
             elif msg_type == "ping":
                 await websocket.send_json({"type": "pong"})
+            elif msg_type == "server_command":
+                # Allow starting server via WS (optional)
+                pass
     except WebSocketDisconnect:
         _manager.disconnect(websocket)
     except Exception:  # noqa: BLE001
         _manager.disconnect(websocket)
+
+
+# ---------------------------------------------------------------------------
+# REST: Server control
+# ---------------------------------------------------------------------------
+
+
+def _extract_port(command: str) -> int | None:
+    """Extract port number from a command string using regex heuristics."""
+    # Match common patterns: --port 3000, -p 8080, :8000, PORT=5000
+    patterns = [
+        r"(?:--port|--Port|-p|-P)\s+(\d{2,5})",
+        r":(\d{4,5})\b",
+        r"PORT[=\s]+(\d{2,5})",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, command)
+        if m:
+            port = int(m.group(1))
+            if 1024 <= port <= 65535:  # noqa: PLR2004
+                return port
+    return None
+
+
+async def _start_server(request: Request) -> JSONResponse:
+    """Start the target server subprocess."""
+    if _server_subprocess.is_running:
+        return JSONResponse(
+            content={"error": "Server is already running"},
+            status_code=409,
+        )
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            content={"error": "Invalid JSON body"},
+            status_code=400,
+        )
+
+    command = body.get("command", "")
+    cwd = body.get("cwd", "")
+
+    if not command:
+        return JSONResponse(
+            content={"error": "No command specified"},
+            status_code=400,
+        )
+
+    # Split command string into args
+    import shlex
+
+    try:
+        cmd_parts = shlex.split(command)
+    except ValueError as exc:
+        return JSONResponse(
+            content={"error": f"Invalid command: {exc}"},
+            status_code=400,
+        )
+
+    cwd_path = Path(cwd) if cwd else None
+
+    try:
+        await _server_subprocess.start_raw(cmd_parts, cwd=cwd_path)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse(
+            content={"error": f"Failed to start server: {exc}"},
+            status_code=500,
+        )
+
+    # Extract port and suggest URL
+    port = _extract_port(command)
+    suggested_url = f"http://localhost:{port}" if port else None
+
+    await _manager.broadcast(
+        {
+            "type": "info",
+            "message": f"Server started: {command}",
+        }
+    )
+
+    return JSONResponse(
+        content={
+            "status": "started",
+            "pid": _server_subprocess.pid,
+            "suggested_url": suggested_url,
+        }
+    )
+
+
+async def _stop_server() -> JSONResponse:
+    """Stop the target server subprocess."""
+    if not _server_subprocess.is_running:
+        return JSONResponse(
+            content={"status": "not_running"},
+        )
+
+    await _server_subprocess.stop()
+    await _manager.broadcast(
+        {
+            "type": "info",
+            "message": "Server stopped",
+        }
+    )
+    return JSONResponse(content={"status": "stopped"})
+
+
+async def _get_server_status() -> JSONResponse:
+    """Get server subprocess status."""
+    return JSONResponse(
+        content={
+            "running": _server_subprocess.is_running,
+            "status": _server_subprocess.status.value,
+            "pid": _server_subprocess.pid,
+        }
+    )
+
+
+async def _get_server_logs() -> JSONResponse:
+    """Get server subprocess log lines."""
+    return JSONResponse(content={"lines": _server_subprocess.log_lines})
+
+
+# ---------------------------------------------------------------------------
+# REST: Documents
+# ---------------------------------------------------------------------------
+
+
+def _get_docs_dir() -> Path:
+    """Get the documents directory path."""
+    if _current_config:
+        return Path(_current_config.data_dir) / "docs"
+    return Path(".aat") / "docs"
+
+
+async def _upload_documents(request: Request) -> JSONResponse:
+    """Upload documents via multipart/form-data."""
+    docs_dir = _get_docs_dir()
+    docs_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        form = await request.form()
+    except Exception:  # noqa: BLE001
+        return JSONResponse(
+            content={"error": "No files provided"},
+            status_code=400,
+        )
+
+    files = form.getlist("files")
+
+    if not files:
+        return JSONResponse(
+            content={"error": "No files provided"},
+            status_code=400,
+        )
+
+    saved: list[str] = []
+    for file in files:
+        if not hasattr(file, "read"):
+            continue
+        filename = getattr(file, "filename", None)
+        if not filename or not isinstance(filename, str):
+            continue
+        # Security: prevent path traversal
+        safe_name = Path(filename).name
+        if not safe_name:
+            continue
+        dest = docs_dir / safe_name
+        content = await file.read()
+        dest.write_bytes(content)
+        saved.append(safe_name)
+
+    if not saved:
+        return JSONResponse(
+            content={"error": "No valid files uploaded"},
+            status_code=400,
+        )
+
+    await _manager.broadcast(
+        {
+            "type": "info",
+            "message": f"Uploaded {len(saved)} document(s): {', '.join(saved)}",
+        }
+    )
+
+    return JSONResponse(
+        content={
+            "status": "ok",
+            "uploaded": saved,
+            "count": len(saved),
+        }
+    )
+
+
+async def _list_documents() -> JSONResponse:
+    """List uploaded documents."""
+    docs_dir = _get_docs_dir()
+    if not docs_dir.exists():
+        return JSONResponse(content={"documents": []})
+
+    allowed_ext = {".md", ".txt", ".pdf", ".html", ".rst", ".yaml", ".yml", ".json"}
+    documents: list[dict[str, Any]] = []
+
+    for f in sorted(docs_dir.iterdir()):
+        if f.is_file() and f.suffix.lower() in allowed_ext:
+            documents.append(
+                {
+                    "name": f.name,
+                    "size": f.stat().st_size,
+                    "ext": f.suffix.lower(),
+                }
+            )
+
+    return JSONResponse(content={"documents": documents})
 
 
 # ---------------------------------------------------------------------------
@@ -376,7 +636,11 @@ async def _execute_run(scenario_path: str) -> None:
         screenshot_dir = Path(_current_config.data_dir) / "screenshots"
         screenshot_dir.mkdir(parents=True, exist_ok=True)
         executor = StepExecutor(
-            engine, hybrid, humanizer, waiter, comparator,
+            engine,
+            hybrid,
+            humanizer,
+            waiter,
+            comparator,
             screenshot_dir=screenshot_dir,
         )
 
@@ -393,7 +657,9 @@ async def _execute_run(scenario_path: str) -> None:
                 for step_config in sc.steps:
                     step_counter += 1
                     _ws_handler.step_start(
-                        step_counter, total_steps, step_config.description,
+                        step_counter,
+                        total_steps,
+                        step_config.description,
                     )
                     _ws_handler.progress("Testing", step_counter, total_steps)
 
@@ -401,7 +667,9 @@ async def _execute_run(scenario_path: str) -> None:
 
                     passed = step_result.status == StepStatus.PASSED
                     _ws_handler.step_result(
-                        step_counter, passed, step_config.description,
+                        step_counter,
+                        passed,
+                        step_config.description,
                         error=step_result.error_message,
                     )
 
@@ -541,22 +809,21 @@ async def _execute_loop(
 
         # Broadcast result
         if result.success:
-            _ws_handler.success(
-                f"Loop SUCCESS after {result.total_iterations} iteration(s)"
-            )
+            _ws_handler.success(f"Loop SUCCESS after {result.total_iterations} iteration(s)")
         else:
             _ws_handler.warning(
-                f"Loop ended after {result.total_iterations} iteration(s): "
-                f"{result.reason}"
+                f"Loop ended after {result.total_iterations} iteration(s): {result.reason}"
             )
 
-        await _manager.broadcast({
-            "type": "loop_complete",
-            "success": result.success,
-            "iterations": result.total_iterations,
-            "reason": result.reason,
-            "duration_ms": result.duration_ms,
-        })
+        await _manager.broadcast(
+            {
+                "type": "loop_complete",
+                "success": result.success,
+                "iterations": result.total_iterations,
+                "reason": result.reason,
+                "duration_ms": result.duration_ms,
+            }
+        )
 
     except asyncio.CancelledError:
         _ws_handler.warning("DevQA Loop cancelled")

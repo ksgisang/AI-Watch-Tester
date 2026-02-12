@@ -53,14 +53,26 @@
   }
   .status-dot.connected { background: var(--success); }
 
-  /* Layout */
+  /* Layout: 3-step Z-pattern */
   .layout {
-    display: grid;
-    grid-template-columns: 280px 1fr 360px;
-    grid-template-rows: 1fr 1fr;
+    display: flex;
+    flex-direction: column;
+    min-height: calc(100vh - 49px);
     gap: 1px;
-    height: calc(100vh - 49px);
     background: var(--border);
+  }
+
+  .top-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+  }
+
+  .bottom-row {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary);
   }
 
   .panel {
@@ -68,6 +80,7 @@
     overflow-y: auto;
     padding: 16px;
   }
+
   .panel-title {
     font-size: 12px;
     font-weight: 700;
@@ -77,22 +90,20 @@
     margin-bottom: 12px;
     padding-bottom: 8px;
     border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
 
-  /* Panel: Server (left top) */
-  .p-server { grid-row: 1; grid-column: 1; }
-
-  /* Panel: Config (left bottom) */
-  .p-config { grid-row: 2; grid-column: 1; }
-
-  /* Panel: Execution (center) */
-  .p-execution { grid-row: 1 / 3; grid-column: 2; }
-
-  /* Panel: Screenshot (right top) */
-  .p-screenshot { grid-row: 1; grid-column: 3; }
-
-  /* Panel: Log (right bottom) */
-  .p-log { grid-row: 2; grid-column: 3; }
+  .step-number {
+    background: var(--accent);
+    color: var(--bg-primary);
+    font-size: 10px;
+    font-weight: 800;
+    padding: 2px 8px;
+    border-radius: 10px;
+    letter-spacing: 0;
+  }
 
   /* Buttons */
   .btn {
@@ -116,6 +127,12 @@
   .btn-danger:hover { opacity: 0.9; }
   .btn-sm { padding: 5px 10px; font-size: 12px; }
   .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-outline {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+  }
+  .btn-outline:hover { background: rgba(0,212,170,0.1); }
 
   .btn-group { display: flex; gap: 8px; margin-top: 12px; }
 
@@ -130,14 +147,69 @@
     width: 100%;
   }
   .input:focus { outline: none; border-color: var(--accent); }
-  .field { margin-bottom: 10px; }
-  .field label {
-    display: block;
+  select.input { appearance: auto; }
+
+  /* Field row: label + input side by side */
+  .field-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
+    gap: 8px;
+  }
+  .field-row label {
+    min-width: 70px;
+    text-align: right;
     font-size: 11px;
     color: var(--text-secondary);
-    margin-bottom: 4px;
+    flex-shrink: 0;
   }
-  select.input { appearance: auto; }
+  .field-row .input { flex: 1; }
+
+  /* Sub-section */
+  .sub-section {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px;
+    margin-bottom: 12px;
+  }
+  .sub-section-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* Server status indicator */
+  .server-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    margin-bottom: 8px;
+  }
+  .server-status .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--text-secondary);
+  }
+  .server-status .dot.running { background: var(--success); }
+
+  /* Mini log */
+  .mini-log {
+    background: var(--bg-primary);
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 10px;
+    line-height: 1.5;
+    max-height: 64px;
+    overflow-y: auto;
+    color: var(--text-secondary);
+    margin-top: 8px;
+  }
 
   /* Scenario list */
   .scenario-item {
@@ -154,6 +226,38 @@
   .scenario-id { font-size: 11px; color: var(--accent); font-weight: 600; }
   .scenario-name { font-size: 13px; margin-top: 2px; }
   .scenario-meta { font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
+
+  /* Drop zone */
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    margin-bottom: 8px;
+  }
+  .drop-zone:hover, .drop-zone.dragover {
+    border-color: var(--accent);
+    background: rgba(0,212,170,0.05);
+  }
+  .drop-zone input[type="file"] { display: none; }
+
+  .doc-list {
+    list-style: none;
+    max-height: 100px;
+    overflow-y: auto;
+  }
+  .doc-item {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    padding: 3px 0;
+    color: var(--text-secondary);
+  }
+  .doc-item .name { color: var(--text-primary); }
 
   /* Progress bar */
   .progress-container {
@@ -213,6 +317,16 @@
     padding-left: 30px;
   }
 
+  /* Execution bottom area: screenshot + log */
+  .exec-bottom {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--border);
+    flex: 1;
+    min-height: 250px;
+  }
+
   /* Screenshot viewer */
   .screenshot-container {
     background: var(--bg-secondary);
@@ -242,15 +356,16 @@
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
     font-size: 11px;
     line-height: 1.6;
-    max-height: calc(100% - 40px);
     overflow-y: auto;
     white-space: pre-wrap;
     word-break: break-all;
+    height: 100%;
   }
   .log-info { color: var(--text-primary); }
   .log-success { color: var(--success); }
   .log-warning { color: var(--warning); }
   .log-error { color: var(--danger); }
+  .log-server { color: #6c9bd4; }
 
   /* Modal */
   .modal-overlay {
@@ -296,15 +411,12 @@
 
   /* Responsive */
   @media (max-width: 1100px) {
-    .layout {
-      grid-template-columns: 1fr 1fr;
-      grid-template-rows: auto;
+    .top-row {
+      grid-template-columns: 1fr;
     }
-    .p-server { grid-row: 1; grid-column: 1; }
-    .p-config { grid-row: 1; grid-column: 2; }
-    .p-execution { grid-row: 2; grid-column: 1 / 3; }
-    .p-screenshot { grid-row: 3; grid-column: 1; }
-    .p-log { grid-row: 3; grid-column: 2; }
+    .exec-bottom {
+      grid-template-columns: 1fr;
+    }
   }
 </style>
 </head>
@@ -319,117 +431,174 @@
   </div>
 </div>
 
-<!-- 5-Panel Layout -->
+<!-- 3-Step Z-Pattern Layout -->
 <div class="layout">
 
-  <!-- Panel: Server -->
-  <div class="panel p-server">
-    <div class="panel-title">Scenarios</div>
-    <div id="scenarioList">
-      <div style="color: var(--text-secondary); font-size: 13px;">Loading...</div>
-    </div>
-    <div class="btn-group">
-      <button class="btn btn-primary btn-sm" onclick="loadScenarios()">Refresh</button>
-    </div>
-  </div>
+  <!-- TOP ROW: Step 1 (Setup) + Step 2 (Prepare) -->
+  <div class="top-row">
 
-  <!-- Panel: Config -->
-  <div class="panel p-config">
-    <div class="panel-title">Configuration</div>
-    <div class="field">
-      <label>Engine Type</label>
-      <select class="input" id="cfgEngine">
-        <option value="web">web</option>
-        <option value="desktop">desktop</option>
-      </select>
-    </div>
-    <div class="field">
-      <label>Browser</label>
-      <select class="input" id="cfgBrowser">
-        <option value="chromium">chromium</option>
-        <option value="firefox">firefox</option>
-        <option value="webkit">webkit</option>
-      </select>
-    </div>
-    <div class="field">
-      <label>Headless</label>
-      <select class="input" id="cfgHeadless">
-        <option value="false">No</option>
-        <option value="true">Yes</option>
-      </select>
-    </div>
-    <div class="field">
-      <label>AI Provider</label>
-      <select class="input" id="cfgProvider">
-        <option value="claude">claude</option>
-        <option value="openai">openai</option>
-        <option value="ollama">ollama</option>
-      </select>
-    </div>
-    <div class="field">
-      <label>Model</label>
-      <input class="input" id="cfgModel" value="">
-    </div>
-    <div class="field">
-      <label>API Key</label>
-      <input class="input" id="cfgApiKey" type="password" placeholder="***">
-    </div>
-    <div class="field">
-      <label>Target URL</label>
-      <input class="input" id="cfgUrl" value="">
-    </div>
-    <div class="field">
-      <label>Approval Mode</label>
-      <select class="input" id="cfgApproval">
-        <option value="manual">manual</option>
-        <option value="branch">branch</option>
-        <option value="auto">auto</option>
-      </select>
-    </div>
-    <div class="btn-group">
-      <button class="btn btn-primary btn-sm" onclick="saveConfig()">Save Config</button>
-    </div>
-  </div>
+    <!-- STEP 1: Setup -->
+    <div class="panel">
+      <div class="panel-title">
+        <span class="step-number">1</span> Setup
+      </div>
 
-  <!-- Panel: Execution (center) -->
-  <div class="panel p-execution">
-    <div class="panel-title">Execution</div>
+      <!-- Server Control -->
+      <div class="sub-section">
+        <div class="sub-section-title">Server Control</div>
+        <div class="server-status">
+          <span class="dot" id="serverDot"></span>
+          <span id="serverStatusText">Stopped</span>
+        </div>
+        <div class="field-row">
+          <label>Command</label>
+          <input class="input" id="serverCmd" placeholder="npm run dev --port 3000">
+        </div>
+        <div class="field-row">
+          <label>CWD</label>
+          <input class="input" id="serverCwd" placeholder="/path/to/project">
+        </div>
+        <div class="btn-group" style="margin-top:8px">
+          <button class="btn btn-primary btn-sm" id="btnServerStart" onclick="startServer()">Start</button>
+          <button class="btn btn-danger btn-sm" id="btnServerStop" onclick="stopServer()" disabled>Stop</button>
+        </div>
+        <div class="mini-log" id="serverMiniLog"></div>
+      </div>
 
-    <!-- Controls -->
-    <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
-      <button class="btn btn-primary" id="btnRun" onclick="startRun()">Run Test</button>
-      <button class="btn btn-primary" id="btnLoop" onclick="startLoop()">DevQA Loop</button>
-      <button class="btn btn-danger" id="btnStop" onclick="stopRun()" disabled>Stop</button>
+      <!-- Configuration -->
+      <div class="sub-section">
+        <div class="sub-section-title">Configuration</div>
+        <div class="field-row">
+          <label>Engine</label>
+          <select class="input" id="cfgEngine">
+            <option value="web">web</option>
+            <option value="desktop">desktop</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <label>Browser</label>
+          <select class="input" id="cfgBrowser">
+            <option value="chromium">chromium</option>
+            <option value="firefox">firefox</option>
+            <option value="webkit">webkit</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <label>Headless</label>
+          <select class="input" id="cfgHeadless">
+            <option value="false">No</option>
+            <option value="true">Yes</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <label>Provider</label>
+          <select class="input" id="cfgProvider">
+            <option value="claude">claude</option>
+            <option value="openai">openai</option>
+            <option value="ollama">ollama</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <label>Model</label>
+          <input class="input" id="cfgModel" value="">
+        </div>
+        <div class="field-row">
+          <label>API Key</label>
+          <input class="input" id="cfgApiKey" type="password" placeholder="***">
+        </div>
+        <div class="field-row">
+          <label>URL</label>
+          <input class="input" id="cfgUrl" value="">
+        </div>
+        <div class="field-row">
+          <label>Approval</label>
+          <select class="input" id="cfgApproval">
+            <option value="manual">manual</option>
+            <option value="branch">branch</option>
+            <option value="auto">auto</option>
+          </select>
+        </div>
+        <div class="btn-group" style="margin-top:8px">
+          <button class="btn btn-primary btn-sm" onclick="saveConfig()">Save Config</button>
+        </div>
+      </div>
     </div>
 
-    <!-- Progress -->
-    <div class="progress-container" id="progressContainer" style="display: none;">
-      <div class="progress-bar" id="progressBar" style="width: 0%"></div>
-      <div class="progress-text" id="progressText">0 / 0</div>
+    <!-- STEP 2: Prepare -->
+    <div class="panel">
+      <div class="panel-title">
+        <span class="step-number">2</span> Prepare
+      </div>
+
+      <!-- Scenarios -->
+      <div class="sub-section">
+        <div class="sub-section-title">Scenarios</div>
+        <div id="scenarioList">
+          <div style="color: var(--text-secondary); font-size: 13px;">Loading...</div>
+        </div>
+        <div class="btn-group" style="margin-top:8px">
+          <button class="btn btn-primary btn-sm" onclick="loadScenarios()">Refresh</button>
+        </div>
+      </div>
+
+      <!-- Documents -->
+      <div class="sub-section">
+        <div class="sub-section-title">Documents</div>
+        <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+          Drop files here or click to browse
+          <input type="file" id="fileInput" multiple accept=".md,.txt,.pdf,.html,.rst,.yaml,.yml,.json">
+        </div>
+        <ul class="doc-list" id="docList"></ul>
+        <div class="btn-group" style="margin-top:8px">
+          <button class="btn btn-primary btn-sm" onclick="uploadFiles()">Upload</button>
+          <button class="btn btn-outline btn-sm" onclick="analyzeAndGenerate()">Analyze &amp; Generate</button>
+        </div>
+      </div>
     </div>
 
-    <!-- Step Results -->
-    <ul class="step-list" id="stepList"></ul>
+  </div><!-- /top-row -->
 
-    <!-- Summary -->
-    <div id="summary" style="display: none; margin-top: 16px; padding: 12px; background: var(--bg-secondary); border-radius: var(--radius);"></div>
-  </div>
+  <!-- STEP 3: Execute (full width) -->
+  <div class="bottom-row">
+    <div class="panel" style="flex-shrink:0">
+      <div class="panel-title">
+        <span class="step-number">3</span> Execute
+      </div>
 
-  <!-- Panel: Live Screenshot -->
-  <div class="panel p-screenshot">
-    <div class="panel-title">Live Screenshot</div>
-    <div class="screenshot-container" id="screenshotBox">
-      <div class="screenshot-placeholder">No screenshot yet</div>
+      <!-- Controls -->
+      <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;">
+        <button class="btn btn-primary" id="btnRun" onclick="startRun()">Run Test</button>
+        <button class="btn btn-primary" id="btnLoop" onclick="startLoop()">DevQA Loop</button>
+        <button class="btn btn-danger" id="btnStop" onclick="stopRun()" disabled>Stop</button>
+        <div id="summary" style="display: none; margin-left: 16px; padding: 8px 16px; background: var(--bg-secondary); border-radius: var(--radius); font-size: 13px;"></div>
+      </div>
+
+      <!-- Progress -->
+      <div class="progress-container" id="progressContainer" style="display: none;">
+        <div class="progress-bar" id="progressBar" style="width: 0%"></div>
+        <div class="progress-text" id="progressText">0 / 0</div>
+      </div>
+
+      <!-- Step Results -->
+      <ul class="step-list" id="stepList"></ul>
     </div>
-  </div>
 
-  <!-- Panel: Event Log -->
-  <div class="panel p-log">
-    <div class="panel-title">Event Log</div>
-    <div class="log-area" id="logArea"></div>
-  </div>
+    <!-- Bottom split: Screenshot + Log -->
+    <div class="exec-bottom">
+      <div class="panel">
+        <div class="panel-title">Live Screenshot</div>
+        <div class="screenshot-container" id="screenshotBox">
+          <div class="screenshot-placeholder">No screenshot yet</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Event Log</div>
+        <div class="log-area" id="logArea"></div>
+      </div>
+    </div>
+  </div><!-- /bottom-row -->
 
-</div>
+</div><!-- /layout -->
 
 <!-- Approval Modal -->
 <div class="modal-overlay" id="approvalModal">
@@ -439,7 +608,7 @@
     <div class="modal-actions">
       <button class="btn btn-primary" onclick="resolvePrompt('approve')">Approve</button>
       <button class="btn btn-danger" onclick="resolvePrompt('deny')">Deny</button>
-      <button class="btn btn-primary" onclick="resolvePrompt('approve_all')" style="background: #0f3460; color: var(--accent); border: 1px solid var(--accent);">Approve All</button>
+      <button class="btn btn-outline" onclick="resolvePrompt('approve_all')">Approve All</button>
     </div>
   </div>
 </div>
@@ -448,7 +617,9 @@
 // -- State --
 let ws = null;
 let isRunning = false;
+let serverRunning = false;
 let selectedScenarios = new Set();
+let pendingFiles = [];
 
 // -- WebSocket --
 function connectWS() {
@@ -477,7 +648,6 @@ function connectWS() {
     handleEvent(data);
   };
 
-  // Ping keepalive
   setInterval(() => {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'ping' }));
@@ -516,6 +686,9 @@ function handleEvent(data) {
       break;
     case 'prompt':
       showApprovalModal(data.question, data.options, data.context);
+      break;
+    case 'server_log':
+      addServerLog(data.line);
       break;
     case 'run_start':
     case 'loop_start':
@@ -557,6 +730,99 @@ function addLog(level, message) {
   area.scrollTop = area.scrollHeight;
 }
 
+// -- Server Control --
+function addServerLog(line) {
+  // Mini log (last 4 lines)
+  const mini = document.getElementById('serverMiniLog');
+  const el = document.createElement('div');
+  el.textContent = line;
+  mini.appendChild(el);
+  while (mini.children.length > 4) {
+    mini.removeChild(mini.firstChild);
+  }
+  mini.scrollTop = mini.scrollHeight;
+
+  // Main event log with [server] prefix
+  addLog('server', `[server] ${line}`);
+}
+
+function setServerRunning(running) {
+  serverRunning = running;
+  const dot = document.getElementById('serverDot');
+  const text = document.getElementById('serverStatusText');
+  const btnStart = document.getElementById('btnServerStart');
+  const btnStop = document.getElementById('btnServerStop');
+
+  if (running) {
+    dot.classList.add('running');
+    text.textContent = 'Running';
+    btnStart.disabled = true;
+    btnStop.disabled = false;
+  } else {
+    dot.classList.remove('running');
+    text.textContent = 'Stopped';
+    btnStart.disabled = false;
+    btnStop.disabled = true;
+  }
+}
+
+async function startServer() {
+  const command = document.getElementById('serverCmd').value.trim();
+  const cwd = document.getElementById('serverCwd').value.trim();
+
+  if (!command) {
+    addLog('warning', 'Enter a server command first');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/server/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command, cwd }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      addLog('error', data.error);
+    } else {
+      setServerRunning(true);
+      addLog('success', 'Server started (PID: ' + (data.pid || '?') + ')');
+      // Auto-fill URL if suggested
+      if (data.suggested_url) {
+        const urlInput = document.getElementById('cfgUrl');
+        if (!urlInput.value) {
+          urlInput.value = data.suggested_url;
+          addLog('info', 'Auto-filled URL: ' + data.suggested_url);
+        }
+      }
+    }
+  } catch (e) {
+    addLog('error', `Failed to start server: ${e.message}`);
+  }
+}
+
+async function stopServer() {
+  try {
+    const res = await fetch('/api/server/stop', { method: 'POST' });
+    const data = await res.json();
+    setServerRunning(false);
+    document.getElementById('serverMiniLog').innerHTML = '';
+    addLog('info', 'Server stopped');
+  } catch (e) {
+    addLog('error', `Failed to stop server: ${e.message}`);
+  }
+}
+
+async function checkServerStatus() {
+  try {
+    const res = await fetch('/api/server/status');
+    const data = await res.json();
+    setServerRunning(data.running);
+  } catch (e) {
+    // ignore
+  }
+}
+
 // -- Steps --
 function clearSteps() {
   document.getElementById('stepList').innerHTML = '';
@@ -568,7 +834,6 @@ function clearSteps() {
 
 function addStepRunning(step, total, description) {
   const list = document.getElementById('stepList');
-  // Remove existing running item for this step
   const existing = document.getElementById(`step-${step}`);
   if (existing) existing.remove();
 
@@ -639,13 +904,12 @@ function showSummary(data) {
   const div = document.getElementById('summary');
   const status = data.success ? 'SUCCESS' : 'FAILURE';
   const color = data.success ? 'var(--success)' : 'var(--danger)';
-  div.innerHTML = `
-    <div style="font-size: 15px; font-weight: 700; color: ${color}; margin-bottom: 8px;">${status}</div>
-    ${data.iterations ? `<div style="font-size: 13px;">Iterations: ${data.iterations}</div>` : ''}
-    ${data.duration_ms ? `<div style="font-size: 13px;">Duration: ${Math.round(data.duration_ms)}ms</div>` : ''}
-    ${data.reason ? `<div style="font-size: 13px; color: var(--text-secondary);">Reason: ${data.reason}</div>` : ''}
-  `;
-  div.style.display = 'block';
+  let html = `<span style="font-weight:700; color:${color};">${status}</span>`;
+  if (data.iterations) html += ` | ${data.iterations} iter`;
+  if (data.duration_ms) html += ` | ${Math.round(data.duration_ms)}ms`;
+  if (data.reason) html += ` | ${escHtml(data.reason)}`;
+  div.innerHTML = html;
+  div.style.display = 'inline-block';
 }
 
 // -- Approval Modal --
@@ -668,6 +932,103 @@ function setRunning(running) {
   document.getElementById('btnRun').disabled = running;
   document.getElementById('btnLoop').disabled = running;
   document.getElementById('btnStop').disabled = !running;
+}
+
+// -- Document Upload --
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function setupDropZone() {
+  const zone = document.getElementById('dropZone');
+  const input = document.getElementById('fileInput');
+
+  zone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    zone.classList.add('dragover');
+  });
+  zone.addEventListener('dragleave', () => {
+    zone.classList.remove('dragover');
+  });
+  zone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+    if (e.dataTransfer.files.length > 0) {
+      pendingFiles = Array.from(e.dataTransfer.files);
+      showPendingFiles();
+    }
+  });
+  input.addEventListener('change', () => {
+    if (input.files.length > 0) {
+      pendingFiles = Array.from(input.files);
+      showPendingFiles();
+    }
+  });
+}
+
+function showPendingFiles() {
+  const zone = document.getElementById('dropZone');
+  if (pendingFiles.length === 0) {
+    zone.textContent = 'Drop files here or click to browse';
+    return;
+  }
+  const names = pendingFiles.map(f => f.name).join(', ');
+  zone.textContent = `${pendingFiles.length} file(s) selected: ${names}`;
+}
+
+async function uploadFiles() {
+  if (pendingFiles.length === 0) {
+    addLog('warning', 'No files selected');
+    return;
+  }
+
+  const formData = new FormData();
+  for (const f of pendingFiles) {
+    formData.append('files', f);
+  }
+
+  try {
+    const res = await fetch('/api/documents/upload', {
+      method: 'POST',
+      body: formData,
+    });
+    const data = await res.json();
+    if (data.error) {
+      addLog('error', data.error);
+    } else {
+      addLog('success', `Uploaded ${data.count} file(s)`);
+      pendingFiles = [];
+      showPendingFiles();
+      loadDocuments();
+    }
+  } catch (e) {
+    addLog('error', `Upload failed: ${e.message}`);
+  }
+}
+
+async function loadDocuments() {
+  try {
+    const res = await fetch('/api/documents');
+    const data = await res.json();
+    const list = document.getElementById('docList');
+    list.innerHTML = '';
+    if (data.documents && data.documents.length > 0) {
+      for (const doc of data.documents) {
+        const li = document.createElement('li');
+        li.className = 'doc-item';
+        li.innerHTML = `<span class="name">${escHtml(doc.name)}</span><span>${formatSize(doc.size)}</span>`;
+        list.appendChild(li);
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
+async function analyzeAndGenerate() {
+  addLog('info', 'Analyze & Generate — use CLI: aat analyze / aat generate');
 }
 
 // -- API Calls --
@@ -706,7 +1067,6 @@ async function saveConfig() {
     url: document.getElementById('cfgUrl').value,
     approval_mode: document.getElementById('cfgApproval').value,
   };
-  // Only include API key if user typed something
   const apiKey = document.getElementById('cfgApiKey').value;
   if (apiKey) body.ai.api_key = apiKey;
 
@@ -822,6 +1182,9 @@ document.addEventListener('DOMContentLoaded', () => {
   connectWS();
   loadConfig();
   loadScenarios();
+  loadDocuments();
+  checkServerStatus();
+  setupDropZone();
 });
 </script>
 </body>

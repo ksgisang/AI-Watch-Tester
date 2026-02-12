@@ -75,12 +75,14 @@ class WebSocketEventHandler(EventEmitter):
         self._send_sync({"type": "error", "message": message})
 
     def step_start(self, step_num: int, total: int, description: str) -> None:
-        self._send_sync({
-            "type": "step_start",
-            "step": step_num,
-            "total": total,
-            "description": description,
-        })
+        self._send_sync(
+            {
+                "type": "step_start",
+                "step": step_num,
+                "total": total,
+                "description": description,
+            }
+        )
 
     def step_result(
         self,
@@ -89,21 +91,25 @@ class WebSocketEventHandler(EventEmitter):
         description: str,
         error: str | None = None,
     ) -> None:
-        self._send_sync({
-            "type": "step_result",
-            "step": step_num,
-            "passed": passed,
-            "description": description,
-            "error": error,
-        })
+        self._send_sync(
+            {
+                "type": "step_result",
+                "step": step_num,
+                "passed": passed,
+                "description": description,
+                "error": error,
+            }
+        )
 
     def progress(self, label: str, current: int, total: int) -> None:
-        self._send_sync({
-            "type": "progress",
-            "label": label,
-            "current": current,
-            "total": total,
-        })
+        self._send_sync(
+            {
+                "type": "progress",
+                "label": label,
+                "current": current,
+                "total": total,
+            }
+        )
 
     def section(self, title: str) -> None:
         self._send_sync({"type": "section", "message": title})
@@ -113,11 +119,13 @@ class WebSocketEventHandler(EventEmitter):
 
         Use prompt_async() from the dashboard app for real async prompts.
         """
-        self._send_sync({
-            "type": "prompt",
-            "question": question,
-            "options": options or [],
-        })
+        self._send_sync(
+            {
+                "type": "prompt",
+                "question": question,
+                "options": options or [],
+            }
+        )
         return ""
 
     async def prompt_async(
@@ -133,12 +141,14 @@ class WebSocketEventHandler(EventEmitter):
         self._prompt_event = asyncio.Event()
         self._prompt_response = ""
 
-        await self._manager.broadcast({
-            "type": "prompt",
-            "question": question,
-            "options": options or [],
-            "context": context or {},
-        })
+        await self._manager.broadcast(
+            {
+                "type": "prompt",
+                "question": question,
+                "options": options or [],
+                "context": context or {},
+            }
+        )
 
         await self._prompt_event.wait()
         return self._prompt_response
@@ -161,10 +171,12 @@ class WebSocketEventHandler(EventEmitter):
         img.save(buf, format="JPEG", quality=self._jpeg_quality)
         b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
-        await self._manager.broadcast({
-            "type": "screenshot",
-            "data": b64,
-        })
+        await self._manager.broadcast(
+            {
+                "type": "screenshot",
+                "data": b64,
+            }
+        )
 
     def _send_sync(self, data: dict[str, Any]) -> None:
         """Fire-and-forget broadcast from synchronous methods."""

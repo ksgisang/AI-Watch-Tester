@@ -7,6 +7,11 @@ import contextlib
 import sys
 from collections import deque
 from enum import StrEnum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
 
 class ProcessStatus(StrEnum):
@@ -19,18 +24,23 @@ class ProcessStatus(StrEnum):
 
 
 class SubprocessManager:
-    """Manages a single AAT CLI subprocess.
+    """Manages a single subprocess.
 
     Captures stdout/stderr into a bounded deque for log streaming.
     Only one process can run at a time.
     """
 
-    def __init__(self, max_log_lines: int = 2000) -> None:
+    def __init__(
+        self,
+        max_log_lines: int = 2000,
+        on_line: Callable[[str], None] | None = None,
+    ) -> None:
         self._process: asyncio.subprocess.Process | None = None
         self._status = ProcessStatus.IDLE
         self._return_code: int | None = None
         self._log: deque[str] = deque(maxlen=max_log_lines)
         self._read_task: asyncio.Task[None] | None = None
+        self._on_line = on_line
 
     @property
     def status(self) -> ProcessStatus:
@@ -39,6 +49,13 @@ class SubprocessManager:
     @property
     def return_code(self) -> int | None:
         return self._return_code
+
+    @property
+    def pid(self) -> int | None:
+        """Return the PID of the running process, or None."""
+        if self._process and self._process.returncode is None:
+            return self._process.pid
+        return None
 
     @property
     def log_lines(self) -> list[str]:
@@ -54,6 +71,28 @@ class SubprocessManager:
         Args:
             args: CLI arguments, e.g. ["run", "scenarios/"].
         """
+        cmd = [sys.executable, "-m", "aat.cli.main", *args]
+        await self._start_process(cmd, cwd=None)
+
+    async def start_raw(
+        self,
+        cmd: list[str],
+        cwd: str | Path | None = None,
+    ) -> None:
+        """Start an arbitrary subprocess.
+
+        Args:
+            cmd: Command and arguments, e.g. ["npm", "run", "dev"].
+            cwd: Working directory for the subprocess.
+        """
+        await self._start_process(cmd, cwd=cwd)
+
+    async def _start_process(
+        self,
+        cmd: list[str],
+        cwd: str | Path | None = None,
+    ) -> None:
+        """Internal: start a subprocess with the given command and cwd."""
         if self.is_running:
             msg = "A process is already running"
             raise RuntimeError(msg)
@@ -62,11 +101,12 @@ class SubprocessManager:
         self._return_code = None
         self._status = ProcessStatus.RUNNING
 
-        cmd = [sys.executable, "-m", "aat.cli.main", *args]
+        cwd_str = str(cwd) if cwd else None
         self._process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            cwd=cwd_str,
         )
         self._read_task = asyncio.create_task(self._read_output())
 
@@ -104,12 +144,12 @@ class SubprocessManager:
                     break
                 decoded = line.decode("utf-8", errors="replace").rstrip("\n")
                 self._log.append(decoded)
+                if self._on_line is not None:
+                    self._on_line(decoded)
         finally:
             if self._process.returncode is None:
                 await self._process.wait()
             self._return_code = self._process.returncode
             self._status = (
-                ProcessStatus.FINISHED
-                if self._return_code == 0
-                else ProcessStatus.ERROR
+                ProcessStatus.FINISHED if self._return_code == 0 else ProcessStatus.ERROR
             )
