@@ -222,9 +222,9 @@ class StepExecutor:
         if target.text and hasattr(self._engine, "find_text_position"):
             pos = await self._engine.find_text_position(target.text)
             if pos is not None:
-                from aat.core.models import MatchMethod, MatchResult as MR
+                from aat.core.models import MatchMethod, MatchResult
 
-                result = MR(
+                result = MatchResult(
                     found=True, x=pos[0], y=pos[1],
                     confidence=1.0, method=MatchMethod.OCR,
                 )
@@ -250,14 +250,14 @@ class StepExecutor:
 
         # Fallback: screenshot + matcher pipeline (OCR/template/feature)
         screenshot = await self._engine.screenshot()
-        result = await self._matcher.find(target, screenshot)
-        if result is None or not result.found:
+        match_result = await self._matcher.find(target, screenshot)
+        if match_result is None or not match_result.found:
             target_desc = target.image or target.text or "unknown"
             msg = f"Target '{target_desc}' not found"
             raise MatchError(msg)
 
         # Perform action at matched location
-        x, y = result.x, result.y
+        x, y = match_result.x, match_result.y
         if step.action in (
             ActionType.FIND_AND_CLICK,
             ActionType.FIND_AND_DOUBLE_CLICK,
@@ -278,7 +278,7 @@ class StepExecutor:
             await self._engine.key_combo("Control", "a")
             await self._engine.press_key("Delete")
 
-        return result
+        return match_result
 
     async def _do_click(
         self,
