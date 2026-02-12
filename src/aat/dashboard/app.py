@@ -139,6 +139,9 @@ def create_app(config_path: Path | None = None) -> FastAPI:
     app.add_api_route("/api/documents/upload", _upload_documents, methods=["POST"])
     app.add_api_route("/api/documents", _list_documents, methods=["GET"])
 
+    # Folder browser
+    app.add_api_route("/api/browse", _browse_directory, methods=["GET"])
+
     app.add_api_websocket_route("/ws", _websocket_endpoint)
 
     return app
@@ -686,6 +689,51 @@ async def _list_documents() -> JSONResponse:
             )
 
     return JSONResponse(content={"documents": documents})
+
+
+# ---------------------------------------------------------------------------
+# REST: Folder browser
+# ---------------------------------------------------------------------------
+
+
+async def _browse_directory(request: Request) -> JSONResponse:
+    """Browse directories for the folder picker modal.
+
+    Query params:
+        path: Directory path to list (default: user home).
+
+    Returns:
+        {dirs: ["subdir1", ...], parent: "/parent/path", current: "/current/path"}
+    """
+    raw_path = request.query_params.get("path", "")
+    target = Path(raw_path).expanduser() if raw_path else Path.home()
+
+    if not target.is_absolute():
+        target = Path.home() / target
+    target = target.resolve()
+
+    if not target.exists() or not target.is_dir():
+        return JSONResponse(
+            content={"dirs": [], "parent": str(target.parent), "current": str(target)},
+        )
+
+    dirs: list[str] = []
+    try:
+        for entry in sorted(target.iterdir()):
+            if entry.name.startswith("."):
+                continue  # skip hidden dirs
+            if entry.is_dir():
+                dirs.append(entry.name)
+    except PermissionError:
+        pass
+
+    return JSONResponse(
+        content={
+            "dirs": dirs,
+            "parent": str(target.parent),
+            "current": str(target),
+        }
+    )
 
 
 # ---------------------------------------------------------------------------

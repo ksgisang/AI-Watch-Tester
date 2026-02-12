@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AAT Dashboard</title>
+<title>AAT 대시보드</title>
 <style>
   :root {
     --bg-primary: #1a1a2e;
@@ -17,7 +17,7 @@
     --warning: #f39c12;
     --success: #00d4aa;
     --border: #2a2a4a;
-    --radius: 8px;
+    --radius: 6px;
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -26,25 +26,28 @@
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
     background: var(--bg-primary);
     color: var(--text-primary);
-    min-height: 100vh;
+    font-size: 13px;
+    height: 100vh;
+    overflow: hidden;
   }
 
   /* Header */
   .header {
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border);
-    padding: 12px 24px;
+    padding: 6px 16px;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    height: 36px;
   }
-  .header h1 { font-size: 18px; font-weight: 600; }
+  .header h1 { font-size: 15px; font-weight: 600; }
   .header h1 span { color: var(--accent); }
   .header-status {
     display: flex;
     align-items: center;
-    gap: 12px;
-    font-size: 13px;
+    gap: 8px;
+    font-size: 12px;
   }
   .status-dot {
     width: 8px; height: 8px; border-radius: 50%;
@@ -53,11 +56,11 @@
   }
   .status-dot.connected { background: var(--success); }
 
-  /* Layout: 3-step Z-pattern */
+  /* Layout: 3-step Z-pattern filling viewport */
   .layout {
     display: flex;
     flex-direction: column;
-    min-height: calc(100vh - 49px);
+    height: calc(100vh - 36px);
     gap: 1px;
     background: var(--border);
   }
@@ -66,6 +69,7 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 1px;
+    flex-shrink: 0;
   }
 
   .bottom-row {
@@ -73,26 +77,27 @@
     display: flex;
     flex-direction: column;
     background: var(--bg-primary);
+    min-height: 0;
   }
 
   .panel {
     background: var(--bg-primary);
     overflow-y: auto;
-    padding: 16px;
+    padding: 8px 12px;
   }
 
   .panel-title {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 1px;
     color: var(--text-secondary);
-    margin-bottom: 12px;
-    padding-bottom: 8px;
+    margin-bottom: 6px;
+    padding-bottom: 4px;
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
   }
 
   .step-number {
@@ -100,32 +105,27 @@
     color: var(--bg-primary);
     font-size: 10px;
     font-weight: 800;
-    padding: 2px 8px;
+    padding: 1px 7px;
     border-radius: 10px;
     letter-spacing: 0;
   }
 
   /* Buttons */
   .btn {
-    padding: 8px 16px;
+    padding: 4px 10px;
     border: none;
     border-radius: var(--radius);
     cursor: pointer;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 500;
     transition: background 0.2s;
+    white-space: nowrap;
   }
-  .btn-primary {
-    background: var(--accent);
-    color: var(--bg-primary);
-  }
+  .btn-primary { background: var(--accent); color: var(--bg-primary); }
   .btn-primary:hover { background: var(--accent-hover); }
-  .btn-danger {
-    background: var(--danger);
-    color: white;
-  }
+  .btn-danger { background: var(--danger); color: white; }
   .btn-danger:hover { opacity: 0.9; }
-  .btn-sm { padding: 5px 10px; font-size: 12px; }
+  .btn-sm { padding: 3px 8px; font-size: 11px; }
   .btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .btn-outline {
     background: transparent;
@@ -133,8 +133,17 @@
     border: 1px solid var(--accent);
   }
   .btn-outline:hover { background: rgba(0,212,170,0.1); }
-
-  .btn-group { display: flex; gap: 8px; margin-top: 12px; }
+  .btn-group { display: flex; gap: 6px; margin-top: 6px; }
+  .btn-icon {
+    background: var(--bg-card);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    padding: 3px 8px;
+    cursor: pointer;
+    border-radius: var(--radius);
+    font-size: 12px;
+  }
+  .btn-icon:hover { border-color: var(--accent); }
 
   /* Inputs */
   .input {
@@ -142,22 +151,22 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     color: var(--text-primary);
-    padding: 6px 10px;
-    font-size: 13px;
+    padding: 4px 8px;
+    font-size: 12px;
     width: 100%;
   }
   .input:focus { outline: none; border-color: var(--accent); }
   select.input { appearance: auto; }
 
-  /* Field row: label + input side by side */
+  /* Field row compact */
   .field-row {
     display: flex;
     align-items: center;
-    margin-bottom: 8px;
-    gap: 8px;
+    margin-bottom: 4px;
+    gap: 6px;
   }
   .field-row label {
-    min-width: 70px;
+    min-width: 60px;
     text-align: right;
     font-size: 11px;
     color: var(--text-secondary);
@@ -165,79 +174,93 @@
   }
   .field-row .input { flex: 1; }
 
+  /* Two-column field grid */
+  .field-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 12px;
+  }
+
   /* Sub-section */
   .sub-section {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 12px;
-    margin-bottom: 12px;
+    padding: 8px;
+    margin-bottom: 6px;
   }
   .sub-section-title {
     font-size: 11px;
     font-weight: 700;
     color: var(--accent);
-    margin-bottom: 8px;
+    margin-bottom: 6px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }
 
-  /* Server status indicator */
-  .server-status {
+  /* Server status inline */
+  .server-inline {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
-    margin-bottom: 8px;
+    font-size: 11px;
   }
-  .server-status .dot {
-    width: 8px; height: 8px;
+  .server-inline .dot {
+    width: 7px; height: 7px;
     border-radius: 50%;
     background: var(--text-secondary);
+    flex-shrink: 0;
   }
-  .server-status .dot.running { background: var(--success); }
+  .server-inline .dot.running { background: var(--success); }
 
   /* Mini log */
   .mini-log {
     background: var(--bg-primary);
     border-radius: 4px;
-    padding: 6px 8px;
+    padding: 4px 6px;
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
     font-size: 10px;
-    line-height: 1.5;
-    max-height: 64px;
+    line-height: 1.4;
+    max-height: 42px;
     overflow-y: auto;
     color: var(--text-secondary);
-    margin-top: 8px;
+    margin-top: 4px;
   }
 
-  /* Scenario list */
+  /* Scenario list compact */
+  .scenario-list {
+    max-height: 120px;
+    overflow-y: auto;
+  }
   .scenario-item {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 10px;
-    margin-bottom: 8px;
+    border-radius: 4px;
+    padding: 4px 8px;
+    margin-bottom: 3px;
     cursor: pointer;
     transition: border-color 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
   .scenario-item:hover { border-color: var(--accent); }
   .scenario-item.selected { border-color: var(--accent); background: var(--bg-card); }
-  .scenario-id { font-size: 11px; color: var(--accent); font-weight: 600; }
-  .scenario-name { font-size: 13px; margin-top: 2px; }
-  .scenario-meta { font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
+  .scenario-id { font-size: 10px; color: var(--accent); font-weight: 600; white-space: nowrap; }
+  .scenario-name { font-size: 12px; flex: 1; }
+  .scenario-meta { font-size: 10px; color: var(--text-secondary); white-space: nowrap; }
 
-  /* Drop zone */
+  /* Drop zone compact */
   .drop-zone {
-    border: 2px dashed var(--border);
+    border: 1px dashed var(--border);
     border-radius: var(--radius);
-    padding: 16px;
+    padding: 8px;
     text-align: center;
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: 11px;
     cursor: pointer;
-    transition: border-color 0.2s, background 0.2s;
-    margin-bottom: 8px;
+    transition: border-color 0.2s;
+    margin-bottom: 4px;
   }
   .drop-zone:hover, .drop-zone.dragover {
     border-color: var(--accent);
@@ -245,16 +268,12 @@
   }
   .drop-zone input[type="file"] { display: none; }
 
-  .doc-list {
-    list-style: none;
-    max-height: 100px;
-    overflow-y: auto;
-  }
+  .doc-list { list-style: none; max-height: 50px; overflow-y: auto; }
   .doc-item {
     display: flex;
     justify-content: space-between;
-    font-size: 11px;
-    padding: 3px 0;
+    font-size: 10px;
+    padding: 2px 0;
     color: var(--text-secondary);
   }
   .doc-item .name { color: var(--text-primary); }
@@ -263,9 +282,9 @@
   .progress-container {
     background: var(--bg-secondary);
     border-radius: var(--radius);
-    height: 24px;
+    height: 20px;
     overflow: hidden;
-    margin-bottom: 16px;
+    margin-bottom: 8px;
     position: relative;
   }
   .progress-bar {
@@ -279,31 +298,35 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
     color: var(--text-primary);
   }
 
   /* Step results */
-  .step-list { list-style: none; }
+  .step-list {
+    list-style: none;
+    max-height: 80px;
+    overflow-y: auto;
+  }
   .step-item {
     background: var(--bg-secondary);
-    border-radius: var(--radius);
-    padding: 10px 12px;
-    margin-bottom: 6px;
+    border-radius: 4px;
+    padding: 4px 8px;
+    margin-bottom: 3px;
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-size: 13px;
+    gap: 8px;
+    font-size: 12px;
     border-left: 3px solid var(--border);
   }
   .step-item.passed { border-left-color: var(--success); }
   .step-item.failed { border-left-color: var(--danger); }
   .step-item.running { border-left-color: var(--warning); }
   .step-badge {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 700;
-    min-width: 20px;
+    min-width: 16px;
     text-align: center;
   }
   .step-badge.passed { color: var(--success); }
@@ -311,51 +334,46 @@
   .step-badge.running { color: var(--warning); }
   .step-desc { flex: 1; }
   .step-error {
-    font-size: 11px;
+    font-size: 10px;
     color: var(--danger);
-    margin-top: 4px;
-    padding-left: 30px;
+    margin-top: 2px;
+    padding-left: 24px;
   }
 
-  /* Execution bottom area: screenshot + log */
+  /* Execution bottom: screenshot + log */
   .exec-bottom {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 1px;
     background: var(--border);
     flex: 1;
-    min-height: 250px;
+    min-height: 0;
   }
 
-  /* Screenshot viewer */
   .screenshot-container {
     background: var(--bg-secondary);
-    border-radius: var(--radius);
     overflow: hidden;
     text-align: center;
-    min-height: 200px;
     display: flex;
     align-items: center;
     justify-content: center;
   }
   .screenshot-container img {
     max-width: 100%;
-    height: auto;
-    border-radius: var(--radius);
+    max-height: 100%;
+    object-fit: contain;
   }
   .screenshot-placeholder {
     color: var(--text-secondary);
-    font-size: 13px;
+    font-size: 12px;
   }
 
-  /* Log panel */
   .log-area {
     background: var(--bg-secondary);
-    border-radius: var(--radius);
-    padding: 10px;
+    padding: 6px 8px;
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    font-size: 11px;
-    line-height: 1.6;
+    font-size: 10px;
+    line-height: 1.5;
     overflow-y: auto;
     white-space: pre-wrap;
     word-break: break-all;
@@ -381,42 +399,119 @@
   .modal {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 24px;
-    max-width: 600px;
+    border-radius: 10px;
+    padding: 16px;
+    max-width: 500px;
     width: 90%;
-    max-height: 80vh;
+    max-height: 70vh;
     overflow-y: auto;
   }
   .modal h3 {
-    font-size: 16px;
-    margin-bottom: 16px;
+    font-size: 14px;
+    margin-bottom: 12px;
     color: var(--accent);
   }
   .modal-context {
     background: var(--bg-primary);
     border-radius: var(--radius);
-    padding: 12px;
-    margin-bottom: 16px;
-    font-size: 13px;
+    padding: 10px;
+    margin-bottom: 12px;
+    font-size: 12px;
     line-height: 1.5;
-    max-height: 300px;
+    max-height: 200px;
     overflow-y: auto;
   }
   .modal-actions {
     display: flex;
-    gap: 10px;
+    gap: 8px;
     justify-content: flex-end;
   }
 
+  /* Folder browser modal */
+  .folder-modal {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    max-width: 420px;
+    width: 90%;
+    max-height: 60vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .folder-modal h3 {
+    font-size: 14px;
+    margin-bottom: 8px;
+    color: var(--accent);
+  }
+  .folder-path {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    word-break: break-all;
+    padding: 4px 8px;
+    background: var(--bg-primary);
+    border-radius: 4px;
+  }
+  .folder-list {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 120px;
+    max-height: 300px;
+  }
+  .folder-item {
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 12px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .folder-item:hover { background: var(--bg-card); }
+  .folder-item.parent { color: var(--accent); font-weight: 600; }
+  .folder-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 12px;
+  }
+
+  /* Recent paths dropdown */
+  .recent-dropdown {
+    position: relative;
+    display: inline-block;
+  }
+  .recent-list {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    z-index: 100;
+    max-height: 120px;
+    overflow-y: auto;
+    display: none;
+  }
+  .recent-list.show { display: block; }
+  .recent-item {
+    padding: 4px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .recent-item:hover { background: var(--bg-card); color: var(--text-primary); }
+
   /* Responsive */
   @media (max-width: 1100px) {
-    .top-row {
-      grid-template-columns: 1fr;
-    }
-    .exec-bottom {
-      grid-template-columns: 1fr;
-    }
+    .top-row { grid-template-columns: 1fr; }
+    .exec-bottom { grid-template-columns: 1fr; }
+    body { overflow: auto; }
   }
 </style>
 </head>
@@ -424,9 +519,9 @@
 
 <!-- Header -->
 <div class="header">
-  <h1><span>AAT</span> Dashboard</h1>
+  <h1><span>AAT</span> 대시보드</h1>
   <div class="header-status">
-    <span id="wsStatus">Disconnected</span>
+    <span id="wsStatus">연결 끊김</span>
     <span class="status-dot" id="wsDot"></span>
   </div>
 </div>
@@ -434,155 +529,186 @@
 <!-- 3-Step Z-Pattern Layout -->
 <div class="layout">
 
-  <!-- TOP ROW: Step 1 (Setup) + Step 2 (Prepare) -->
+  <!-- TOP ROW: Step 1 (설정) + Step 2 (준비) -->
   <div class="top-row">
 
-    <!-- STEP 1: Setup -->
+    <!-- STEP 1: 설정 -->
     <div class="panel">
       <div class="panel-title">
-        <span class="step-number">1</span> Setup
+        <span class="step-number">1</span> 설정
       </div>
 
-      <!-- Server Control -->
+      <!-- 서버 관리 -->
       <div class="sub-section">
-        <div class="sub-section-title">Server Control</div>
-        <div class="server-status">
-          <span class="dot" id="serverDot"></span>
-          <span id="serverStatusText">Stopped</span>
-        </div>
+        <div class="sub-section-title">서버 관리</div>
+        <!-- Row 1: 서버 유형 + 포트 + 시작/중지 + 상태 -->
         <div class="field-row">
-          <label>Command</label>
-          <input class="input" id="serverCmd" placeholder="npm run dev --port 3000">
+          <label>서버 유형</label>
+          <select class="input" id="serverType" onchange="onServerTypeChange()" style="flex:1.5">
+            <option value="python">Python (http.server)</option>
+            <option value="nodejs">Node.js (npx serve)</option>
+            <option value="react">React (npm start)</option>
+            <option value="nextjs">Next.js (npm run dev)</option>
+            <option value="vue">Vue (npm run serve)</option>
+            <option value="flask">Flask</option>
+            <option value="django">Django</option>
+            <option value="custom">직접 입력</option>
+          </select>
+          <label style="min-width:30px">포트</label>
+          <input class="input" id="serverPort" value="8000" style="width:60px;flex:0" onchange="onPortChange()">
+          <button class="btn btn-primary btn-sm" id="btnServerStart" onclick="startServer()">시작</button>
+          <button class="btn btn-danger btn-sm" id="btnServerStop" onclick="stopServer()" disabled>중지</button>
+          <div class="server-inline">
+            <span class="dot" id="serverDot"></span>
+            <span id="serverStatusText">중지됨</span>
+          </div>
         </div>
+        <!-- Custom command (hidden by default) -->
+        <div class="field-row" id="customCmdRow" style="display:none">
+          <label>명령어</label>
+          <input class="input" id="serverCmd" placeholder="custom command --port 3000">
+        </div>
+        <!-- Row 2: CWD path + browse + recent -->
         <div class="field-row">
-          <label>CWD</label>
-          <input class="input" id="serverCwd" placeholder="/path/to/project">
-        </div>
-        <div class="btn-group" style="margin-top:8px">
-          <button class="btn btn-primary btn-sm" id="btnServerStart" onclick="startServer()">Start</button>
-          <button class="btn btn-danger btn-sm" id="btnServerStop" onclick="stopServer()" disabled>Stop</button>
+          <label>경로</label>
+          <div style="flex:1;position:relative">
+            <div style="display:flex;gap:4px">
+              <input class="input" id="serverCwd" placeholder="/path/to/project" style="flex:1">
+              <button class="btn-icon" onclick="openFolderBrowser()" title="폴더 탐색">📁</button>
+              <button class="btn-icon" onclick="toggleRecentPaths()" title="최근 사용">▾</button>
+            </div>
+            <div class="recent-list" id="recentPathsList"></div>
+          </div>
         </div>
         <div class="mini-log" id="serverMiniLog"></div>
       </div>
 
-      <!-- Configuration -->
+      <!-- 테스트 설정 -->
       <div class="sub-section">
-        <div class="sub-section-title">Configuration</div>
-        <div class="field-row">
-          <label>Engine</label>
-          <select class="input" id="cfgEngine">
-            <option value="web">web</option>
-            <option value="desktop">desktop</option>
-          </select>
+        <div class="sub-section-title">테스트 설정</div>
+        <div class="field-grid">
+          <div class="field-row">
+            <label>엔진</label>
+            <select class="input" id="cfgEngine">
+              <option value="web">web</option>
+              <option value="desktop">desktop</option>
+            </select>
+          </div>
+          <div class="field-row">
+            <label>브라우저</label>
+            <select class="input" id="cfgBrowser">
+              <option value="chromium">chromium</option>
+              <option value="firefox">firefox</option>
+              <option value="webkit">webkit</option>
+            </select>
+          </div>
+          <div class="field-row">
+            <label>헤드리스</label>
+            <select class="input" id="cfgHeadless">
+              <option value="false">No</option>
+              <option value="true">Yes</option>
+            </select>
+          </div>
+          <div class="field-row">
+            <label>승인 방식</label>
+            <select class="input" id="cfgApproval">
+              <option value="manual">manual</option>
+              <option value="branch">branch</option>
+              <option value="auto">auto</option>
+            </select>
+          </div>
+          <div class="field-row">
+            <label>AI 제공자</label>
+            <select class="input" id="cfgProvider" onchange="onProviderChange()">
+              <option value="claude">claude</option>
+              <option value="openai">openai</option>
+              <option value="ollama">ollama</option>
+            </select>
+          </div>
+          <div class="field-row">
+            <label>모델</label>
+            <select class="input" id="cfgModel" onchange="onModelSelect()">
+            </select>
+          </div>
         </div>
-        <div class="field-row">
-          <label>Browser</label>
-          <select class="input" id="cfgBrowser">
-            <option value="chromium">chromium</option>
-            <option value="firefox">firefox</option>
-            <option value="webkit">webkit</option>
-          </select>
+        <!-- Custom model input (hidden) -->
+        <div class="field-row" id="customModelRow" style="display:none">
+          <label>모델명</label>
+          <input class="input" id="cfgModelCustom" placeholder="모델명 직접 입력">
         </div>
-        <div class="field-row">
-          <label>Headless</label>
-          <select class="input" id="cfgHeadless">
-            <option value="false">No</option>
-            <option value="true">Yes</option>
-          </select>
-        </div>
-        <div class="field-row">
-          <label>Provider</label>
-          <select class="input" id="cfgProvider">
-            <option value="claude">claude</option>
-            <option value="openai">openai</option>
-            <option value="ollama">ollama</option>
-          </select>
-        </div>
-        <div class="field-row">
-          <label>Model</label>
-          <input class="input" id="cfgModel" value="">
-        </div>
-        <div class="field-row">
-          <label>API Key</label>
+        <!-- API Key (hidden for ollama) -->
+        <div class="field-row" id="apiKeyRow">
+          <label>API 키</label>
           <input class="input" id="cfgApiKey" type="password" placeholder="***">
         </div>
         <div class="field-row">
-          <label>URL</label>
+          <label>대상 URL</label>
           <input class="input" id="cfgUrl" value="">
         </div>
-        <div class="field-row">
-          <label>Approval</label>
-          <select class="input" id="cfgApproval">
-            <option value="manual">manual</option>
-            <option value="branch">branch</option>
-            <option value="auto">auto</option>
-          </select>
-        </div>
-        <div class="btn-group" style="margin-top:8px">
-          <button class="btn btn-primary btn-sm" onclick="saveConfig()">Save Config</button>
+        <div style="text-align:right;margin-top:4px">
+          <button class="btn btn-primary btn-sm" onclick="saveConfig()">설정 저장</button>
         </div>
       </div>
     </div>
 
-    <!-- STEP 2: Prepare -->
+    <!-- STEP 2: 준비 -->
     <div class="panel">
       <div class="panel-title">
-        <span class="step-number">2</span> Prepare
+        <span class="step-number">2</span> 준비
       </div>
 
-      <!-- Scenarios -->
+      <!-- 시나리오 -->
       <div class="sub-section">
-        <div class="sub-section-title">Scenarios <span id="scenarioCount" style="font-weight:400; color: var(--text-secondary); text-transform: none; letter-spacing: 0;"></span></div>
+        <div class="sub-section-title">시나리오 <span id="scenarioCount" style="font-weight:400; color: var(--text-secondary); text-transform: none; letter-spacing: 0;"></span></div>
         <div class="field-row">
-          <label>Path</label>
-          <input class="input" id="scenarioPath" placeholder="custom/scenarios/path">
-          <button class="btn btn-primary btn-sm" onclick="loadScenarios(document.getElementById('scenarioPath').value.trim())">Load</button>
+          <label>경로</label>
+          <input class="input" id="scenarioPath" placeholder="scenarios/">
+          <button class="btn btn-primary btn-sm" onclick="loadScenariosFromPath()">불러오기</button>
         </div>
-        <div id="scenarioList">
-          <div style="color: var(--text-secondary); font-size: 13px;">Loading...</div>
+        <div class="scenario-list" id="scenarioList">
+          <div style="color: var(--text-secondary); font-size: 12px; padding: 8px; text-align: center;">불러오는 중...</div>
         </div>
-        <div class="btn-group" style="margin-top:8px">
-          <button class="btn btn-primary btn-sm" onclick="loadScenarios()">Refresh</button>
-          <button class="btn btn-outline btn-sm" onclick="selectAllScenarios()">Select All</button>
-          <button class="btn btn-outline btn-sm" onclick="clearScenarioSelection()">Clear</button>
-        </div>
-        <!-- Scenario YAML upload -->
-        <div style="margin-top: 8px; display: flex; gap: 8px; align-items: center;">
-          <input type="file" id="scenarioFileInput" accept=".yaml,.yml" style="font-size: 12px; color: var(--text-secondary);">
-          <button class="btn btn-outline btn-sm" onclick="uploadScenario()">Upload</button>
+        <div style="display:flex;gap:6px;margin-top:4px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="loadScenarios()">새로고침</button>
+          <button class="btn btn-outline btn-sm" onclick="selectAllScenarios()">전체선택</button>
+          <button class="btn btn-outline btn-sm" onclick="clearScenarioSelection()">초기화</button>
+          <span style="flex:1"></span>
+          <input type="file" id="scenarioFileInput" accept=".yaml,.yml" multiple style="display:none">
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('scenarioFileInput').click()">파일 선택</button>
+          <button class="btn btn-primary btn-sm" onclick="uploadScenario()">업로드</button>
         </div>
       </div>
 
-      <!-- Documents -->
+      <!-- 문서 -->
       <div class="sub-section">
-        <div class="sub-section-title">Documents</div>
+        <div class="sub-section-title">문서</div>
         <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
-          Drop files here or click to browse
+          파일을 드래그하거나 클릭하여 선택
           <input type="file" id="fileInput" multiple accept=".md,.txt,.pdf,.html,.rst,.yaml,.yml,.json">
         </div>
         <ul class="doc-list" id="docList"></ul>
-        <div class="btn-group" style="margin-top:8px">
-          <button class="btn btn-primary btn-sm" onclick="uploadFiles()">Upload</button>
-          <button class="btn btn-outline btn-sm" onclick="analyzeAndGenerate()">Analyze &amp; Generate</button>
+        <div class="btn-group" style="margin-top:4px">
+          <button class="btn btn-primary btn-sm" onclick="uploadFiles()">업로드</button>
+          <button class="btn btn-outline btn-sm" onclick="analyzeAndGenerate()">분석 및 생성</button>
         </div>
       </div>
     </div>
 
   </div><!-- /top-row -->
 
-  <!-- STEP 3: Execute (full width) -->
+  <!-- STEP 3: 실행 (full width) -->
   <div class="bottom-row">
-    <div class="panel" style="flex-shrink:0">
+    <div class="panel" style="flex-shrink:0; padding-bottom:4px">
       <div class="panel-title">
-        <span class="step-number">3</span> Execute
+        <span class="step-number">3</span> 실행
       </div>
 
       <!-- Controls -->
-      <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;">
-        <button class="btn btn-primary" id="btnRun" onclick="startRun()">Run Test (All)</button>
-        <button class="btn btn-primary" id="btnLoop" onclick="startLoop()">DevQA Loop (All)</button>
-        <button class="btn btn-danger" id="btnStop" onclick="stopRun()" disabled>Stop</button>
-        <div id="summary" style="display: none; margin-left: 16px; padding: 8px 16px; background: var(--bg-secondary); border-radius: var(--radius); font-size: 13px;"></div>
+      <div style="display: flex; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; align-items: center;">
+        <button class="btn btn-primary" id="btnRun" onclick="startRun()">테스트 실행 (전체)</button>
+        <button class="btn btn-primary" id="btnLoop" onclick="startLoop()">DevQA 반복 (전체)</button>
+        <button class="btn btn-danger" id="btnStop" onclick="stopRun()" disabled>중지</button>
+        <div id="summary" style="display: none; margin-left: 8px; padding: 4px 12px; background: var(--bg-secondary); border-radius: var(--radius); font-size: 12px;"></div>
       </div>
 
       <!-- Progress -->
@@ -597,30 +723,43 @@
 
     <!-- Bottom split: Screenshot + Log -->
     <div class="exec-bottom">
-      <div class="panel">
-        <div class="panel-title">Live Screenshot</div>
-        <div class="screenshot-container" id="screenshotBox">
-          <div class="screenshot-placeholder">No screenshot yet</div>
+      <div style="padding:6px;background:var(--bg-primary);display:flex;flex-direction:column;min-height:0">
+        <div class="panel-title" style="margin-bottom:4px">실시간 스크린샷</div>
+        <div class="screenshot-container" id="screenshotBox" style="flex:1;min-height:0">
+          <div class="screenshot-placeholder">스크린샷 대기 중</div>
         </div>
       </div>
-      <div class="panel">
-        <div class="panel-title">Event Log</div>
-        <div class="log-area" id="logArea"></div>
+      <div style="padding:6px;background:var(--bg-primary);display:flex;flex-direction:column;min-height:0">
+        <div class="panel-title" style="margin-bottom:4px">이벤트 로그</div>
+        <div class="log-area" id="logArea" style="flex:1;min-height:0"></div>
       </div>
     </div>
   </div><!-- /bottom-row -->
 
 </div><!-- /layout -->
 
-<!-- Approval Modal -->
+<!-- 승인 모달 -->
 <div class="modal-overlay" id="approvalModal">
   <div class="modal">
-    <h3>AI Fix Approval</h3>
+    <h3>AI 수정 승인</h3>
     <div class="modal-context" id="approvalContext"></div>
     <div class="modal-actions">
-      <button class="btn btn-primary" onclick="resolvePrompt('approve')">Approve</button>
-      <button class="btn btn-danger" onclick="resolvePrompt('deny')">Deny</button>
-      <button class="btn btn-outline" onclick="resolvePrompt('approve_all')">Approve All</button>
+      <button class="btn btn-primary" onclick="resolvePrompt('approve')">승인</button>
+      <button class="btn btn-danger" onclick="resolvePrompt('deny')">거부</button>
+      <button class="btn btn-outline" onclick="resolvePrompt('approve_all')">전체 승인</button>
+    </div>
+  </div>
+</div>
+
+<!-- 폴더 탐색 모달 -->
+<div class="modal-overlay" id="folderModal">
+  <div class="folder-modal">
+    <h3>폴더 탐색</h3>
+    <div class="folder-path" id="folderCurrentPath"></div>
+    <div class="folder-list" id="folderList"></div>
+    <div class="folder-actions">
+      <button class="btn btn-outline btn-sm" onclick="closeFolderBrowser()">취소</button>
+      <button class="btn btn-primary btn-sm" onclick="selectFolder()">선택</button>
     </div>
   </div>
 </div>
@@ -634,6 +773,215 @@ let selectedScenarios = new Set();
 let totalScenarios = 0;
 let allScenarioIds = [];
 let pendingFiles = [];
+let folderBrowsePath = '';
+let urlManuallySet = false;
+
+// -- Server type presets --
+const SERVER_PRESETS = {
+  python:  (port) => `python3 -m http.server ${port}`,
+  nodejs:  (port) => `npx serve -l ${port}`,
+  react:   (port) => `PORT=${port} npm start`,
+  nextjs:  (port) => `PORT=${port} npm run dev`,
+  vue:     (port) => `PORT=${port} npm run serve`,
+  flask:   (port) => `python3 -m flask run --port ${port}`,
+  django:  (port) => `python3 manage.py runserver 0.0.0.0:${port}`,
+};
+
+// -- Provider ↔ Model mapping --
+const MODEL_OPTIONS = {
+  claude: [
+    { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
+    { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
+    { value: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
+  ],
+  openai: [
+    { value: 'gpt-4o', label: 'GPT-4o' },
+    { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+    { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+  ],
+  ollama: [
+    { value: 'codellama:7b', label: 'CodeLlama 7B' },
+    { value: 'llama3:8b', label: 'Llama 3 8B' },
+    { value: 'mistral:7b', label: 'Mistral 7B' },
+    { value: 'custom', label: '직접 입력' },
+  ],
+};
+
+// -- Recent paths (localStorage) --
+function getRecentPaths() {
+  try {
+    return JSON.parse(localStorage.getItem('aat_recent_paths') || '[]');
+  } catch { return []; }
+}
+
+function addRecentPath(path) {
+  if (!path) return;
+  let paths = getRecentPaths().filter(p => p !== path);
+  paths.unshift(path);
+  paths = paths.slice(0, 5);
+  localStorage.setItem('aat_recent_paths', JSON.stringify(paths));
+}
+
+function toggleRecentPaths() {
+  const list = document.getElementById('recentPathsList');
+  const paths = getRecentPaths();
+  if (list.classList.contains('show')) {
+    list.classList.remove('show');
+    return;
+  }
+  list.innerHTML = '';
+  if (paths.length === 0) {
+    list.innerHTML = '<div class="recent-item" style="color:var(--text-secondary)">기록 없음</div>';
+  } else {
+    paths.forEach(p => {
+      const item = document.createElement('div');
+      item.className = 'recent-item';
+      item.textContent = p;
+      item.onclick = () => {
+        document.getElementById('serverCwd').value = p;
+        list.classList.remove('show');
+      };
+      list.appendChild(item);
+    });
+  }
+  list.classList.add('show');
+}
+
+// Close recent dropdown on outside click
+document.addEventListener('click', (e) => {
+  const list = document.getElementById('recentPathsList');
+  if (list && !e.target.closest('#recentPathsList') && !e.target.closest('[onclick*="toggleRecentPaths"]')) {
+    list.classList.remove('show');
+  }
+});
+
+// -- Server type change --
+function onServerTypeChange() {
+  const type = document.getElementById('serverType').value;
+  const customRow = document.getElementById('customCmdRow');
+  customRow.style.display = type === 'custom' ? 'flex' : 'none';
+}
+
+function buildServerCommand() {
+  const type = document.getElementById('serverType').value;
+  const port = document.getElementById('serverPort').value || '8000';
+  if (type === 'custom') {
+    return document.getElementById('serverCmd').value.trim();
+  }
+  const fn = SERVER_PRESETS[type];
+  return fn ? fn(port) : '';
+}
+
+// -- Port change → URL auto-fill --
+function onPortChange() {
+  const port = document.getElementById('serverPort').value;
+  if (port && !urlManuallySet) {
+    document.getElementById('cfgUrl').value = `http://localhost:${port}`;
+  }
+}
+
+// Track manual URL edits
+document.addEventListener('DOMContentLoaded', () => {
+  const urlInput = document.getElementById('cfgUrl');
+  urlInput.addEventListener('input', () => { urlManuallySet = true; });
+});
+
+// -- Provider ↔ Model --
+function onProviderChange() {
+  const provider = document.getElementById('cfgProvider').value;
+  const modelSelect = document.getElementById('cfgModel');
+  const apiKeyRow = document.getElementById('apiKeyRow');
+  const customModelRow = document.getElementById('customModelRow');
+
+  // Show/hide API key for ollama
+  apiKeyRow.style.display = provider === 'ollama' ? 'none' : 'flex';
+
+  // Populate model options
+  const options = MODEL_OPTIONS[provider] || [];
+  modelSelect.innerHTML = '';
+  options.forEach(opt => {
+    const o = document.createElement('option');
+    o.value = opt.value;
+    o.textContent = opt.label;
+    modelSelect.appendChild(o);
+  });
+
+  // Hide custom model input
+  customModelRow.style.display = 'none';
+}
+
+function onModelSelect() {
+  const val = document.getElementById('cfgModel').value;
+  const customRow = document.getElementById('customModelRow');
+  customRow.style.display = val === 'custom' ? 'flex' : 'none';
+}
+
+function getSelectedModel() {
+  const val = document.getElementById('cfgModel').value;
+  if (val === 'custom') {
+    return document.getElementById('cfgModelCustom').value.trim();
+  }
+  return val;
+}
+
+// -- Folder Browser --
+async function openFolderBrowser() {
+  const currentPath = document.getElementById('serverCwd').value.trim() || '';
+  folderBrowsePath = currentPath;
+  await loadFolderContents(currentPath);
+  document.getElementById('folderModal').classList.add('active');
+}
+
+function closeFolderBrowser() {
+  document.getElementById('folderModal').classList.remove('active');
+}
+
+function selectFolder() {
+  document.getElementById('serverCwd').value = folderBrowsePath;
+  addRecentPath(folderBrowsePath);
+  closeFolderBrowser();
+}
+
+async function loadFolderContents(path) {
+  try {
+    const url = '/api/browse?path=' + encodeURIComponent(path);
+    const res = await fetch(url);
+    const data = await res.json();
+    folderBrowsePath = data.current || path;
+
+    document.getElementById('folderCurrentPath').textContent = folderBrowsePath;
+
+    const list = document.getElementById('folderList');
+    list.innerHTML = '';
+
+    // Parent dir
+    if (data.parent && data.parent !== folderBrowsePath) {
+      const parentItem = document.createElement('div');
+      parentItem.className = 'folder-item parent';
+      parentItem.innerHTML = '⬆ 상위 폴더';
+      parentItem.onclick = () => loadFolderContents(data.parent);
+      list.appendChild(parentItem);
+    }
+
+    // Sub-dirs
+    if (data.dirs && data.dirs.length > 0) {
+      data.dirs.forEach(dir => {
+        const item = document.createElement('div');
+        item.className = 'folder-item';
+        item.innerHTML = `📁 ${escHtml(dir)}`;
+        item.onclick = () => loadFolderContents(folderBrowsePath + '/' + dir);
+        list.appendChild(item);
+      });
+    } else {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'padding:8px;color:var(--text-secondary);font-size:11px;text-align:center';
+      empty.textContent = '하위 폴더 없음';
+      list.appendChild(empty);
+    }
+  } catch (e) {
+    addLog('error', `폴더 탐색 실패: ${e.message}`);
+  }
+}
 
 // -- WebSocket --
 function connectWS() {
@@ -641,20 +989,20 @@ function connectWS() {
   ws = new WebSocket(`${proto}//${location.host}/ws`);
 
   ws.onopen = () => {
-    document.getElementById('wsStatus').textContent = 'Connected';
+    document.getElementById('wsStatus').textContent = '연결됨';
     document.getElementById('wsDot').classList.add('connected');
-    addLog('info', 'WebSocket connected');
+    addLog('info', 'WebSocket 연결됨');
   };
 
   ws.onclose = () => {
-    document.getElementById('wsStatus').textContent = 'Disconnected';
+    document.getElementById('wsStatus').textContent = '연결 끊김';
     document.getElementById('wsDot').classList.remove('connected');
-    addLog('warning', 'WebSocket disconnected, reconnecting...');
+    addLog('warning', 'WebSocket 연결 끊김, 재연결 중...');
     setTimeout(connectWS, 3000);
   };
 
   ws.onerror = () => {
-    addLog('error', 'WebSocket error');
+    addLog('error', 'WebSocket 오류');
   };
 
   ws.onmessage = (event) => {
@@ -671,18 +1019,10 @@ function connectWS() {
 
 function handleEvent(data) {
   switch (data.type) {
-    case 'info':
-      addLog('info', data.message);
-      break;
-    case 'success':
-      addLog('success', data.message);
-      break;
-    case 'warning':
-      addLog('warning', data.message);
-      break;
-    case 'error':
-      addLog('error', data.message);
-      break;
+    case 'info': addLog('info', data.message); break;
+    case 'success': addLog('success', data.message); break;
+    case 'warning': addLog('warning', data.message); break;
+    case 'error': addLog('error', data.message); break;
     case 'step_start':
       addStepRunning(data.step, data.total, data.description);
       break;
@@ -707,7 +1047,7 @@ function handleEvent(data) {
     case 'server_exit':
       setServerRunning(false);
       addLog(data.return_code === 0 ? 'info' : 'warning',
-        `Server exited (code=${data.return_code})`);
+        `서버 종료 (코드=${data.return_code})`);
       break;
     case 'run_start':
     case 'loop_start':
@@ -717,24 +1057,20 @@ function handleEvent(data) {
     case 'run_complete':
     case 'loop_complete':
       setRunning(false);
-      if (data.success !== undefined) {
-        showSummary(data);
-      }
+      if (data.success !== undefined) showSummary(data);
       break;
     case 'run_cancelled':
     case 'loop_cancelled':
       setRunning(false);
-      addLog('warning', 'Execution cancelled');
+      addLog('warning', '실행 취소됨');
       break;
     case 'run_error':
     case 'loop_error':
       setRunning(false);
-      addLog('error', data.error || 'Unknown error');
+      addLog('error', data.error || '알 수 없는 오류');
       break;
-    case 'pong':
-      break;
-    default:
-      addLog('info', JSON.stringify(data));
+    case 'pong': break;
+    default: addLog('info', JSON.stringify(data));
   }
 }
 
@@ -751,18 +1087,15 @@ function addLog(level, message) {
 
 // -- Server Control --
 function addServerLog(line) {
-  // Mini log (last 4 lines)
   const mini = document.getElementById('serverMiniLog');
   const el = document.createElement('div');
   el.textContent = line;
   mini.appendChild(el);
-  while (mini.children.length > 4) {
+  while (mini.children.length > 3) {
     mini.removeChild(mini.firstChild);
   }
   mini.scrollTop = mini.scrollHeight;
-
-  // Main event log with [server] prefix
-  addLog('server', `[server] ${line}`);
+  addLog('server', `[서버] ${line}`);
 }
 
 function setServerRunning(running) {
@@ -774,25 +1107,28 @@ function setServerRunning(running) {
 
   if (running) {
     dot.classList.add('running');
-    text.textContent = 'Running';
+    text.textContent = '실행 중';
     btnStart.disabled = true;
     btnStop.disabled = false;
   } else {
     dot.classList.remove('running');
-    text.textContent = 'Stopped';
+    text.textContent = '중지됨';
     btnStart.disabled = false;
     btnStop.disabled = true;
   }
 }
 
 async function startServer() {
-  const command = document.getElementById('serverCmd').value.trim();
+  const command = buildServerCommand();
   const cwd = document.getElementById('serverCwd').value.trim();
 
   if (!command) {
-    addLog('warning', 'Enter a server command first');
+    addLog('warning', '서버 명령어를 입력하세요');
     return;
   }
+
+  // Save CWD to recent paths
+  if (cwd) addRecentPath(cwd);
 
   try {
     const res = await fetch('/api/server/start', {
@@ -805,30 +1141,27 @@ async function startServer() {
       addLog('error', data.error);
     } else {
       setServerRunning(true);
-      addLog('success', 'Server started (PID: ' + (data.pid || '?') + ')');
-      // Auto-fill URL if suggested
-      if (data.suggested_url) {
-        const urlInput = document.getElementById('cfgUrl');
-        if (!urlInput.value) {
-          urlInput.value = data.suggested_url;
-          addLog('info', 'Auto-filled URL: ' + data.suggested_url);
-        }
+      addLog('success', '서버 시작됨 (PID: ' + (data.pid || '?') + ')');
+      // Auto-fill URL
+      const port = document.getElementById('serverPort').value;
+      if (port && !urlManuallySet) {
+        document.getElementById('cfgUrl').value = `http://localhost:${port}`;
+        addLog('info', `URL 자동 설정: http://localhost:${port}`);
       }
     }
   } catch (e) {
-    addLog('error', `Failed to start server: ${e.message}`);
+    addLog('error', `서버 시작 실패: ${e.message}`);
   }
 }
 
 async function stopServer() {
   try {
-    const res = await fetch('/api/server/stop', { method: 'POST' });
-    const data = await res.json();
+    await fetch('/api/server/stop', { method: 'POST' });
     setServerRunning(false);
     document.getElementById('serverMiniLog').innerHTML = '';
-    addLog('info', 'Server stopped');
+    addLog('info', '서버 중지됨');
   } catch (e) {
-    addLog('error', `Failed to stop server: ${e.message}`);
+    addLog('error', `서버 중지 실패: ${e.message}`);
   }
 }
 
@@ -837,9 +1170,7 @@ async function checkServerStatus() {
     const res = await fetch('/api/server/status');
     const data = await res.json();
     setServerRunning(data.running);
-  } catch (e) {
-    // ignore
-  }
+  } catch (e) { /* ignore */ }
 }
 
 // -- Steps --
@@ -848,7 +1179,7 @@ function clearSteps() {
   document.getElementById('summary').style.display = 'none';
   const pc = document.getElementById('progressContainer');
   pc.style.display = 'block';
-  updateProgress(0, 1, 'Starting...');
+  updateProgress(0, 1, '시작 중...');
 }
 
 function addStepRunning(step, total, description) {
@@ -862,7 +1193,7 @@ function addStepRunning(step, total, description) {
   li.innerHTML = `
     <span class="step-badge running">${step}</span>
     <span class="step-desc">${escHtml(description)}</span>
-    <span style="color: var(--warning); font-size: 11px;">running...</span>
+    <span style="color: var(--warning); font-size: 10px;">실행 중...</span>
   `;
   list.appendChild(li);
   li.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -915,16 +1246,16 @@ function updateProgress(current, total, label) {
 // -- Screenshot --
 function updateScreenshot(base64Data) {
   const box = document.getElementById('screenshotBox');
-  box.innerHTML = `<img src="data:image/jpeg;base64,${base64Data}" alt="Live screenshot">`;
+  box.innerHTML = `<img src="data:image/jpeg;base64,${base64Data}" alt="실시간 스크린샷">`;
 }
 
 // -- Summary --
 function showSummary(data) {
   const div = document.getElementById('summary');
-  const status = data.success ? 'SUCCESS' : 'FAILURE';
+  const status = data.success ? '성공' : '실패';
   const color = data.success ? 'var(--success)' : 'var(--danger)';
   let html = `<span style="font-weight:700; color:${color};">${status}</span>`;
-  if (data.iterations) html += ` | ${data.iterations} iter`;
+  if (data.iterations) html += ` | ${data.iterations}회`;
   if (data.duration_ms) html += ` | ${Math.round(data.duration_ms)}ms`;
   if (data.reason) html += ` | ${escHtml(data.reason)}`;
   div.innerHTML = html;
@@ -934,7 +1265,7 @@ function showSummary(data) {
 // -- Approval Modal --
 function showApprovalModal(question, options, context) {
   document.getElementById('approvalContext').textContent =
-    context?.analysis || question || 'Approve this fix?';
+    context?.analysis || question || '이 수정을 승인하시겠습니까?';
   document.getElementById('approvalModal').classList.add('active');
 }
 
@@ -990,16 +1321,16 @@ function setupDropZone() {
 function showPendingFiles() {
   const zone = document.getElementById('dropZone');
   if (pendingFiles.length === 0) {
-    zone.textContent = 'Drop files here or click to browse';
+    zone.textContent = '파일을 드래그하거나 클릭하여 선택';
     return;
   }
   const names = pendingFiles.map(f => f.name).join(', ');
-  zone.textContent = `${pendingFiles.length} file(s) selected: ${names}`;
+  zone.textContent = `${pendingFiles.length}개 파일 선택됨: ${names}`;
 }
 
 async function uploadFiles() {
   if (pendingFiles.length === 0) {
-    addLog('warning', 'No files selected');
+    addLog('warning', '파일을 먼저 선택하세요');
     return;
   }
 
@@ -1009,21 +1340,18 @@ async function uploadFiles() {
   }
 
   try {
-    const res = await fetch('/api/documents/upload', {
-      method: 'POST',
-      body: formData,
-    });
+    const res = await fetch('/api/documents/upload', { method: 'POST', body: formData });
     const data = await res.json();
     if (data.error) {
       addLog('error', data.error);
     } else {
-      addLog('success', `Uploaded ${data.count} file(s)`);
+      addLog('success', `${data.count}개 파일 업로드 완료`);
       pendingFiles = [];
       showPendingFiles();
       loadDocuments();
     }
   } catch (e) {
-    addLog('error', `Upload failed: ${e.message}`);
+    addLog('error', `업로드 실패: ${e.message}`);
   }
 }
 
@@ -1041,16 +1369,14 @@ async function loadDocuments() {
         list.appendChild(li);
       }
     }
-  } catch (e) {
-    // ignore
-  }
+  } catch (e) { /* ignore */ }
 }
 
 async function analyzeAndGenerate() {
-  addLog('info', 'Analyze & Generate — use CLI: aat analyze / aat generate');
+  addLog('info', '분석 및 생성 — CLI 사용: aat analyze / aat generate');
 }
 
-// -- API Calls --
+// -- Config --
 async function loadConfig() {
   try {
     const res = await fetch('/api/config');
@@ -1062,13 +1388,27 @@ async function loadConfig() {
     }
     if (data.ai) {
       document.getElementById('cfgProvider').value = data.ai.provider || 'claude';
-      document.getElementById('cfgModel').value = data.ai.model || '';
+      onProviderChange(); // populate model options
+      // Try to set model to saved value
+      const savedModel = data.ai.model || '';
+      const modelSelect = document.getElementById('cfgModel');
+      const matchingOption = Array.from(modelSelect.options).find(o => o.value === savedModel);
+      if (matchingOption) {
+        modelSelect.value = savedModel;
+      } else if (savedModel) {
+        // If saved model is not in presets, add it and select
+        const customOpt = document.createElement('option');
+        customOpt.value = savedModel;
+        customOpt.textContent = savedModel;
+        modelSelect.appendChild(customOpt);
+        modelSelect.value = savedModel;
+      }
       document.getElementById('cfgApiKey').placeholder = data.ai.api_key || '***';
     }
     document.getElementById('cfgUrl').value = data.url || '';
     document.getElementById('cfgApproval').value = data.approval_mode || 'manual';
   } catch (e) {
-    addLog('error', `Failed to load config: ${e.message}`);
+    addLog('error', `설정 불러오기 실패: ${e.message}`);
   }
 }
 
@@ -1081,7 +1421,7 @@ async function saveConfig() {
     },
     ai: {
       provider: document.getElementById('cfgProvider').value,
-      model: document.getElementById('cfgModel').value,
+      model: getSelectedModel(),
     },
     url: document.getElementById('cfgUrl').value,
     approval_mode: document.getElementById('cfgApproval').value,
@@ -1097,14 +1437,20 @@ async function saveConfig() {
     });
     const data = await res.json();
     if (data.error) {
-      addLog('error', `Config save failed: ${data.error}`);
+      addLog('error', `설정 저장 실패: ${data.error}`);
     } else {
-      addLog('success', 'Config saved');
+      addLog('success', '설정 저장 완료');
       loadConfig();
     }
   } catch (e) {
-    addLog('error', `Config save failed: ${e.message}`);
+    addLog('error', `설정 저장 실패: ${e.message}`);
   }
+}
+
+// -- Scenarios --
+function loadScenariosFromPath() {
+  const path = document.getElementById('scenarioPath').value.trim();
+  loadScenarios(path || undefined);
 }
 
 async function loadScenarios(customPath) {
@@ -1117,12 +1463,15 @@ async function loadScenarios(customPath) {
     const data = await res.json();
     const list = document.getElementById('scenarioList');
     allScenarioIds = [];
+
     if (!data.scenarios || data.scenarios.length === 0) {
-      list.innerHTML = '<div style="color: var(--text-secondary); font-size: 13px;">No scenarios found</div>';
+      list.innerHTML = '<div style="color: var(--text-secondary); font-size: 12px; padding: 8px; text-align: center;">시나리오 없음</div>';
       totalScenarios = 0;
       updateScenarioCount();
+      if (data.error) addLog('warning', data.error);
       return;
     }
+
     totalScenarios = data.scenarios.length;
     list.innerHTML = '';
     data.scenarios.forEach(sc => {
@@ -1130,9 +1479,9 @@ async function loadScenarios(customPath) {
       const div = document.createElement('div');
       div.className = 'scenario-item' + (selectedScenarios.has(sc.id) ? ' selected' : '');
       div.innerHTML = `
-        <div class="scenario-id">${escHtml(sc.id)}</div>
-        <div class="scenario-name">${escHtml(sc.name)}</div>
-        <div class="scenario-meta">${sc.steps_count} steps${sc.tags.length ? ' | ' + sc.tags.join(', ') : ''}</div>
+        <span class="scenario-id">${escHtml(sc.id)}</span>
+        <span class="scenario-name">${escHtml(sc.name)}</span>
+        <span class="scenario-meta">${sc.steps_count}단계${sc.tags.length ? ' | ' + sc.tags.join(', ') : ''}</span>
       `;
       div.onclick = () => {
         if (selectedScenarios.has(sc.id)) {
@@ -1146,16 +1495,15 @@ async function loadScenarios(customPath) {
       };
       list.appendChild(div);
     });
-    // Remove selections not in current list
     selectedScenarios.forEach(id => {
       if (!allScenarioIds.includes(id)) selectedScenarios.delete(id);
     });
     updateScenarioCount();
-    if (data.error) {
-      addLog('warning', data.error);
-    }
+
+    if (data.error) addLog('warning', data.error);
+    else addLog('info', `시나리오 ${totalScenarios}개 불러옴`);
   } catch (e) {
-    addLog('error', `Failed to load scenarios: ${e.message}`);
+    addLog('error', `시나리오 불러오기 실패: ${e.message}`);
   }
 }
 
@@ -1163,20 +1511,18 @@ function updateScenarioCount() {
   const count = selectedScenarios.size;
   const el = document.getElementById('scenarioCount');
   if (totalScenarios > 0) {
-    el.textContent = count > 0 ? `(${count} / ${totalScenarios} selected)` : `(${totalScenarios} total)`;
+    el.textContent = count > 0 ? `(${totalScenarios}개 중 ${count}개 선택됨)` : `(${totalScenarios}개)`;
   } else {
     el.textContent = '';
   }
-  // Update button labels
-  const runLabel = count > 0 ? `Run Test (${count})` : 'Run Test (All)';
-  const loopLabel = count > 0 ? `DevQA Loop (${count})` : 'DevQA Loop (All)';
+  const runLabel = count > 0 ? `테스트 실행 (${count}개)` : '테스트 실행 (전체)';
+  const loopLabel = count > 0 ? `DevQA 반복 (${count}개)` : 'DevQA 반복 (전체)';
   document.getElementById('btnRun').textContent = runLabel;
   document.getElementById('btnLoop').textContent = loopLabel;
 }
 
 function selectAllScenarios() {
   allScenarioIds.forEach(id => selectedScenarios.add(id));
-  // Re-render selection state
   document.querySelectorAll('.scenario-item').forEach(el => el.classList.add('selected'));
   updateScenarioCount();
 }
@@ -1190,31 +1536,39 @@ function clearScenarioSelection() {
 async function uploadScenario() {
   const input = document.getElementById('scenarioFileInput');
   if (!input.files || input.files.length === 0) {
-    addLog('warning', 'No scenario file selected');
+    addLog('warning', '시나리오 파일을 먼저 선택하세요');
     return;
   }
-  const file = input.files[0];
-  const formData = new FormData();
-  formData.append('file', file);
 
-  try {
-    const res = await fetch('/api/scenarios/upload', {
-      method: 'POST',
-      body: formData,
-    });
-    const data = await res.json();
-    if (data.error) {
-      addLog('error', data.error);
-    } else {
-      addLog('success', `Scenario uploaded: ${data.uploaded}`);
-      input.value = '';
-      loadScenarios();
+  // Upload each file
+  let successCount = 0;
+  for (const file of input.files) {
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await fetch('/api/scenarios/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.error) {
+        addLog('error', `${file.name}: ${data.error}`);
+      } else {
+        successCount++;
+        addLog('success', `시나리오 업로드 완료: ${data.uploaded}`);
+      }
+    } catch (e) {
+      addLog('error', `시나리오 업로드 실패 (${file.name}): ${e.message}`);
     }
-  } catch (e) {
-    addLog('error', `Scenario upload failed: ${e.message}`);
+  }
+
+  input.value = '';
+  if (successCount > 0) {
+    loadScenarios();
   }
 }
 
+// -- Run / Loop / Stop --
 async function startRun() {
   const ids = [...selectedScenarios];
   try {
@@ -1227,11 +1581,11 @@ async function startRun() {
     if (data.error) {
       addLog('error', data.error);
     } else {
-      const label = ids.length > 0 ? `${ids.length} scenario(s)` : 'all scenarios';
-      addLog('info', `Test run started (${label})`);
+      const label = ids.length > 0 ? `${ids.length}개 시나리오` : '전체 시나리오';
+      addLog('info', `테스트 실행 시작 (${label})`);
     }
   } catch (e) {
-    addLog('error', `Failed to start run: ${e.message}`);
+    addLog('error', `테스트 실행 실패: ${e.message}`);
   }
 }
 
@@ -1248,20 +1602,20 @@ async function startLoop() {
     if (data.error) {
       addLog('error', data.error);
     } else {
-      const label = ids.length > 0 ? `${ids.length} scenario(s)` : 'all scenarios';
-      addLog('info', `DevQA Loop started (${label})`);
+      const label = ids.length > 0 ? `${ids.length}개 시나리오` : '전체 시나리오';
+      addLog('info', `DevQA 반복 시작 (${label})`);
     }
   } catch (e) {
-    addLog('error', `Failed to start loop: ${e.message}`);
+    addLog('error', `DevQA 반복 실패: ${e.message}`);
   }
 }
 
 async function stopRun() {
   try {
     await fetch('/api/stop', { method: 'POST' });
-    addLog('warning', 'Stop requested');
+    addLog('warning', '중지 요청됨');
   } catch (e) {
-    addLog('error', `Failed to stop: ${e.message}`);
+    addLog('error', `중지 실패: ${e.message}`);
   }
 }
 
@@ -1279,6 +1633,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadDocuments();
   checkServerStatus();
   setupDropZone();
+  onProviderChange(); // initialize model options
 });
 </script>
 </body>
