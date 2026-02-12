@@ -278,7 +278,7 @@ class OpenAIAdapter(AIAdapter):
                 model=self._config.model,
                 max_tokens=self._config.max_tokens,
                 temperature=self._config.temperature,
-                messages=[
+                messages=[  # type: ignore[list-item]
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},
                 ],
