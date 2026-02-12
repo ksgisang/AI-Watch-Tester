@@ -55,9 +55,10 @@ CLI (Typer)
           +---------+---------+
           |                   |
      +----+----+       +-----+-----+
-     | Claude  |       | Reporter  |
+     |   AI    |       | Reporter  |
      | Adapter |       | (Markdown)|
      +---------+       +-----------+
+     Claude|OpenAI|Ollama
 ```
 
 ---
@@ -205,9 +206,9 @@ After `aat init`, a `.aat/config.yaml` file is created. Settings can also be ove
 
 | Config Key | Env Variable | Default | Description |
 |------------|-------------|---------|-------------|
-| `ai.provider` | `AAT_AI_PROVIDER` | `claude` | AI adapter (currently claude only) |
-| `ai.api_key` | `AAT_AI_API_KEY` | -- | Claude API key |
-| `ai.model` | `AAT_AI_MODEL` | `claude-sonnet-4-20250514` | Model to use |
+| `ai.provider` | `AAT_AI_PROVIDER` | `claude` | AI adapter: `claude`, `openai`, or `ollama` |
+| `ai.api_key` | `AAT_AI_API_KEY` | -- | API key (Claude/OpenAI) or Ollama URL |
+| `ai.model` | `AAT_AI_MODEL` | `claude-sonnet-4-20250514` | Model to use (e.g. `gpt-4o`, `codellama:7b`) |
 | `engine.type` | `AAT_ENGINE_TYPE` | `web` | Engine type (currently web only) |
 | `engine.headless` | `AAT_ENGINE_HEADLESS` | `false` | Headless mode |
 | `matching.confidence_threshold` | `AAT_MATCHING_CONFIDENCE` | `0.85` | Minimum match confidence (0.0-1.0) |
@@ -264,7 +265,9 @@ AI-Watch-Tester/
 │   │
 │   ├── adapters/                    # AI Adapter (plugin)
 │   │   ├── base.py                  # AIAdapter ABC
-│   │   └── claude.py                # ClaudeAdapter
+│   │   ├── claude.py                # ClaudeAdapter
+│   │   ├── openai_adapter.py        # OpenAIAdapter
+│   │   └── ollama.py                # OllamaAdapter
 │   │
 │   ├── parsers/                     # Document parser (plugin)
 │   │   ├── base.py                  # BaseParser ABC
@@ -308,6 +311,8 @@ AI-Watch-Tester/
 | `pillow >=10.0` | Image loading/conversion |
 | `pytesseract >=0.3.10` | OCR (text recognition) |
 | `anthropic >=0.40` | Claude API client |
+| `openai >=1.0` | OpenAI GPT API client |
+| `httpx >=0.27` | HTTP client (Ollama) |
 | `jinja2 >=3.1` | Report template rendering |
 | `rich >=13.0` | Terminal output formatting |
 
