@@ -47,6 +47,9 @@ def mock_engine() -> MagicMock:
     engine.get_page_text = AsyncMock(return_value="Page text")
     engine.get_url = AsyncMock(return_value="https://example.com/page")
     engine.find_text_position = AsyncMock(return_value=None)
+    # Explicitly remove find_on_screen so hasattr() returns False
+    # (MagicMock auto-creates any attribute, breaking the screen-coord code path)
+    del engine.find_on_screen
     return engine
 
 
@@ -331,6 +334,78 @@ class TestFindAndClickAction:
         result = await executor.execute_step(step)
         assert result.status == StepStatus.FAILED
         assert "not found" in (result.error_message or "")
+
+
+class TestFindAndClickScreenCoords:
+    """Test find_and_click using PyAutoGUI screen-coordinate path."""
+
+    @pytest.mark.asyncio
+    async def test_find_and_click_via_screen(
+        self,
+        mock_matcher: MagicMock,
+        mock_humanizer: MagicMock,
+        mock_waiter: MagicMock,
+        mock_comparator: MagicMock,
+        tmp_path: "Path",
+    ) -> None:
+        """When engine has find_on_screen and image target, use screen coords."""
+        engine = MagicMock()
+        engine.find_on_screen = AsyncMock(return_value=(500, 300))
+        engine.click_on_screen = AsyncMock()
+        engine.screenshot = AsyncMock(return_value=b"png")
+        engine.save_screenshot = AsyncMock()
+        engine.find_text_position = AsyncMock(return_value=None)
+        executor = StepExecutor(
+            engine=engine,
+            matcher=mock_matcher,
+            humanizer=mock_humanizer,
+            waiter=mock_waiter,
+            comparator=mock_comparator,
+            screenshot_dir=tmp_path,
+        )
+        target = TargetSpec(image="button.png")
+        step = make_step(ActionType.FIND_AND_CLICK, target=target, humanize=False)
+        result = await executor.execute_step(step)
+        assert result.status == StepStatus.PASSED
+        assert result.match_result is not None
+        assert result.match_result.x == 500
+        assert result.match_result.y == 300
+        engine.find_on_screen.assert_awaited_once()
+        engine.click_on_screen.assert_awaited_once_with(500, 300)
+        # Regular matcher should NOT be called
+        mock_matcher.find.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_find_on_screen_miss_falls_through(
+        self,
+        mock_matcher: MagicMock,
+        mock_humanizer: MagicMock,
+        mock_waiter: MagicMock,
+        mock_comparator: MagicMock,
+        tmp_path: "Path",
+    ) -> None:
+        """When find_on_screen returns None, fall through to matcher."""
+        engine = MagicMock()
+        engine.find_on_screen = AsyncMock(return_value=None)
+        engine.click = AsyncMock()
+        engine.screenshot = AsyncMock(return_value=b"png")
+        engine.save_screenshot = AsyncMock()
+        engine.find_text_position = AsyncMock(return_value=None)
+        executor = StepExecutor(
+            engine=engine,
+            matcher=mock_matcher,
+            humanizer=mock_humanizer,
+            waiter=mock_waiter,
+            comparator=mock_comparator,
+            screenshot_dir=tmp_path,
+        )
+        target = TargetSpec(image="button.png")
+        step = make_step(ActionType.FIND_AND_CLICK, target=target, humanize=False)
+        result = await executor.execute_step(step)
+        assert result.status == StepStatus.PASSED
+        # Fell through to screenshot+matcher
+        mock_matcher.find.assert_awaited_once()
+        engine.click.assert_awaited_once_with(100, 200)
 
 
 class TestFindAndDoubleClickAction:

@@ -239,6 +239,60 @@ class TestDesktopEngineCoordinateConversion:
         assert engine._window_offset_y == 80  # sensible fallback
 
 
+class TestDesktopEngineScreenOps:
+    """Test screen-coordinate operations for PyAutoGUI image matching."""
+
+    async def test_find_on_screen_found(self, mock_pag: MagicMock) -> None:
+        engine = DesktopEngine()
+        engine._pag = mock_pag
+        mock_location = MagicMock()
+        mock_pag.locateOnScreen.return_value = mock_location
+        mock_pag.center.return_value = MagicMock(x=500, y=300)
+        result = await engine.find_on_screen("button.png", confidence=0.9)
+        assert result == (500, 300)
+        mock_pag.locateOnScreen.assert_called_once_with(
+            "button.png", confidence=0.9,
+        )
+
+    async def test_find_on_screen_not_found(self, mock_pag: MagicMock) -> None:
+        engine = DesktopEngine()
+        engine._pag = mock_pag
+        mock_pag.locateOnScreen.return_value = None
+        result = await engine.find_on_screen("missing.png")
+        assert result is None
+
+    async def test_find_on_screen_error(self, mock_pag: MagicMock) -> None:
+        engine = DesktopEngine()
+        engine._pag = mock_pag
+        mock_pag.locateOnScreen.side_effect = Exception("no display")
+        result = await engine.find_on_screen("broken.png")
+        assert result is None
+
+    async def test_click_on_screen(self, mock_pag: MagicMock) -> None:
+        engine = DesktopEngine()
+        engine._pag = mock_pag
+        await engine.click_on_screen(500, 300)
+        mock_pag.click.assert_called_once_with(500, 300)
+
+    async def test_double_click_on_screen(self, mock_pag: MagicMock) -> None:
+        engine = DesktopEngine()
+        engine._pag = mock_pag
+        await engine.double_click_on_screen(500, 300)
+        mock_pag.doubleClick.assert_called_once_with(500, 300)
+
+    async def test_right_click_on_screen(self, mock_pag: MagicMock) -> None:
+        engine = DesktopEngine()
+        engine._pag = mock_pag
+        await engine.right_click_on_screen(500, 300)
+        mock_pag.rightClick.assert_called_once_with(500, 300)
+
+    async def test_move_mouse_screen(self, mock_pag: MagicMock) -> None:
+        engine = DesktopEngine()
+        engine._pag = mock_pag
+        await engine.move_mouse_screen(500, 300)
+        mock_pag.moveTo.assert_called_once_with(500, 300)
+
+
 class TestDesktopEngineRegistry:
     def test_registered(self) -> None:
         from aat.engine import ENGINE_REGISTRY

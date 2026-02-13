@@ -94,3 +94,34 @@ class TestHumanizer:
         assert len(points) == 5  # 1 start + 3 control + 1 end
         assert points[0] == (0.0, 0.0)
         assert points[-1] == (100.0, 100.0)
+
+
+class TestHumanizerScreenCoords:
+    """Tests for move_to_screen (screen coordinate Bezier movement)."""
+
+    @pytest.mark.asyncio
+    async def test_move_to_screen_disabled(self) -> None:
+        config = HumanizerConfig(enabled=False)
+        humanizer = Humanizer(config)
+        engine = MockEngine()
+        engine.move_mouse_screen = engine.move_mouse  # type: ignore[attr-defined]
+        await humanizer.move_to_screen(engine, 400, 500)  # type: ignore[arg-type]
+        assert engine.moves == [(400, 500)]
+
+    @pytest.mark.asyncio
+    async def test_move_to_screen_enabled(self) -> None:
+        from unittest.mock import MagicMock
+
+        config = HumanizerConfig(
+            enabled=True, mouse_speed_min=0.01, mouse_speed_max=0.02,
+        )
+        humanizer = Humanizer(config)
+        engine = MockEngine()
+        engine.move_mouse_screen = engine.move_mouse  # type: ignore[attr-defined]
+        engine.pag = MagicMock()  # type: ignore[attr-defined]
+        engine.pag.position.return_value = MagicMock(x=0, y=0)
+        await humanizer.move_to_screen(engine, 500, 300)  # type: ignore[arg-type]
+        assert len(engine.moves) >= 10
+        last_x, last_y = engine.moves[-1]
+        assert last_x == 500
+        assert last_y == 300

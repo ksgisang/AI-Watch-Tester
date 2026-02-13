@@ -217,6 +217,41 @@ class DesktopEngine(BaseEngine):
         self._mouse_x, self._mouse_y = x, y
 
     # ------------------------------------------------------------------
+    # Screen-coordinate operations (for PyAutoGUI image matching)
+    # ------------------------------------------------------------------
+
+    async def find_on_screen(
+        self, image_path: str, confidence: float = 0.8
+    ) -> tuple[int, int] | None:
+        """Find image on screen via PyAutoGUI, return screen coordinates."""
+        try:
+            location = await asyncio.to_thread(
+                self.pag.locateOnScreen, image_path, confidence=confidence
+            )
+            if location is not None:
+                center = self.pag.center(location)
+                return (center.x, center.y)
+        except Exception:
+            pass
+        return None
+
+    async def click_on_screen(self, x: int, y: int) -> None:
+        """Click at screen coordinates via PyAutoGUI (no conversion)."""
+        await asyncio.to_thread(self.pag.click, x, y)
+
+    async def double_click_on_screen(self, x: int, y: int) -> None:
+        """Double-click at screen coordinates via PyAutoGUI (no conversion)."""
+        await asyncio.to_thread(self.pag.doubleClick, x, y)
+
+    async def right_click_on_screen(self, x: int, y: int) -> None:
+        """Right-click at screen coordinates via PyAutoGUI (no conversion)."""
+        await asyncio.to_thread(self.pag.rightClick, x, y)
+
+    async def move_mouse_screen(self, x: int, y: int) -> None:
+        """Move mouse to screen coordinates via PyAutoGUI (no conversion)."""
+        await asyncio.to_thread(self.pag.moveTo, x, y)
+
+    # ------------------------------------------------------------------
     # Keyboard — Playwright (IME-safe, works with Korean/Japanese input)
     # ------------------------------------------------------------------
 

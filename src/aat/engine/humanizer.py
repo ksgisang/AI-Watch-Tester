@@ -62,6 +62,49 @@ class Humanizer:
         # Brief pause after arrival (human hesitation before click)
         await asyncio.sleep(random.uniform(0.05, 0.15))
 
+    async def move_to_screen(self, engine: BaseEngine, x: int, y: int) -> None:
+        """Bezier mouse movement using screen coordinates directly.
+
+        Unlike move_to(), this uses engine.move_mouse_screen() which
+        does not apply viewport-to-screen conversion. Used for PyAutoGUI
+        image matching results that are already in screen coordinates.
+        """
+        move_fn = (
+            engine.move_mouse_screen  # type: ignore[union-attr]
+            if hasattr(engine, "move_mouse_screen")
+            else engine.move_mouse
+        )
+
+        if not self._config.enabled:
+            await move_fn(x, y)
+            return
+
+        # Get current screen position from PyAutoGUI
+        current_x, current_y = 0, 0
+        if hasattr(engine, "pag"):
+            pos = engine.pag.position()  # type: ignore[union-attr]
+            current_x, current_y = pos.x, pos.y
+
+        duration = random.uniform(
+            self._config.mouse_speed_min,
+            self._config.mouse_speed_max,
+        )
+        points = self._generate_bezier_points(
+            start=(current_x, current_y),
+            end=(x, y),
+            num_control=self._config.bezier_control_points,
+        )
+
+        steps = max(int(duration / 0.016), 10)
+        step_delay = duration / steps
+        for i in range(1, steps + 1):
+            t = i / steps
+            px, py = self._bezier_point(t, points)
+            await move_fn(int(px), int(py))
+            await asyncio.sleep(step_delay)
+
+        await asyncio.sleep(random.uniform(0.05, 0.15))
+
     async def type_text(self, engine: BaseEngine, text: str) -> None:
         """Type text one character at a time with variable delay.
 

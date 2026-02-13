@@ -260,6 +260,42 @@ class StepExecutor:
                     await self._engine.press_key("Delete")
                 return result
 
+        # Try PyAutoGUI screen search (DesktopEngine, image target)
+        if target.image and hasattr(self._engine, "find_on_screen"):
+            confidence = target.confidence or 0.8
+            coords = await self._engine.find_on_screen(target.image, confidence)
+            if coords is not None:
+                from aat.core.models import MatchMethod, MatchResult as MR
+
+                sx, sy = coords
+                result = MR(
+                    found=True,
+                    x=sx,
+                    y=sy,
+                    confidence=confidence,
+                    method=MatchMethod.TEMPLATE,
+                )
+                if step.action in (
+                    ActionType.FIND_AND_CLICK,
+                    ActionType.FIND_AND_DOUBLE_CLICK,
+                    ActionType.FIND_AND_RIGHT_CLICK,
+                ):
+                    await self._do_click_screen(
+                        sx,
+                        sy,
+                        step.humanize,
+                        double=(step.action == ActionType.FIND_AND_DOUBLE_CLICK),
+                        right=(step.action == ActionType.FIND_AND_RIGHT_CLICK),
+                    )
+                elif step.action == ActionType.FIND_AND_TYPE:
+                    await self._do_click_screen(sx, sy, step.humanize)
+                    await self._do_type(step.value or "", step.humanize)
+                elif step.action == ActionType.FIND_AND_CLEAR:
+                    await self._do_click_screen(sx, sy, step.humanize)
+                    await self._engine.key_combo("Control", "a")
+                    await self._engine.press_key("Delete")
+                return result
+
         # Fallback: screenshot + matcher pipeline (OCR/template/feature)
         screenshot = await self._engine.screenshot()
         match_result = await self._matcher.find(target, screenshot)
@@ -318,6 +354,28 @@ class StepExecutor:
             await self._engine.right_click(x, y)
         else:
             await self._engine.click(x, y)
+
+    async def _do_click_screen(
+        self,
+        x: int,
+        y: int,
+        humanize: bool,
+        *,
+        double: bool = False,
+        right: bool = False,
+    ) -> None:
+        """Click using screen coordinates (for PyAutoGUI find_on_screen results).
+
+        No viewport-to-screen conversion is applied.
+        """
+        if humanize:
+            await self._humanizer.move_to_screen(self._engine, x, y)
+        if double:
+            await self._engine.double_click_on_screen(x, y)
+        elif right:
+            await self._engine.right_click_on_screen(x, y)
+        else:
+            await self._engine.click_on_screen(x, y)
 
     async def _do_type(self, text: str, humanize: bool) -> None:
         """Type text with optional humanization.
