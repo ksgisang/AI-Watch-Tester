@@ -119,6 +119,7 @@ def create_app(config_path: Path | None = None) -> FastAPI:
     app.add_api_route("/api/config", _update_config, methods=["PUT"])
     app.add_api_route("/api/scenarios", _list_scenarios, methods=["GET"])
     app.add_api_route("/api/scenarios/upload", _upload_scenario, methods=["POST"])
+    app.add_api_route("/api/scenarios/generate", _generate_scenarios, methods=["POST"])
     app.add_api_route("/api/run", _start_run, methods=["POST"])
     app.add_api_route("/api/loop", _start_loop, methods=["POST"])
     app.add_api_route("/api/stop", _stop_run, methods=["POST"])
@@ -323,6 +324,86 @@ async def _upload_scenario(request: Request) -> JSONResponse:
         return JSONResponse(content={"status": "ok", "uploaded": safe_name, "scenarios": result})
     except AATError:
         return JSONResponse(content={"status": "ok", "uploaded": safe_name, "scenarios": []})
+
+
+async def _generate_scenarios(request: Request) -> JSONResponse:
+    """Generate scenarios from document text using AI adapter."""
+    if _current_config is None:
+        return JSONResponse(content={"error": "설정이 없습니다"}, status_code=400)
+
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse(content={"error": "잘못된 요청"}, status_code=400)
+
+    document_text = body.get("document_text", "")
+    if not document_text.strip():
+        return JSONResponse(content={"error": "문서 내용이 비어있습니다"}, status_code=400)
+
+    # Create AI adapter
+    from aat.adapters import ADAPTER_REGISTRY
+
+    adapter_cls = ADAPTER_REGISTRY.get(_current_config.ai.provider)
+    if adapter_cls is None:
+        return JSONResponse(
+            content={"error": f"AI 어댑터 없음: {_current_config.ai.provider}"},
+            status_code=400,
+        )
+
+    try:
+        adapter = adapter_cls(_current_config.ai)
+        scenarios = await adapter.generate_scenarios(document_text)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse(
+            content={"error": f"시나리오 생성 실패: {e}"},
+            status_code=500,
+        )
+
+    if not scenarios:
+        return JSONResponse(content={"error": "생성된 시나리오가 없습니다"}, status_code=400)
+
+    # Save as YAML files
+    import yaml
+
+    scenarios_dir = _resolve_scenario_path(_current_config.scenarios_dir)
+    scenarios_dir.mkdir(parents=True, exist_ok=True)
+
+    saved_files: list[str] = []
+    for sc in scenarios:
+        safe_name = sc.name.replace(" ", "_").lower()
+        safe_name = re.sub(r"[^a-z0-9_]", "", safe_name)
+        filename = f"{sc.id}_{safe_name}.yaml"
+        filepath = scenarios_dir / filename
+
+        data = sc.model_dump(mode="json", exclude_none=True)
+        # Remove default/empty fields for cleaner YAML
+        for step in data.get("steps", []):
+            for key in list(step.keys()):
+                if step[key] is None:
+                    del step[key]
+            target = step.get("target")
+            if target:
+                step["target"] = {k: v for k, v in target.items() if v is not None}
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+        saved_files.append(filename)
+
+    await _manager.broadcast({
+        "type": "success",
+        "message": f"시나리오 {len(scenarios)}개 생성 완료",
+    })
+
+    return JSONResponse(content={
+        "success": True,
+        "count": len(scenarios),
+        "files": saved_files,
+        "scenarios": [
+            {"id": s.id, "name": s.name, "steps": len(s.steps)}
+            for s in scenarios
+        ],
+    })
 
 
 # ---------------------------------------------------------------------------

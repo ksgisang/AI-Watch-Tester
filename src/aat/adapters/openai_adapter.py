@@ -49,18 +49,41 @@ Return ONLY valid JSON, no markdown fences."""
 
 _SYSTEM_GENERATE_SCENARIOS = """\
 You are an expert QA engineer. Given a specification document, generate test \
-scenarios as a JSON array. Each element must have:
-- "id": "SC-NNN" format
-- "name": short name
-- "description": what the scenario tests
-- "tags": list of tags
-- "steps": list of step objects with "step" (int), "action", "description", \
-and optionally "value", "target"
-- "expected_result": list of expected result objects (can be empty)
-- "variables": dict of variables (can be empty)
+scenarios as a JSON array.
 
-For steps, valid actions include: navigate, find_and_click, find_and_type, \
-type_text, press_key, assert, wait, screenshot.
+Each scenario must follow this EXACT format:
+{"id": "SC-001", "name": "Short name", "description": "What this tests", \
+"tags": ["tag1"], "steps": [...], "expected_result": []}
+
+Each step MUST have "step" (integer from 1) and "description" (non-empty).
+
+VALID ACTIONS (use ONLY these):
+- "navigate" — requires "value" with URL. Example:
+  {"step": 1, "action": "navigate", "value": "{{url}}/login", "description": "Go to login"}
+- "find_and_click" — requires "target" with "text". Example:
+  {"step": 2, "action": "find_and_click", "target": {"text": "Login"}, \
+"description": "Click login", "humanize": true}
+- "find_and_type" — requires "target" with "text" AND "value". Example:
+  {"step": 3, "action": "find_and_type", "target": {"text": "Email"}, \
+"value": "user@test.com", "description": "Enter email", "humanize": true}
+- "type_text" — types into focused field. Example:
+  {"step": 4, "action": "type_text", "value": "hello", "description": "Type text"}
+- "press_key" — press a key. Example:
+  {"step": 5, "action": "press_key", "value": "Enter", "description": "Press enter"}
+- "assert" — requires "assert_type" and "expected". Example:
+  {"step": 6, "action": "assert", "assert_type": "text_visible", \
+"expected": [{"type": "text_visible", "value": "Welcome"}], "description": "Verify text"}
+- "wait" — milliseconds. Example:
+  {"step": 7, "action": "wait", "value": "2000", "description": "Wait 2s"}
+- "screenshot" — capture screen. Example:
+  {"step": 8, "action": "screenshot", "description": "Capture state"}
+
+CRITICAL RULES:
+- "click" is INVALID. Use "find_and_click"
+- "type" is INVALID. Use "find_and_type"
+- target must NOT have "role" or "url" fields. Only "text"
+- Use {{url}} for base URL in navigate actions
+- Do NOT include "variables" with hardcoded URLs
 
 Return ONLY a valid JSON array, no markdown fences."""
 

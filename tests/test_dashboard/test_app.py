@@ -11,6 +11,8 @@ pytest.importorskip("fastapi")
 if TYPE_CHECKING:
     from pathlib import Path
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 from fastapi.testclient import TestClient
 
 from aat.dashboard.app import create_app
@@ -306,3 +308,75 @@ class TestScenarioManagement:
         assert response.json()["status"] == "started"
         # Clean up
         client.post("/api/stop")
+
+
+class TestScenarioGeneration:
+    """Test AI scenario generation endpoint."""
+
+    def test_generate_empty_document(self, client: TestClient) -> None:
+        response = client.post(
+            "/api/scenarios/generate",
+            json={"document_text": ""},
+        )
+        assert response.status_code == 400
+        assert "비어있습니다" in response.json()["error"]
+
+    def test_generate_no_document(self, client: TestClient) -> None:
+        response = client.post(
+            "/api/scenarios/generate",
+            json={},
+        )
+        assert response.status_code == 400
+        assert "비어있습니다" in response.json()["error"]
+
+    def test_generate_success(self, client: TestClient) -> None:
+        from aat.core.models import Scenario, StepConfig
+
+        mock_scenario = Scenario(
+            id="SC-001",
+            name="Test Login",
+            description="Login test",
+            tags=["auth"],
+            steps=[
+                StepConfig(
+                    step=1,
+                    action="navigate",
+                    value="{{url}}/login",
+                    description="Go to login",
+                ),
+            ],
+        )
+
+        mock_adapter = MagicMock()
+        mock_adapter.generate_scenarios = AsyncMock(return_value=[mock_scenario])
+
+        mock_registry = {"claude": MagicMock(return_value=mock_adapter)}
+
+        with patch("aat.adapters.ADAPTER_REGISTRY", mock_registry):
+            response = client.post(
+                "/api/scenarios/generate",
+                json={"document_text": "Login page with email and password"},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["count"] == 1
+        assert len(data["files"]) == 1
+        assert data["scenarios"][0]["id"] == "SC-001"
+
+    def test_generate_ai_failure(self, client: TestClient) -> None:
+        mock_adapter_cls = MagicMock()
+        mock_adapter_cls.return_value.generate_scenarios = AsyncMock(
+            side_effect=Exception("API error"),
+        )
+        mock_registry = {"claude": mock_adapter_cls}
+
+        with patch("aat.adapters.ADAPTER_REGISTRY", mock_registry):
+            response = client.post(
+                "/api/scenarios/generate",
+                json={"document_text": "Some spec document"},
+            )
+
+        assert response.status_code == 500
+        assert "생성 실패" in response.json()["error"]
