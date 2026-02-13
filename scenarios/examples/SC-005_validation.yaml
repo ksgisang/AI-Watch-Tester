@@ -1,0 +1,56 @@
+id: "SC-005"
+name: "Input Validation"
+description: "Verify form validation on registration page"
+tags: ["validation", "register"]
+
+steps:
+  - step: 1
+    action: navigate
+    value: "{{url}}/register"
+    description: "Navigate to registration page"
+
+  - step: 2
+    action: find_and_click
+    target:
+      text: "Register"
+    description: "Click register button with empty fields"
+    humanize: true
+    screenshot_after: true
+
+  - step: 3
+    action: assert
+    assert_type: text_visible
+    expected:
+      - type: text_visible
+        value: "required"
+    description: "Verify required field validation error"
+
+  - step: 4
+    action: find_and_type
+    target:
+      text: "Email"
+    value: "invalid-email"
+    description: "Enter invalid email format"
+    humanize: true
+
+  - step: 5
+    action: find_and_click
+    target:
+      text: "Register"
+    description: "Click register button with invalid email"
+    humanize: true
+    screenshot_after: true
+
+  - step: 6
+    action: assert
+    assert_type: text_visible
+    expected:
+      - type: text_visible
+        value: "valid email"
+    description: "Verify email validation error"
+
+expected_result:
+  - type: text_visible
+    value: "required"
+  - type: text_visible
+    value: "valid email"

@@ -1,0 +1,77 @@
+id: "SC-003"
+name: "Main Page Navigation"
+description: "Verify main page content and navigation after login"
+tags: ["navigation", "main"]
+
+steps:
+  - step: 1
+    action: navigate
+    value: "{{url}}/login"
+    description: "Navigate to login page"
+
+  - step: 2
+    action: find_and_type
+    target:
+      text: "Email"
+    value: "test@example.com"
+    description: "Enter email address"
+    humanize: true
+
+  - step: 3
+    action: find_and_type
+    target:
+      text: "Password"
+    value: "password123"
+    description: "Enter password"
+    humanize: true
+
+  - step: 4
+    action: find_and_click
+    target:
+      text: "Login"
+    description: "Click login button"
+    humanize: true
+
+  - step: 5
+    action: assert
+    assert_type: text_visible
+    expected:
+      - type: text_visible
+        value: "Welcome, Test User!"
+    description: "Verify personalized welcome message"
+
+  - step: 6
+    action: find_and_click
+    target:
+      text: "Home"
+    description: "Click Home navigation link"
+    humanize: true
+
+  - step: 7
+    action: assert
+    assert_type: text_visible
+    expected:
+      - type: text_visible
+        value: "Welcome to AAT Demo"
+    description: "Verify home page content"
+
+  - step: 8
+    action: find_and_click
+    target:
+      text: "Main"
+    description: "Click Main navigation link"
+    humanize: true
+
+  - step: 9
+    action: assert
+    assert_type: url_contains
+    expected:
+      - type: url_contains
+        value: "/main"
+    description: "Verify redirect to main page"
+
+expected_result:
+  - type: text_visible
+    value: "Welcome to AAT Demo"
+  - type: url_contains
+    value: "/main"
