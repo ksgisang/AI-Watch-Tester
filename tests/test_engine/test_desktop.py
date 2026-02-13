@@ -51,10 +51,10 @@ class TestDesktopEngineInit:
 
 
 class TestDesktopEngineMousePosition:
-    def test_mouse_position_from_pyautogui(self, mock_pag: MagicMock) -> None:
-        mock_pag.position.return_value = MagicMock(x=150, y=250)
+    def test_mouse_position_returns_viewport_coords(self) -> None:
         engine = DesktopEngine()
-        engine._pag = mock_pag
+        assert engine.mouse_position == (0, 0)
+        engine._mouse_x, engine._mouse_y = 150, 250
         assert engine.mouse_position == (150, 250)
 
 
@@ -72,6 +72,10 @@ class TestDesktopEngineActions:
         mock_page.reload = AsyncMock()
         mock_page.inner_text = AsyncMock(return_value="Page text")
         mock_page.url = "https://example.com/page"
+        mock_page.evaluate = AsyncMock(return_value={
+            "screenX": 0, "screenY": 0,
+            "chromeWidth": 0, "chromeHeight": 0,
+        })
         engine._page = mock_page
         return engine
 
@@ -197,6 +201,65 @@ class TestDesktopEngineActions:
         engine_with_mocks.page.goto.side_effect = Exception("Network error")
         with pytest.raises(EngineError, match="Navigation.*failed"):
             await engine_with_mocks.navigate("https://fail.com")
+
+
+class TestDesktopEngineCoordinateConversion:
+    """Test viewport-to-screen coordinate conversion."""
+
+    def test_viewport_to_screen_no_offset(self) -> None:
+        engine = DesktopEngine()
+        assert engine._viewport_to_screen(100, 200) == (100, 200)
+
+    def test_viewport_to_screen_with_offset(self) -> None:
+        engine = DesktopEngine()
+        engine._window_offset_x = 50
+        engine._window_offset_y = 80
+        assert engine._viewport_to_screen(100, 200) == (150, 280)
+
+    async def test_click_applies_offset(self, mock_pag: MagicMock) -> None:
+        engine = DesktopEngine()
+        engine._pag = mock_pag
+        engine._window_offset_x = 50
+        engine._window_offset_y = 80
+        await engine.click(100, 200)
+        mock_pag.click.assert_called_once_with(150, 280)
+        # Stored position remains in viewport coords
+        assert engine._mouse_x == 100
+        assert engine._mouse_y == 200
+
+    async def test_move_mouse_applies_offset(self, mock_pag: MagicMock) -> None:
+        engine = DesktopEngine()
+        engine._pag = mock_pag
+        engine._window_offset_x = 30
+        engine._window_offset_y = 60
+        await engine.move_mouse(200, 300)
+        mock_pag.moveTo.assert_called_once_with(230, 360)
+        assert engine.mouse_position == (200, 300)
+
+    @pytest.mark.asyncio
+    async def test_update_window_offset(self, mock_pag: MagicMock) -> None:
+        engine = DesktopEngine()
+        engine._pag = mock_pag
+        mock_page = MagicMock()
+        mock_page.evaluate = AsyncMock(return_value={
+            "screenX": 100, "screenY": 50,
+            "chromeWidth": 0, "chromeHeight": 72,
+        })
+        engine._page = mock_page
+        await engine._update_window_offset()
+        assert engine._window_offset_x == 100
+        assert engine._window_offset_y == 122  # 50 + 72
+
+    @pytest.mark.asyncio
+    async def test_update_window_offset_fallback(self, mock_pag: MagicMock) -> None:
+        engine = DesktopEngine()
+        engine._pag = mock_pag
+        mock_page = MagicMock()
+        mock_page.evaluate = AsyncMock(side_effect=Exception("no JS"))
+        engine._page = mock_page
+        await engine._update_window_offset()
+        assert engine._window_offset_x == 0
+        assert engine._window_offset_y == 0
 
 
 class TestDesktopEngineRegistry:

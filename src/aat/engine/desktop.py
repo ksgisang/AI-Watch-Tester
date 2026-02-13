@@ -53,6 +53,9 @@ class DesktopEngine(BaseEngine):
         self._mouse_x: int = 0
         self._mouse_y: int = 0
         self._pag: types.ModuleType | None = None
+        # Viewport-to-screen coordinate offset
+        self._window_offset_x: int = 0
+        self._window_offset_y: int = 0
 
     @property
     def page(self) -> Page:
@@ -71,9 +74,8 @@ class DesktopEngine(BaseEngine):
 
     @property
     def mouse_position(self) -> tuple[int, int]:
-        """Current mouse position from PyAutoGUI."""
-        pos = self.pag.position()
-        return (pos.x, pos.y)
+        """Current mouse position in viewport coordinates (for Humanizer)."""
+        return (self._mouse_x, self._mouse_y)
 
     async def start(self) -> None:
         """Launch browser via Playwright and configure PyAutoGUI."""
@@ -99,6 +101,7 @@ class DesktopEngine(BaseEngine):
             )
             self._context.set_default_timeout(self._config.timeout_ms)
             self._page = await self._context.new_page()
+            await self._update_window_offset()
         except EngineError:
             raise
         except Exception as e:
@@ -122,6 +125,33 @@ class DesktopEngine(BaseEngine):
             self._context = None
             self._browser = None
             self._playwright = None
+
+    # ------------------------------------------------------------------
+    # Coordinate conversion (viewport → screen)
+    # ------------------------------------------------------------------
+
+    async def _update_window_offset(self) -> None:
+        """Detect browser window position to compute viewport-to-screen offset."""
+        if not self._page:
+            return
+        try:
+            offsets = await self._page.evaluate(
+                """() => ({
+                    screenX: window.screenX,
+                    screenY: window.screenY,
+                    chromeWidth: window.outerWidth - window.innerWidth,
+                    chromeHeight: window.outerHeight - window.innerHeight,
+                })"""
+            )
+            self._window_offset_x = offsets["screenX"] + offsets["chromeWidth"] // 2
+            self._window_offset_y = offsets["screenY"] + offsets["chromeHeight"]
+        except Exception:
+            self._window_offset_x = 0
+            self._window_offset_y = 0
+
+    def _viewport_to_screen(self, x: int, y: int) -> tuple[int, int]:
+        """Convert Playwright viewport coordinates to OS screen coordinates."""
+        return (x + self._window_offset_x, y + self._window_offset_y)
 
     # ------------------------------------------------------------------
     # Screenshot — PyAutoGUI (OS-level full screen)
@@ -149,18 +179,21 @@ class DesktopEngine(BaseEngine):
     # ------------------------------------------------------------------
 
     async def click(self, x: int, y: int) -> None:
-        """Click at coordinates via PyAutoGUI."""
-        await asyncio.to_thread(self.pag.click, x, y)
+        """Click at viewport coordinates via PyAutoGUI."""
+        sx, sy = self._viewport_to_screen(x, y)
+        await asyncio.to_thread(self.pag.click, sx, sy)
         self._mouse_x, self._mouse_y = x, y
 
     async def double_click(self, x: int, y: int) -> None:
-        """Double-click at coordinates via PyAutoGUI."""
-        await asyncio.to_thread(self.pag.doubleClick, x, y)
+        """Double-click at viewport coordinates via PyAutoGUI."""
+        sx, sy = self._viewport_to_screen(x, y)
+        await asyncio.to_thread(self.pag.doubleClick, sx, sy)
         self._mouse_x, self._mouse_y = x, y
 
     async def right_click(self, x: int, y: int) -> None:
-        """Right-click at coordinates via PyAutoGUI."""
-        await asyncio.to_thread(self.pag.rightClick, x, y)
+        """Right-click at viewport coordinates via PyAutoGUI."""
+        sx, sy = self._viewport_to_screen(x, y)
+        await asyncio.to_thread(self.pag.rightClick, sx, sy)
         self._mouse_x, self._mouse_y = x, y
 
     async def click_at_current(self) -> None:
@@ -176,13 +209,15 @@ class DesktopEngine(BaseEngine):
         await asyncio.to_thread(self.pag.rightClick)
 
     async def move_mouse(self, x: int, y: int) -> None:
-        """Move mouse pointer via PyAutoGUI (no click)."""
-        await asyncio.to_thread(self.pag.moveTo, x, y)
+        """Move mouse pointer via PyAutoGUI (viewport coordinates)."""
+        sx, sy = self._viewport_to_screen(x, y)
+        await asyncio.to_thread(self.pag.moveTo, sx, sy)
         self._mouse_x, self._mouse_y = x, y
 
     async def scroll(self, x: int, y: int, delta: int) -> None:
-        """Scroll at coordinates via PyAutoGUI. delta > 0: down, delta < 0: up."""
-        await asyncio.to_thread(self.pag.moveTo, x, y)
+        """Scroll at viewport coordinates via PyAutoGUI."""
+        sx, sy = self._viewport_to_screen(x, y)
+        await asyncio.to_thread(self.pag.moveTo, sx, sy)
         # PyAutoGUI scroll: positive = up, negative = down (opposite convention)
         await asyncio.to_thread(self.pag.scroll, -delta)
         self._mouse_x, self._mouse_y = x, y
@@ -211,6 +246,9 @@ class DesktopEngine(BaseEngine):
         """Navigate to URL via Playwright."""
         try:
             await self.page.goto(url, wait_until="domcontentloaded")
+            await self._update_window_offset()
+        except EngineError:
+            raise
         except Exception as e:
             msg = f"Navigation to {url} failed: {e}"
             raise EngineError(msg) from e

@@ -60,7 +60,7 @@ class Humanizer:
             await asyncio.sleep(step_delay)
 
         # Brief pause after arrival (human hesitation before click)
-        await asyncio.sleep(random.uniform(0.1, 0.3))
+        await asyncio.sleep(random.uniform(0.05, 0.15))
 
     async def type_text(self, engine: BaseEngine, text: str) -> None:
         """Type text one character at a time with variable delay.
