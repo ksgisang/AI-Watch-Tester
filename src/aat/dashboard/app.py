@@ -343,10 +343,18 @@ async def _generate_scenarios(request: Request) -> JSONResponse:
     # Create AI adapter
     from aat.adapters import ADAPTER_REGISTRY
 
-    adapter_cls = ADAPTER_REGISTRY.get(_current_config.ai.provider)
+    provider = _current_config.ai.provider
+    adapter_cls = ADAPTER_REGISTRY.get(provider)
     if adapter_cls is None:
         return JSONResponse(
-            content={"error": f"AI 어댑터 없음: {_current_config.ai.provider}"},
+            content={"error": f"AI 어댑터 없음: {provider}"},
+            status_code=400,
+        )
+
+    # Validate API key for providers that require one
+    if provider != "ollama" and not _current_config.ai.api_key:
+        return JSONResponse(
+            content={"error": f"API 키가 설정되지 않았습니다. 설정 > API 키에 {provider} API 키를 입력하고 '설정 저장'을 클릭하세요."},
             status_code=400,
         )
 
