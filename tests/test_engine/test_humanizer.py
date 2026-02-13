@@ -78,7 +78,7 @@ class TestHumanizer:
     async def test_default_config(self) -> None:
         humanizer = Humanizer()
         assert humanizer._config.enabled is True
-        assert humanizer._config.mouse_speed_min == 0.5
+        assert humanizer._config.mouse_speed_min == 0.25
 
     def test_bezier_point_endpoints(self) -> None:
         """Bezier curve starts at t=0 and ends at t=1."""

@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import io
+import logging
 from pathlib import Path  # noqa: TC003
 from typing import TYPE_CHECKING, Any
+
+_log = logging.getLogger(__name__)
 
 from playwright.async_api import (
     Browser,
@@ -139,20 +142,20 @@ class DesktopEngine(BaseEngine):
         try:
             info = await self._page.evaluate(
                 """() => ({
-                    screenX: window.screenX,
-                    screenY: window.screenY,
-                    chromeWidth: window.outerWidth - window.innerWidth,
-                    chromeHeight: window.outerHeight - window.innerHeight,
+                    offsetX: window.screenX + window.outerWidth - window.innerWidth,
+                    offsetY: window.screenY + window.outerHeight - window.innerHeight,
                     devicePixelRatio: window.devicePixelRatio,
                 })"""
             )
-            self._window_offset_x = int(
-                info["screenX"] + info["chromeWidth"] / 2
-            )
-            self._window_offset_y = int(
-                info["screenY"] + info["chromeHeight"]
-            )
+            self._window_offset_x = int(info["offsetX"] / 2)
+            self._window_offset_y = int(info["offsetY"])
             self._device_pixel_ratio = info.get("devicePixelRatio", 1.0)
+            _log.debug(
+                "Window offset: x=%d, y=%d, dpr=%.1f",
+                self._window_offset_x,
+                self._window_offset_y,
+                self._device_pixel_ratio,
+            )
         except Exception:
             self._window_offset_x = 0
             self._window_offset_y = 80  # sensible fallback for typical browser chrome

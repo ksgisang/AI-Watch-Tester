@@ -60,7 +60,7 @@ class Humanizer:
             await asyncio.sleep(step_delay)
 
         # Brief pause after arrival (human hesitation before click)
-        await asyncio.sleep(random.uniform(0.05, 0.15))
+        await asyncio.sleep(random.uniform(0.03, 0.08))
 
     async def move_to_screen(self, engine: BaseEngine, x: int, y: int) -> None:
         """Bezier mouse movement using screen coordinates directly.
@@ -103,7 +103,7 @@ class Humanizer:
             await move_fn(int(px), int(py))
             await asyncio.sleep(step_delay)
 
-        await asyncio.sleep(random.uniform(0.05, 0.15))
+        await asyncio.sleep(random.uniform(0.03, 0.08))
 
     async def type_text(self, engine: BaseEngine, text: str) -> None:
         """Type text one character at a time with variable delay.

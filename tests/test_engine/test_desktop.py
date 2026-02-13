@@ -217,14 +217,14 @@ class TestDesktopEngineCoordinateConversion:
         engine._pag = mock_pag
         mock_page = MagicMock()
         mock_page.evaluate = AsyncMock(return_value={
-            "screenX": 100, "screenY": 50,
-            "chromeWidth": 0, "chromeHeight": 72,
+            "offsetX": 200,
+            "offsetY": 122,
             "devicePixelRatio": 2.0,
         })
         engine._page = mock_page
         await engine._update_window_offset()
-        assert engine._window_offset_x == 100
-        assert engine._window_offset_y == 122  # 50 + 72
+        assert engine._window_offset_x == 100  # 200 / 2
+        assert engine._window_offset_y == 122
         assert engine._device_pixel_ratio == 2.0
 
     @pytest.mark.asyncio
