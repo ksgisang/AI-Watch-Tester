@@ -1631,10 +1631,21 @@ async function loadScenarios(customPath) {
     allScenarioIds = [];
 
     if (!data.scenarios || data.scenarios.length === 0) {
-      list.innerHTML = '<div style="color: var(--text-secondary); font-size: 12px; padding: 8px; text-align: center;">시나리오 없음</div>';
       totalScenarios = 0;
       updateScenarioCount();
-      if (data.error) addLog('warning', data.error);
+      if (data.guidance) {
+        // Show user-friendly guidance in scenario list area
+        const lines = data.guidance.split('\n').map(l => escHtml(l)).join('<br>');
+        list.innerHTML = `<div style="color: #ffa726; font-size: 12px; padding: 10px; line-height: 1.6; white-space: pre-wrap;">
+          ${lines}
+        </div>`;
+        addLog('warning', '시나리오 형식 오류 — 시나리오 목록에서 상세 안내를 확인하세요.');
+      } else if (data.error) {
+        list.innerHTML = '<div style="color: #ffa726; font-size: 12px; padding: 8px;">시나리오를 불러올 수 없습니다. 경로와 파일 형식을 확인해주세요.</div>';
+        addLog('warning', data.error);
+      } else {
+        list.innerHTML = '<div style="color: var(--text-secondary); font-size: 12px; padding: 8px; text-align: center;">시나리오 없음</div>';
+      }
       return;
     }
 

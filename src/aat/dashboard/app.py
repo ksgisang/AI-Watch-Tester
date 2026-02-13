@@ -221,6 +221,46 @@ async def _update_config(request: Request) -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 
+def _get_scenario_guidance(error_str: str) -> str:
+    """Parse Pydantic validation errors and return user-friendly Korean guidance."""
+    hints: list[str] = []
+
+    lower = error_str.lower()
+
+    if "step" in lower and ("field required" in lower or "missing" in lower):
+        hints.append("각 스텝에 'step' 번호(정수)가 필요합니다 (예: step: 1)")
+
+    if "'click'" in lower or "'type'" in lower or "action" in lower:
+        hints.append(
+            "action은 다음 중 하나여야 합니다: "
+            "navigate, find_and_click, find_and_type, scroll, wait, "
+            "screenshot, assert, hover, press_key, select_option, drag_and_drop"
+        )
+
+    if "target" in lower and ("role" in lower or "url" in lower):
+        hints.append("target에는 'text' 필드만 사용하세요 (role, url은 지원하지 않음)")
+
+    if "assert_type" in lower or "expected" in lower:
+        hints.append(
+            "assert 스텝에는 assert_type과 expected 리스트가 필요합니다\n"
+            "  예: assert_type: text_visible\n"
+            "      expected:\n"
+            "        - type: text_visible\n"
+            "          value: \"확인할 텍스트\""
+        )
+
+    if "variables" in lower:
+        hints.append("시나리오 파일에 'variables' 섹션은 지원하지 않습니다. URL은 설정의 {{url}} 변수를 사용하세요")
+
+    if not hints:
+        hints.append("시나리오 YAML 파일의 형식이 올바르지 않습니다")
+
+    return (
+        "시나리오 형식 오류가 있습니다. 아래 사항을 확인해주세요:\n\n"
+        + "\n".join(f"• {h}" for h in hints)
+    )
+
+
 async def _list_scenarios(request: Request) -> JSONResponse:
     """List available scenarios.
 
@@ -254,7 +294,13 @@ async def _list_scenarios(request: Request) -> JSONResponse:
             )
         return JSONResponse(content={"scenarios": result, "path": str(scenarios_dir)})
     except AATError as exc:
-        return JSONResponse(content={"scenarios": [], "error": str(exc)})
+        error_str = str(exc)
+        guidance = _get_scenario_guidance(error_str)
+        return JSONResponse(content={
+            "scenarios": [],
+            "error": error_str,
+            "guidance": guidance,
+        })
 
 
 async def _upload_scenario(request: Request) -> JSONResponse:

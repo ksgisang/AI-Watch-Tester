@@ -386,3 +386,39 @@ class TestScenarioGeneration:
 
         assert response.status_code == 500
         assert "생성 실패" in response.json()["error"]
+
+
+class TestScenarioGuidance:
+    """Tests for _get_scenario_guidance helper."""
+
+    def test_missing_step_field(self) -> None:
+        from aat.dashboard.app import _get_scenario_guidance
+
+        result = _get_scenario_guidance("step\nField required")
+        assert "step" in result
+        assert "번호" in result
+
+    def test_invalid_action_name(self) -> None:
+        from aat.dashboard.app import _get_scenario_guidance
+
+        result = _get_scenario_guidance("Input should be 'click' action invalid")
+        assert "find_and_click" in result
+
+    def test_target_role_hint(self) -> None:
+        from aat.dashboard.app import _get_scenario_guidance
+
+        result = _get_scenario_guidance("target field: role not allowed")
+        assert "text" in result
+
+    def test_assert_hint(self) -> None:
+        from aat.dashboard.app import _get_scenario_guidance
+
+        result = _get_scenario_guidance("assert_type field required, expected missing")
+        assert "assert_type" in result
+        assert "expected" in result
+
+    def test_fallback_hint(self) -> None:
+        from aat.dashboard.app import _get_scenario_guidance
+
+        result = _get_scenario_guidance("some unknown error")
+        assert "형식" in result
