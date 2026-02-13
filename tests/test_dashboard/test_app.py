@@ -364,6 +364,8 @@ class TestScenarioGeneration:
         assert data["count"] == 1
         assert len(data["files"]) == 1
         assert data["scenarios"][0]["id"] == "SC-001"
+        assert data["scenarios"][0]["steps_count"] == 1
+        assert "scenarios_path" in data
 
     def test_generate_ai_failure(self, client: TestClient) -> None:
         mock_adapter_cls = MagicMock()

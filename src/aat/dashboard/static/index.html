@@ -695,7 +695,7 @@
           <button class="btn btn-primary btn-sm" onclick="loadScenariosFromPath()">불러오기</button>
         </div>
         <div class="scenario-list" id="scenarioList">
-          <div style="color: var(--text-secondary); font-size: 12px; padding: 8px; text-align: center;">불러오는 중...</div>
+          <div style="color: var(--text-secondary); font-size: 12px; padding: 8px; text-align: center;">기획서에서 생성하거나, 시나리오 파일을 업로드하세요.</div>
         </div>
         <div style="display:flex;gap:6px;margin-top:4px;align-items:center;flex-wrap:wrap">
           <button class="btn btn-outline btn-sm" onclick="loadScenarios()">새로고침</button>
@@ -1518,7 +1518,41 @@ async function generateScenarios() {
     }
     addLog('success', `시나리오 ${data.count}개 생성 완료: ${data.files.join(', ')}`);
     status.textContent = `${data.count}개 생성 완료`;
-    await loadScenarios();
+
+    // 시나리오 경로를 임시 폴더로 설정
+    if (data.scenarios_path) {
+      document.getElementById('scenarioPath').value = data.scenarios_path;
+    }
+
+    // 목록에 직접 추가
+    const list = document.getElementById('scenarioList');
+    list.innerHTML = '';
+    allScenarioIds = [];
+    selectedScenarios.clear();
+    totalScenarios = data.scenarios.length;
+    data.scenarios.forEach(sc => {
+      allScenarioIds.push(sc.id);
+      selectedScenarios.add(sc.id);
+      const item = document.createElement('div');
+      item.className = 'scenario-item selected';
+      item.innerHTML = `
+        <span class="scenario-id">${escHtml(sc.id)}</span>
+        <span class="scenario-name">${escHtml(sc.name)}</span>
+        <span class="scenario-meta">${sc.steps_count}단계${sc.tags && sc.tags.length ? ' | ' + sc.tags.join(', ') : ''}</span>
+      `;
+      item.onclick = () => {
+        if (selectedScenarios.has(sc.id)) {
+          selectedScenarios.delete(sc.id);
+          item.classList.remove('selected');
+        } else {
+          selectedScenarios.add(sc.id);
+          item.classList.add('selected');
+        }
+        updateScenarioCount();
+      };
+      list.appendChild(item);
+    });
+    updateScenarioCount();
   } catch (e) {
     addLog('error', `시나리오 생성 오류: ${e.message}`);
     status.textContent = '생성 오류';
@@ -1639,7 +1673,9 @@ async function uploadScenario() {
 
   input.value = '';
   if (successCount > 0) {
-    loadScenarios();
+    // 업로드된 파일의 시나리오를 불러오기 위해 현재 경로로 로드
+    const path = document.getElementById('scenarioPath').value.trim();
+    if (path) loadScenarios(path);
   }
 }
 
@@ -1701,7 +1737,10 @@ async function startRun() {
     const res = await fetch('/api/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scenario_ids: ids }),
+      body: JSON.stringify({
+        scenario_path: document.getElementById('scenarioPath').value.trim() || undefined,
+        scenario_ids: ids,
+      }),
     });
     const data = await res.json();
     if (data.error) {
@@ -1727,7 +1766,11 @@ async function startLoop() {
     const res = await fetch('/api/loop', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ approval_mode: approvalMode, scenario_ids: ids }),
+      body: JSON.stringify({
+        approval_mode: approvalMode,
+        scenario_path: document.getElementById('scenarioPath').value.trim() || undefined,
+        scenario_ids: ids,
+      }),
     });
     const data = await res.json();
     if (data.error) {
@@ -1760,7 +1803,6 @@ function escHtml(text) {
 document.addEventListener('DOMContentLoaded', () => {
   connectWS();
   loadConfig();
-  loadScenarios();
   loadDocuments();
   checkServerStatus();
   setupDropZone();

@@ -362,21 +362,22 @@ async def _generate_scenarios(request: Request) -> JSONResponse:
     if not scenarios:
         return JSONResponse(content={"error": "생성된 시나리오가 없습니다"}, status_code=400)
 
-    # Save as YAML files
+    # Save to temp directory (not mixed with project files)
+    import tempfile
+
     import yaml
 
-    scenarios_dir = _resolve_scenario_path(_current_config.scenarios_dir)
-    scenarios_dir.mkdir(parents=True, exist_ok=True)
+    temp_dir = Path(tempfile.mkdtemp(prefix="aat_scenarios_"))
 
     saved_files: list[str] = []
+    result_scenarios: list[dict[str, Any]] = []
     for sc in scenarios:
         safe_name = sc.name.replace(" ", "_").lower()
         safe_name = re.sub(r"[^a-z0-9_]", "", safe_name)
         filename = f"{sc.id}_{safe_name}.yaml"
-        filepath = scenarios_dir / filename
+        filepath = temp_dir / filename
 
         data = sc.model_dump(mode="json", exclude_none=True)
-        # Remove default/empty fields for cleaner YAML
         for step in data.get("steps", []):
             for key in list(step.keys()):
                 if step[key] is None:
@@ -389,6 +390,13 @@ async def _generate_scenarios(request: Request) -> JSONResponse:
             yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
         saved_files.append(filename)
+        result_scenarios.append({
+            "id": sc.id,
+            "name": sc.name,
+            "description": sc.description,
+            "tags": sc.tags,
+            "steps_count": len(sc.steps),
+        })
 
     await _manager.broadcast({
         "type": "success",
@@ -399,10 +407,8 @@ async def _generate_scenarios(request: Request) -> JSONResponse:
         "success": True,
         "count": len(scenarios),
         "files": saved_files,
-        "scenarios": [
-            {"id": s.id, "name": s.name, "steps": len(s.steps)}
-            for s in scenarios
-        ],
+        "scenarios": result_scenarios,
+        "scenarios_path": str(temp_dir),
     })
 
 
