@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -86,6 +87,7 @@ _server_subprocess = SubprocessManager(
 _current_config: Config | None = None
 _config_path: Path | None = None
 _run_task: asyncio.Task[Any] | None = None
+_last_server_port: int | None = None
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -138,6 +140,9 @@ def create_app(config_path: Path | None = None) -> FastAPI:
     # Document management
     app.add_api_route("/api/documents/upload", _upload_documents, methods=["POST"])
     app.add_api_route("/api/documents", _list_documents, methods=["GET"])
+
+    # Preflight check
+    app.add_api_route("/api/preflight", _preflight, methods=["POST"])
 
     # Folder browser
     app.add_api_route("/api/browse", _browse_directory, methods=["GET"])
@@ -297,9 +302,7 @@ async def _upload_scenario(request: Request) -> JSONResponse:
     content = await file.read()
     dest.write_bytes(content)
 
-    await _manager.broadcast(
-        {"type": "info", "message": f"Scenario uploaded: {safe_name}"}
-    )
+    await _manager.broadcast({"type": "info", "message": f"Scenario uploaded: {safe_name}"})
 
     # Return updated scenario list
     try:
@@ -317,13 +320,9 @@ async def _upload_scenario(request: Request) -> JSONResponse:
             }
             for sc in scenarios
         ]
-        return JSONResponse(
-            content={"status": "ok", "uploaded": safe_name, "scenarios": result}
-        )
+        return JSONResponse(content={"status": "ok", "uploaded": safe_name, "scenarios": result})
     except AATError:
-        return JSONResponse(
-            content={"status": "ok", "uploaded": safe_name, "scenarios": []}
-        )
+        return JSONResponse(content={"status": "ok", "uploaded": safe_name, "scenarios": []})
 
 
 # ---------------------------------------------------------------------------
@@ -529,6 +528,11 @@ async def _start_server(request: Request) -> JSONResponse:
     command = body.get("command", "")
     cwd = body.get("cwd", "")
 
+    # Replace "python3" with the current venv interpreter so that
+    # subprocess inherits installed packages (flask, django, etc.)
+    if command and "python3" in command:
+        command = command.replace("python3", sys.executable)
+
     if not command:
         return JSONResponse(
             content={"error": "No command specified"},
@@ -546,7 +550,9 @@ async def _start_server(request: Request) -> JSONResponse:
         )
 
     # Extract port and suggest URL
+    global _last_server_port  # noqa: PLW0603
     port = _extract_port(command)
+    _last_server_port = port
     suggested_url = f"http://localhost:{port}" if port else None
 
     await _manager.broadcast(
@@ -737,6 +743,334 @@ async def _browse_directory(request: Request) -> JSONResponse:
 
 
 # ---------------------------------------------------------------------------
+# Preflight check
+# ---------------------------------------------------------------------------
+
+
+async def _preflight(request: Request) -> JSONResponse:
+    """Run pre-flight checks before test execution.
+
+    Body params:
+        mode: "run" | "loop" (default: "run")
+
+    Returns check results with pass/warn/fail status and guidance messages.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    mode = body.get("mode", "run")
+    checks: list[dict[str, Any]] = []
+
+    # 1. server_running — warn only
+    checks.append(
+        {
+            "id": "server_running",
+            "status": "pass" if _server_subprocess.is_running else "warn",
+            "message": "서버 실행 중"
+            if _server_subprocess.is_running
+            else "서버가 실행되지 않았습니다",
+            "guidance": ""
+            if _server_subprocess.is_running
+            else "Step 1에서 서버를 시작하세요. 외부 서버를 사용하는 경우 무시해도 됩니다.",
+            "blocking": False,
+        }
+    )
+
+    # 2. url_configured — blocking
+    url = _current_config.url if _current_config else ""
+    url_ok = bool(url and url.strip())
+    checks.append(
+        {
+            "id": "url_configured",
+            "status": "pass" if url_ok else "fail",
+            "message": f"URL 설정됨: {url}" if url_ok else "테스트 대상 URL이 설정되지 않았습니다",
+            "guidance": ""
+            if url_ok
+            else "설정 > 대상 URL에 테스트할 주소를 입력하고 '설정 저장'을 클릭하세요.",
+            "blocking": True,
+        }
+    )
+
+    # 3. url_reachable — warn only (skip if url not configured)
+    if url_ok:
+        try:
+            from aat.core.connection import test_url
+
+            reachable, msg = await test_url(url)
+            checks.append(
+                {
+                    "id": "url_reachable",
+                    "status": "pass" if reachable else "warn",
+                    "message": msg,
+                    "guidance": (
+                        ""
+                        if reachable
+                        else "URL에 접속할 수 없습니다. "
+                        "서버가 실행 중인지, URL이 정확한지 확인하세요."
+                    ),
+                    "blocking": False,
+                }
+            )
+        except Exception as exc:
+            checks.append(
+                {
+                    "id": "url_reachable",
+                    "status": "warn",
+                    "message": f"URL 접속 확인 실패: {exc}",
+                    "guidance": "URL 접속 확인 중 오류가 발생했습니다. 서버 상태를 확인하세요.",
+                    "blocking": False,
+                }
+            )
+    else:
+        checks.append(
+            {
+                "id": "url_reachable",
+                "status": "skip",
+                "message": "URL 미설정으로 접속 확인 건너뜀",
+                "guidance": "",
+                "blocking": False,
+            }
+        )
+
+    # 4. port_mismatch — warn only
+    if url_ok and _last_server_port:
+        import urllib.parse
+
+        try:
+            parsed = urllib.parse.urlparse(url)
+            url_port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            if url_port != _last_server_port:
+                checks.append(
+                    {
+                        "id": "port_mismatch",
+                        "status": "warn",
+                        "message": f"포트 불일치: 서버={_last_server_port}, URL={url_port}",
+                        "guidance": (
+                            f"서버는 포트 {_last_server_port}에서 실행 중이지만, "
+                            f"URL은 포트 {url_port}을 사용합니다. "
+                            f"URL을 http://localhost:{_last_server_port} 으로 변경하세요."
+                        ),
+                        "blocking": False,
+                    }
+                )
+            else:
+                checks.append(
+                    {
+                        "id": "port_mismatch",
+                        "status": "pass",
+                        "message": f"포트 일치: {url_port}",
+                        "guidance": "",
+                        "blocking": False,
+                    }
+                )
+        except Exception:
+            checks.append(
+                {
+                    "id": "port_mismatch",
+                    "status": "skip",
+                    "message": "포트 비교 불가",
+                    "guidance": "",
+                    "blocking": False,
+                }
+            )
+    else:
+        checks.append(
+            {
+                "id": "port_mismatch",
+                "status": "skip",
+                "message": "포트 비교 건너뜀",
+                "guidance": "",
+                "blocking": False,
+            }
+        )
+
+    # 5. scenarios_loaded — blocking
+    try:
+        from aat.core.scenario_loader import load_scenarios
+
+        sc_path = _current_config.scenarios_dir if _current_config else "scenarios/"
+        resolved = _resolve_scenario_path(sc_path)
+        variables = _build_variables()
+        scenarios = load_scenarios(resolved, variables=variables)
+        checks.append(
+            {
+                "id": "scenarios_loaded",
+                "status": "pass" if scenarios else "fail",
+                "message": f"시나리오 {len(scenarios)}개 로드됨"
+                if scenarios
+                else "시나리오를 찾을 수 없습니다",
+                "guidance": "" if scenarios else "Step 2에서 시나리오를 불러오거나 업로드하세요.",
+                "blocking": True,
+            }
+        )
+    except Exception as exc:
+        checks.append(
+            {
+                "id": "scenarios_loaded",
+                "status": "fail",
+                "message": f"시나리오 로드 실패: {exc}",
+                "guidance": "시나리오 경로와 YAML 형식을 확인하세요.",
+                "blocking": True,
+            }
+        )
+
+    # 6 & 7. AI checks — blocking only for loop mode
+    is_loop = mode == "loop"
+    if is_loop:
+        provider = _current_config.ai.provider if _current_config else ""
+        api_key = _current_config.ai.api_key if _current_config else ""
+
+        # ai_provider
+        from aat.adapters import ADAPTER_REGISTRY
+
+        if provider in ADAPTER_REGISTRY:
+            checks.append(
+                {
+                    "id": "ai_provider",
+                    "status": "pass",
+                    "message": f"AI 제공자: {provider}",
+                    "guidance": "",
+                    "blocking": True,
+                }
+            )
+        else:
+            checks.append(
+                {
+                    "id": "ai_provider",
+                    "status": "fail",
+                    "message": f"알 수 없는 AI 제공자: {provider}",
+                    "guidance": (
+                        "설정에서 AI 제공자를 선택하세요. "
+                        f"지원: {', '.join(ADAPTER_REGISTRY.keys())}"
+                    ),
+                    "blocking": True,
+                }
+            )
+
+        # ai_api_key
+        if provider == "ollama":
+            checks.append(
+                {
+                    "id": "ai_api_key",
+                    "status": "skip",
+                    "message": "Ollama는 API 키 불필요",
+                    "guidance": "",
+                    "blocking": False,
+                }
+            )
+        elif api_key:
+            checks.append(
+                {
+                    "id": "ai_api_key",
+                    "status": "pass",
+                    "message": "API 키 설정됨",
+                    "guidance": "",
+                    "blocking": True,
+                }
+            )
+        else:
+            checks.append(
+                {
+                    "id": "ai_api_key",
+                    "status": "fail",
+                    "message": "API 키가 설정되지 않았습니다",
+                    "guidance": (
+                        f"설정 > API 키에 {provider} API 키를 입력하고 "
+                        "'설정 저장'을 클릭하세요."
+                    ),
+                    "blocking": True,
+                }
+            )
+    else:
+        checks.append(
+            {
+                "id": "ai_provider",
+                "status": "skip",
+                "message": "단일 실행 모드 — AI 검사 건너뜀",
+                "guidance": "",
+                "blocking": False,
+            }
+        )
+        checks.append(
+            {
+                "id": "ai_api_key",
+                "status": "skip",
+                "message": "단일 실행 모드 — AI 검사 건너뜀",
+                "guidance": "",
+                "blocking": False,
+            }
+        )
+
+    has_blocking_fail = any(c["status"] == "fail" and c["blocking"] for c in checks)
+    return JSONResponse(content={"ok": not has_blocking_fail, "checks": checks})
+
+
+# ---------------------------------------------------------------------------
+# Smart error guidance
+# ---------------------------------------------------------------------------
+
+_ERROR_GUIDANCE: list[tuple[str, str]] = [
+    (
+        "ERR_CONNECTION_REFUSED",
+        "서버에 연결할 수 없습니다. Step 1에서 서버를 시작했는지 확인하세요.",
+    ),
+    ("ERR_CONNECTION_RESET", "서버 연결이 끊어졌습니다. 서버가 정상 실행 중인지 확인하세요."),
+    ("ERR_NAME_NOT_RESOLVED", "도메인을 찾을 수 없습니다. URL이 정확한지 확인하세요."),
+    (
+        "404",
+        "페이지를 찾을 수 없습니다 (404). 서버 유형이 맞는지, URL 경로가 정확한지 확인하세요.",
+    ),
+    ("403", "접근이 거부되었습니다 (403). 인증 설정을 확인하세요."),
+    ("500", "서버 내부 오류 (500). 서버 로그를 확인하세요."),
+    ("Timeout", "연결 시간 초과. 서버 상태와 네트워크를 확인하세요."),
+    ("timed out", "연결 시간 초과. 서버 상태와 네트워크를 확인하세요."),
+    ("api_key", "API 키를 확인하세요. 설정 > API 키에서 올바른 키를 입력했는지 확인하세요."),
+    ("API key", "API 키를 확인하세요. 설정 > API 키에서 올바른 키를 입력했는지 확인하세요."),
+    ("authentication", "인증 오류. API 키가 올바른지 확인하세요."),
+    ("Ollama", "Ollama가 실행 중인지 확인하세요 (ollama serve)."),
+    ("ollama", "Ollama가 실행 중인지 확인하세요 (ollama serve)."),
+]
+
+# AAT exception type → guidance
+_EXCEPTION_GUIDANCE: dict[str, str] = {
+    "EngineError": (
+        "브라우저 엔진 오류. Playwright가 설치되어 있는지 확인하세요 (playwright install)."
+    ),
+    "AdapterError": "AI 어댑터 오류. API 키와 모델 설정을 확인하세요.",
+    "ScenarioError": "시나리오 오류. YAML 형식과 필수 필드를 확인하세요.",
+    "MatchError": "이미지 매칭 오류. 참조 이미지 경로와 화면 상태를 확인하세요.",
+    "ConfigError": "설정 오류. 설정 파일의 형식과 필수 값을 확인하세요.",
+    "StepExecutionError": "스텝 실행 오류. 해당 스텝의 액션과 대상 요소를 확인하세요.",
+    "LoopError": "DevQA 루프 오류. AI 설정과 소스 코드 경로를 확인하세요.",
+    "GitOpsError": "Git 작업 오류. Git 저장소 상태와 권한을 확인하세요.",
+}
+
+
+def _get_error_guidance(exc: Exception) -> str:
+    """Match an exception against known error patterns and return guidance."""
+    error_str = str(exc)
+
+    # Check AAT exception types first
+    exc_type = type(exc).__name__
+    if exc_type in _EXCEPTION_GUIDANCE:
+        guidance = _EXCEPTION_GUIDANCE[exc_type]
+        # Also check for more specific pattern match
+        for pattern, specific_guidance in _ERROR_GUIDANCE:
+            if pattern.lower() in error_str.lower():
+                return specific_guidance
+        return guidance
+
+    # Check error string patterns
+    for pattern, guidance in _ERROR_GUIDANCE:
+        if pattern.lower() in error_str.lower():
+            return guidance
+
+    return ""
+
+
+# ---------------------------------------------------------------------------
 # Execution helpers
 # ---------------------------------------------------------------------------
 
@@ -883,8 +1217,13 @@ async def _execute_run(
         _ws_handler.warning("Test run cancelled")
         await _manager.broadcast({"type": "run_cancelled"})
     except Exception as exc:  # noqa: BLE001
-        _ws_handler.error(f"Test run failed: {exc}")
-        await _manager.broadcast({"type": "run_error", "error": str(exc)})
+        guidance = _get_error_guidance(exc)
+        error_text = str(exc) or f"{type(exc).__name__}: (상세 메시지 없음)"
+        _ws_handler.error(f"Test run failed: {error_text}")
+        msg: dict[str, Any] = {"type": "run_error", "error": error_text}
+        if guidance:
+            msg["guidance"] = guidance
+        await _manager.broadcast(msg)
 
 
 async def _execute_loop(
@@ -1016,5 +1355,10 @@ async def _execute_loop(
         _ws_handler.warning("DevQA Loop cancelled")
         await _manager.broadcast({"type": "loop_cancelled"})
     except Exception as exc:  # noqa: BLE001
-        _ws_handler.error(f"DevQA Loop failed: {exc}")
-        await _manager.broadcast({"type": "loop_error", "error": str(exc)})
+        guidance = _get_error_guidance(exc)
+        error_text = str(exc) or f"{type(exc).__name__}: (상세 메시지 없음)"
+        _ws_handler.error(f"DevQA Loop failed: {error_text}")
+        msg: dict[str, Any] = {"type": "loop_error", "error": error_text}
+        if guidance:
+            msg["guidance"] = guidance
+        await _manager.broadcast(msg)

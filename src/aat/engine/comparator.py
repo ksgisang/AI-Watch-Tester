@@ -75,16 +75,33 @@ class Comparator:
                 )
 
     async def check_assert(self, step: StepConfig, engine: BaseEngine) -> None:
-        """Assert action handler. Uses step.assert_type and step.value.
+        """Assert action handler.
+
+        Supports two formats:
+        1. step.assert_type + step.value (inline)
+        2. step.expected list (each with type + value)
 
         Args:
-            step: StepConfig with assert_type and value.
+            step: StepConfig with assert info.
             engine: BaseEngine instance.
         """
-        assert step.assert_type is not None  # noqa: S101
-        assert step.value is not None  # noqa: S101
-        expected = ExpectedResult(type=step.assert_type, value=step.value)
-        await self.check(expected, engine)
+        # Format 2: expected list (preferred)
+        if step.expected:
+            for exp in step.expected:
+                await self.check(exp, engine)
+            return
+
+        # Format 1: inline assert_type + value
+        if step.assert_type is not None and step.value is not None:
+            expected = ExpectedResult(type=step.assert_type, value=step.value)
+            await self.check(expected, engine)
+            return
+
+        raise StepExecutionError(
+            "Assert step requires 'expected' list or 'assert_type' + 'value'",
+            step=step.step,
+            action="assert",
+        )
 
     @staticmethod
     def _compare_screenshots(current: bytes, reference_path: str) -> float:

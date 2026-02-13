@@ -123,8 +123,9 @@ class StepExecutor:
             if step.screenshot_after:
                 screenshots["after"] = await self._save_screenshot("after")
 
-            # 4. Check step-level expected results
-            if step.expected:
+            # 4. Check step-level expected results (skip for assert action,
+            #    already handled in check_assert)
+            if step.expected and step.action != ActionType.ASSERT:
                 for exp in step.expected:
                     await self._comparator.check(exp, self._engine)
 
@@ -149,6 +150,17 @@ class StepExecutor:
                 status=status,
                 description=step.description,
                 error_message=str(e),
+                elapsed_ms=elapsed,
+            )
+        except Exception as e:  # noqa: BLE001
+            elapsed = (time.monotonic() - start) * 1000
+            error_msg = str(e) or f"{type(e).__name__}"
+            return StepResult(
+                step=step.step,
+                action=step.action,
+                status=StepStatus.FAILED,
+                description=step.description,
+                error_message=error_msg,
                 elapsed_ms=elapsed,
             )
 
