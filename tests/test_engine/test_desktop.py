@@ -293,6 +293,53 @@ class TestDesktopEngineScreenOps:
         mock_pag.moveTo.assert_called_once_with(500, 300)
 
 
+class TestDesktopEngineFindTextPosition:
+    """Test find_text_position using Playwright locator."""
+
+    @pytest.fixture
+    def engine_with_page(self) -> DesktopEngine:
+        engine = DesktopEngine()
+        mock_page = MagicMock()
+        engine._page = mock_page
+        return engine
+
+    @pytest.mark.asyncio
+    async def test_find_text_position_found(self, engine_with_page: DesktopEngine) -> None:
+        mock_locator = MagicMock()
+        mock_locator.is_visible = AsyncMock(return_value=True)
+        mock_locator.bounding_box = AsyncMock(
+            return_value={"x": 100, "y": 200, "width": 80, "height": 30},
+        )
+        mock_first = MagicMock()
+        mock_first.first = mock_locator
+        engine_with_page._page.get_by_text = MagicMock(return_value=mock_first)
+        result = await engine_with_page.find_text_position("Email")
+        assert result == (140, 215)
+
+    @pytest.mark.asyncio
+    async def test_find_text_position_not_visible(self, engine_with_page: DesktopEngine) -> None:
+        mock_locator = MagicMock()
+        mock_locator.is_visible = AsyncMock(return_value=False)
+        mock_first = MagicMock()
+        mock_first.first = mock_locator
+        engine_with_page._page.get_by_text = MagicMock(return_value=mock_first)
+        result = await engine_with_page.find_text_position("NonExistent")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_find_text_position_no_page(self) -> None:
+        engine = DesktopEngine()
+        engine._page = None
+        result = await engine.find_text_position("Email")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_find_text_position_exception(self, engine_with_page: DesktopEngine) -> None:
+        engine_with_page._page.get_by_text = MagicMock(side_effect=Exception("fail"))
+        result = await engine_with_page.find_text_position("Email")
+        assert result is None
+
+
 class TestDesktopEngineRegistry:
     def test_registered(self) -> None:
         from aat.engine import ENGINE_REGISTRY

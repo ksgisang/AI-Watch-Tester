@@ -299,3 +299,24 @@ class DesktopEngine(BaseEngine):
     async def get_page_text(self) -> str:
         """Return visible text of current page from Playwright."""
         return await self.page.inner_text("body")
+
+    async def find_text_position(self, text: str) -> tuple[int, int] | None:
+        """Find text on page using Playwright native locator.
+
+        Returns (x, y) center coordinates of the element in viewport pixels,
+        or None if not found.
+        """
+        if not self._page:
+            return None
+        try:
+            locator = self._page.get_by_text(text, exact=False).first
+            if await locator.is_visible(timeout=2000):
+                box = await locator.bounding_box()
+                if box:
+                    return (
+                        int(box["x"] + box["width"] / 2),
+                        int(box["y"] + box["height"] / 2),
+                    )
+        except Exception:  # noqa: BLE001
+            pass
+        return None
