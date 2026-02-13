@@ -75,47 +75,35 @@ class TestDesktopEngineActions:
         mock_page.evaluate = AsyncMock(return_value={
             "screenX": 0, "screenY": 0,
             "chromeWidth": 0, "chromeHeight": 0,
+            "devicePixelRatio": 1.0,
         })
+        # Playwright mouse/keyboard mocks
+        mock_page.mouse = MagicMock()
+        mock_page.mouse.click = AsyncMock()
+        mock_page.mouse.dblclick = AsyncMock()
+        mock_page.keyboard = MagicMock()
+        mock_page.keyboard.type = AsyncMock()
+        mock_page.keyboard.press = AsyncMock()
         engine._page = mock_page
         return engine
 
-    # -- Mouse (PyAutoGUI) --
+    # -- Clicks (Playwright) --
 
-    async def test_click(
-        self, engine_with_mocks: DesktopEngine, mock_pag: MagicMock,
-    ) -> None:
+    async def test_click(self, engine_with_mocks: DesktopEngine) -> None:
         await engine_with_mocks.click(100, 200)
-        mock_pag.click.assert_called_once_with(100, 200)
+        engine_with_mocks.page.mouse.click.assert_awaited_once_with(100, 200)
 
-    async def test_double_click(
-        self, engine_with_mocks: DesktopEngine, mock_pag: MagicMock,
-    ) -> None:
+    async def test_double_click(self, engine_with_mocks: DesktopEngine) -> None:
         await engine_with_mocks.double_click(50, 75)
-        mock_pag.doubleClick.assert_called_once_with(50, 75)
+        engine_with_mocks.page.mouse.dblclick.assert_awaited_once_with(50, 75)
 
-    async def test_right_click(
-        self, engine_with_mocks: DesktopEngine, mock_pag: MagicMock,
-    ) -> None:
+    async def test_right_click(self, engine_with_mocks: DesktopEngine) -> None:
         await engine_with_mocks.right_click(10, 20)
-        mock_pag.rightClick.assert_called_once_with(10, 20)
+        engine_with_mocks.page.mouse.click.assert_awaited_once_with(
+            10, 20, button="right",
+        )
 
-    async def test_click_at_current(
-        self, engine_with_mocks: DesktopEngine, mock_pag: MagicMock,
-    ) -> None:
-        await engine_with_mocks.click_at_current()
-        mock_pag.click.assert_called_once_with()
-
-    async def test_double_click_at_current(
-        self, engine_with_mocks: DesktopEngine, mock_pag: MagicMock,
-    ) -> None:
-        await engine_with_mocks.double_click_at_current()
-        mock_pag.doubleClick.assert_called_once_with()
-
-    async def test_right_click_at_current(
-        self, engine_with_mocks: DesktopEngine, mock_pag: MagicMock,
-    ) -> None:
-        await engine_with_mocks.right_click_at_current()
-        mock_pag.rightClick.assert_called_once_with()
+    # -- Mouse movement (PyAutoGUI) --
 
     async def test_move_mouse(
         self, engine_with_mocks: DesktopEngine, mock_pag: MagicMock,
@@ -130,25 +118,23 @@ class TestDesktopEngineActions:
         mock_pag.moveTo.assert_called_once_with(100, 200)
         mock_pag.scroll.assert_called_once_with(-300)
 
-    # -- Keyboard (PyAutoGUI) --
+    # -- Keyboard (Playwright) --
 
-    async def test_type_text(
-        self, engine_with_mocks: DesktopEngine, mock_pag: MagicMock,
-    ) -> None:
+    async def test_type_text(self, engine_with_mocks: DesktopEngine) -> None:
         await engine_with_mocks.type_text("hello")
-        mock_pag.write.assert_called_once_with("hello", interval=0.05)
+        engine_with_mocks.page.keyboard.type.assert_awaited_once_with(
+            "hello", delay=0,
+        )
 
-    async def test_press_key(
-        self, engine_with_mocks: DesktopEngine, mock_pag: MagicMock,
-    ) -> None:
+    async def test_press_key(self, engine_with_mocks: DesktopEngine) -> None:
         await engine_with_mocks.press_key("Enter")
-        mock_pag.press.assert_called_once_with("enter")
+        engine_with_mocks.page.keyboard.press.assert_awaited_once_with("Enter")
 
-    async def test_key_combo(
-        self, engine_with_mocks: DesktopEngine, mock_pag: MagicMock,
-    ) -> None:
+    async def test_key_combo(self, engine_with_mocks: DesktopEngine) -> None:
         await engine_with_mocks.key_combo("Control", "A")
-        mock_pag.hotkey.assert_called_once_with("control", "a")
+        engine_with_mocks.page.keyboard.press.assert_awaited_once_with(
+            "Control+A",
+        )
 
     # -- Screenshot (PyAutoGUI) --
 
@@ -216,17 +202,6 @@ class TestDesktopEngineCoordinateConversion:
         engine._window_offset_y = 80
         assert engine._viewport_to_screen(100, 200) == (150, 280)
 
-    async def test_click_applies_offset(self, mock_pag: MagicMock) -> None:
-        engine = DesktopEngine()
-        engine._pag = mock_pag
-        engine._window_offset_x = 50
-        engine._window_offset_y = 80
-        await engine.click(100, 200)
-        mock_pag.click.assert_called_once_with(150, 280)
-        # Stored position remains in viewport coords
-        assert engine._mouse_x == 100
-        assert engine._mouse_y == 200
-
     async def test_move_mouse_applies_offset(self, mock_pag: MagicMock) -> None:
         engine = DesktopEngine()
         engine._pag = mock_pag
@@ -244,11 +219,13 @@ class TestDesktopEngineCoordinateConversion:
         mock_page.evaluate = AsyncMock(return_value={
             "screenX": 100, "screenY": 50,
             "chromeWidth": 0, "chromeHeight": 72,
+            "devicePixelRatio": 2.0,
         })
         engine._page = mock_page
         await engine._update_window_offset()
         assert engine._window_offset_x == 100
         assert engine._window_offset_y == 122  # 50 + 72
+        assert engine._device_pixel_ratio == 2.0
 
     @pytest.mark.asyncio
     async def test_update_window_offset_fallback(self, mock_pag: MagicMock) -> None:
@@ -259,7 +236,7 @@ class TestDesktopEngineCoordinateConversion:
         engine._page = mock_page
         await engine._update_window_offset()
         assert engine._window_offset_x == 0
-        assert engine._window_offset_y == 0
+        assert engine._window_offset_y == 80  # sensible fallback
 
 
 class TestDesktopEngineRegistry:

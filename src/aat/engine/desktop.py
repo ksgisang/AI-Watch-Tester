@@ -1,7 +1,8 @@
 """DesktopEngine — PyAutoGUI + Playwright hybrid engine.
 
-Uses PyAutoGUI for OS-level mouse/keyboard/screenshot control.
-Playwright handles browser lifecycle and navigation (navigate, go_back, refresh).
+Mouse movement and screenshots use PyAutoGUI (OS-level).
+Clicks and keyboard use Playwright (viewport-accurate, IME-safe).
+Navigation uses Playwright.
 """
 
 from __future__ import annotations
@@ -40,8 +41,8 @@ def _get_pyautogui() -> Any:
 class DesktopEngine(BaseEngine):
     """PyAutoGUI + Playwright hybrid test engine.
 
-    Mouse, keyboard, and screenshot operations use PyAutoGUI (OS-level).
-    Browser navigation (navigate, go_back, refresh) uses Playwright.
+    Mouse movement and screenshots use PyAutoGUI (OS-level).
+    Clicks and keyboard input use Playwright (viewport-accurate, IME-safe).
     """
 
     def __init__(self, config: EngineConfig | None = None) -> None:
@@ -56,6 +57,7 @@ class DesktopEngine(BaseEngine):
         # Viewport-to-screen coordinate offset
         self._window_offset_x: int = 0
         self._window_offset_y: int = 0
+        self._device_pixel_ratio: float = 1.0
 
     @property
     def page(self) -> Page:
@@ -135,19 +137,26 @@ class DesktopEngine(BaseEngine):
         if not self._page:
             return
         try:
-            offsets = await self._page.evaluate(
+            info = await self._page.evaluate(
                 """() => ({
                     screenX: window.screenX,
                     screenY: window.screenY,
                     chromeWidth: window.outerWidth - window.innerWidth,
                     chromeHeight: window.outerHeight - window.innerHeight,
+                    devicePixelRatio: window.devicePixelRatio,
                 })"""
             )
-            self._window_offset_x = offsets["screenX"] + offsets["chromeWidth"] // 2
-            self._window_offset_y = offsets["screenY"] + offsets["chromeHeight"]
+            self._window_offset_x = int(
+                info["screenX"] + info["chromeWidth"] / 2
+            )
+            self._window_offset_y = int(
+                info["screenY"] + info["chromeHeight"]
+            )
+            self._device_pixel_ratio = info.get("devicePixelRatio", 1.0)
         except Exception:
             self._window_offset_x = 0
-            self._window_offset_y = 0
+            self._window_offset_y = 80  # sensible fallback for typical browser chrome
+            self._device_pixel_ratio = 1.0
 
     def _viewport_to_screen(self, x: int, y: int) -> tuple[int, int]:
         """Convert Playwright viewport coordinates to OS screen coordinates."""
@@ -175,41 +184,26 @@ class DesktopEngine(BaseEngine):
         return path
 
     # ------------------------------------------------------------------
-    # Mouse — PyAutoGUI (OS-level)
+    # Mouse — movement via PyAutoGUI, clicks via Playwright
     # ------------------------------------------------------------------
 
     async def click(self, x: int, y: int) -> None:
-        """Click at viewport coordinates via PyAutoGUI."""
-        sx, sy = self._viewport_to_screen(x, y)
-        await asyncio.to_thread(self.pag.click, sx, sy)
+        """Click at viewport coordinates via Playwright."""
+        await self.page.mouse.click(x, y)
         self._mouse_x, self._mouse_y = x, y
 
     async def double_click(self, x: int, y: int) -> None:
-        """Double-click at viewport coordinates via PyAutoGUI."""
-        sx, sy = self._viewport_to_screen(x, y)
-        await asyncio.to_thread(self.pag.doubleClick, sx, sy)
+        """Double-click at viewport coordinates via Playwright."""
+        await self.page.mouse.dblclick(x, y)
         self._mouse_x, self._mouse_y = x, y
 
     async def right_click(self, x: int, y: int) -> None:
-        """Right-click at viewport coordinates via PyAutoGUI."""
-        sx, sy = self._viewport_to_screen(x, y)
-        await asyncio.to_thread(self.pag.rightClick, sx, sy)
+        """Right-click at viewport coordinates via Playwright."""
+        await self.page.mouse.click(x, y, button="right")
         self._mouse_x, self._mouse_y = x, y
 
-    async def click_at_current(self) -> None:
-        """Click at current mouse position (no move)."""
-        await asyncio.to_thread(self.pag.click)
-
-    async def double_click_at_current(self) -> None:
-        """Double-click at current mouse position (no move)."""
-        await asyncio.to_thread(self.pag.doubleClick)
-
-    async def right_click_at_current(self) -> None:
-        """Right-click at current mouse position (no move)."""
-        await asyncio.to_thread(self.pag.rightClick)
-
     async def move_mouse(self, x: int, y: int) -> None:
-        """Move mouse pointer via PyAutoGUI (viewport coordinates)."""
+        """Move mouse pointer via PyAutoGUI (viewport → screen conversion)."""
         sx, sy = self._viewport_to_screen(x, y)
         await asyncio.to_thread(self.pag.moveTo, sx, sy)
         self._mouse_x, self._mouse_y = x, y
@@ -223,20 +217,21 @@ class DesktopEngine(BaseEngine):
         self._mouse_x, self._mouse_y = x, y
 
     # ------------------------------------------------------------------
-    # Keyboard — PyAutoGUI (OS-level)
+    # Keyboard — Playwright (IME-safe, works with Korean/Japanese input)
     # ------------------------------------------------------------------
 
     async def type_text(self, text: str) -> None:
-        """Type text via PyAutoGUI with slight interval."""
-        await asyncio.to_thread(self.pag.write, text, interval=0.05)
+        """Type text via Playwright (handles Korean/CJK input correctly)."""
+        await self.page.keyboard.type(text, delay=0)
 
     async def press_key(self, key: str) -> None:
-        """Press a single key via PyAutoGUI."""
-        await asyncio.to_thread(self.pag.press, key.lower())
+        """Press a single key via Playwright."""
+        await self.page.keyboard.press(key)
 
     async def key_combo(self, *keys: str) -> None:
-        """Press key combination via PyAutoGUI."""
-        await asyncio.to_thread(self.pag.hotkey, *[k.lower() for k in keys])
+        """Press key combination via Playwright."""
+        combo = "+".join(keys)
+        await self.page.keyboard.press(combo)
 
     # ------------------------------------------------------------------
     # Navigation — Playwright (browser control)
@@ -246,6 +241,7 @@ class DesktopEngine(BaseEngine):
         """Navigate to URL via Playwright."""
         try:
             await self.page.goto(url, wait_until="domcontentloaded")
+            await asyncio.sleep(0.5)
             await self._update_window_offset()
         except EngineError:
             raise

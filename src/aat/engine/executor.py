@@ -312,15 +312,6 @@ class StepExecutor:
         """
         if humanize:
             await self._humanizer.move_to(self._engine, x, y)
-            # Already moved — click at current position to avoid teleport
-            if hasattr(self._engine, "click_at_current"):
-                if double:
-                    await self._engine.double_click_at_current()
-                elif right:
-                    await self._engine.right_click_at_current()
-                else:
-                    await self._engine.click_at_current()
-                return
         if double:
             await self._engine.double_click(x, y)
         elif right:

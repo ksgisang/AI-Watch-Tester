@@ -157,7 +157,7 @@ class HumanizerConfig(BaseModel):
 
     enabled: bool = Field(default=True)
     mouse_speed_min: float = Field(default=0.5)
-    mouse_speed_max: float = Field(default=1.2)
+    mouse_speed_max: float = Field(default=1.0)
     typing_delay_min: float = Field(default=0.05)
     typing_delay_max: float = Field(default=0.15)
     bezier_control_points: int = Field(default=3, ge=2, le=5)
