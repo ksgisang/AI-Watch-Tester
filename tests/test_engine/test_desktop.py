@@ -294,7 +294,7 @@ class TestDesktopEngineScreenOps:
 
 
 class TestDesktopEngineFindTextPosition:
-    """Test find_text_position using Playwright locator."""
+    """Test find_text_position with strategy chain (label → placeholder → button → link → text)."""
 
     @pytest.fixture
     def engine_with_page(self) -> DesktopEngine:
@@ -303,40 +303,86 @@ class TestDesktopEngineFindTextPosition:
         engine._page = mock_page
         return engine
 
-    @pytest.mark.asyncio
-    async def test_find_text_position_found(self, engine_with_page: DesktopEngine) -> None:
-        mock_locator = MagicMock()
-        mock_locator.is_visible = AsyncMock(return_value=True)
-        mock_locator.bounding_box = AsyncMock(
-            return_value={"x": 100, "y": 200, "width": 80, "height": 30},
+    def _make_visible_locator(
+        self, box: dict[str, int] | None = None,
+    ) -> MagicMock:
+        """Create a mock locator that is visible with a bounding box."""
+        loc = MagicMock()
+        loc.is_visible = AsyncMock(return_value=True)
+        loc.bounding_box = AsyncMock(
+            return_value=box or {"x": 100, "y": 200, "width": 80, "height": 30},
         )
-        mock_first = MagicMock()
-        mock_first.first = mock_locator
-        engine_with_page._page.get_by_text = MagicMock(return_value=mock_first)
-        result = await engine_with_page.find_text_position("Email")
-        assert result == (140, 215)
+        wrapper = MagicMock()
+        wrapper.first = loc
+        return wrapper
+
+    def _make_invisible_locator(self) -> MagicMock:
+        """Create a mock locator that is not visible."""
+        loc = MagicMock()
+        loc.is_visible = AsyncMock(return_value=False)
+        wrapper = MagicMock()
+        wrapper.first = loc
+        return wrapper
+
+    def _make_error_locator(self) -> MagicMock:
+        """Create a mock locator that raises an exception."""
+        return MagicMock(side_effect=Exception("not found"))
 
     @pytest.mark.asyncio
-    async def test_find_text_position_not_visible(self, engine_with_page: DesktopEngine) -> None:
-        mock_locator = MagicMock()
-        mock_locator.is_visible = AsyncMock(return_value=False)
-        mock_first = MagicMock()
-        mock_first.first = mock_locator
-        engine_with_page._page.get_by_text = MagicMock(return_value=mock_first)
+    async def test_found_by_label(self, engine_with_page: DesktopEngine) -> None:
+        """get_by_label finds input field linked to label (highest priority)."""
+        engine_with_page._page.get_by_label = MagicMock(
+            return_value=self._make_visible_locator(
+                {"x": 100, "y": 200, "width": 80, "height": 30},
+            ),
+        )
+        result = await engine_with_page.find_text_position("Email")
+        assert result == (140, 215)
+        engine_with_page._page.get_by_label.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_fallback_to_text(self, engine_with_page: DesktopEngine) -> None:
+        """Falls through to get_by_text when earlier strategies fail."""
+        engine_with_page._page.get_by_label = self._make_error_locator()
+        engine_with_page._page.get_by_placeholder = self._make_error_locator()
+        engine_with_page._page.get_by_role = self._make_error_locator()
+        engine_with_page._page.get_by_text = MagicMock(
+            return_value=self._make_visible_locator(
+                {"x": 50, "y": 100, "width": 60, "height": 20},
+            ),
+        )
+        result = await engine_with_page.find_text_position("Register")
+        assert result == (80, 110)
+
+    @pytest.mark.asyncio
+    async def test_found_by_button_role(self, engine_with_page: DesktopEngine) -> None:
+        """get_by_role("button") finds button element."""
+        engine_with_page._page.get_by_label = self._make_error_locator()
+        engine_with_page._page.get_by_placeholder = self._make_error_locator()
+        engine_with_page._page.get_by_role = MagicMock(
+            return_value=self._make_visible_locator(
+                {"x": 200, "y": 300, "width": 100, "height": 40},
+            ),
+        )
+        result = await engine_with_page.find_text_position("Submit")
+        assert result == (250, 320)
+
+    @pytest.mark.asyncio
+    async def test_all_strategies_fail(self, engine_with_page: DesktopEngine) -> None:
+        """Returns None when all strategies fail."""
+        engine_with_page._page.get_by_label = self._make_error_locator()
+        engine_with_page._page.get_by_placeholder = self._make_error_locator()
+        engine_with_page._page.get_by_role = self._make_error_locator()
+        engine_with_page._page.get_by_text = self._make_error_locator()
         result = await engine_with_page.find_text_position("NonExistent")
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_find_text_position_no_page(self) -> None:
+    async def test_no_page(self) -> None:
+        """Returns None when page is not initialized."""
         engine = DesktopEngine()
         engine._page = None
         result = await engine.find_text_position("Email")
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_find_text_position_exception(self, engine_with_page: DesktopEngine) -> None:
-        engine_with_page._page.get_by_text = MagicMock(side_effect=Exception("fail"))
-        result = await engine_with_page.find_text_position("Email")
         assert result is None
 
 

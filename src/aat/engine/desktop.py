@@ -304,22 +304,39 @@ class DesktopEngine(BaseEngine):
         return await self.page.inner_text("body")
 
     async def find_text_position(self, text: str) -> tuple[int, int] | None:
-        """Find text on page using Playwright native locator.
+        """Find element on page, prioritizing input fields over labels.
 
-        Returns (x, y) center coordinates of the element in viewport pixels,
-        or None if not found.
+        Strategy:
+        1. get_by_label — input/textarea linked to label (highest priority)
+        2. get_by_placeholder — placeholder text
+        3. get_by_role("button") — buttons
+        4. get_by_role("link") — links
+        5. get_by_text — general text fallback
+
+        Returns (x, y) center coordinates in viewport pixels, or None.
         """
         if not self._page:
             return None
-        try:
-            locator = self._page.get_by_text(text, exact=False).first
-            if await locator.is_visible(timeout=2000):
-                box = await locator.bounding_box()
-                if box:
-                    return (
-                        int(box["x"] + box["width"] / 2),
-                        int(box["y"] + box["height"] / 2),
-                    )
-        except Exception:  # noqa: BLE001
-            pass
+
+        strategies = [
+            lambda: self._page.get_by_label(text, exact=False).first,
+            lambda: self._page.get_by_placeholder(text, exact=False).first,
+            lambda: self._page.get_by_role("button", name=text, exact=False).first,
+            lambda: self._page.get_by_role("link", name=text, exact=False).first,
+            lambda: self._page.get_by_text(text, exact=False).first,
+        ]
+
+        for strategy in strategies:
+            try:
+                locator = strategy()
+                if await locator.is_visible(timeout=1000):
+                    box = await locator.bounding_box()
+                    if box:
+                        return (
+                            int(box["x"] + box["width"] / 2),
+                            int(box["y"] + box["height"] / 2),
+                        )
+            except Exception:  # noqa: BLE001
+                continue
+
         return None
