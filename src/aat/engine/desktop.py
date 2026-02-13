@@ -158,13 +158,15 @@ class DesktopEngine(BaseEngine):
         try:
             info = await self._page.evaluate(
                 """() => ({
-                    offsetX: window.screenX + window.outerWidth - window.innerWidth,
-                    offsetY: window.screenY + window.outerHeight - window.innerHeight,
+                    screenX: window.screenX,
+                    screenY: window.screenY,
+                    chromeX: (window.outerWidth - window.innerWidth) / 2,
+                    chromeY: window.outerHeight - window.innerHeight,
                     devicePixelRatio: window.devicePixelRatio,
                 })"""
             )
-            self._window_offset_x = int(info["offsetX"] / 2)
-            self._window_offset_y = int(info["offsetY"])
+            self._window_offset_x = int(info["screenX"] + info["chromeX"])
+            self._window_offset_y = int(info["screenY"] + info["chromeY"])
             self._device_pixel_ratio = info.get("devicePixelRatio", 1.0)
             _log.debug(
                 "Window offset: x=%d, y=%d, dpr=%.1f",
