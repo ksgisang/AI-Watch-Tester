@@ -95,6 +95,24 @@ class TestDesktopEngineActions:
         await engine_with_mocks.right_click(10, 20)
         mock_pag.rightClick.assert_called_once_with(10, 20)
 
+    async def test_click_at_current(
+        self, engine_with_mocks: DesktopEngine, mock_pag: MagicMock,
+    ) -> None:
+        await engine_with_mocks.click_at_current()
+        mock_pag.click.assert_called_once_with()
+
+    async def test_double_click_at_current(
+        self, engine_with_mocks: DesktopEngine, mock_pag: MagicMock,
+    ) -> None:
+        await engine_with_mocks.double_click_at_current()
+        mock_pag.doubleClick.assert_called_once_with()
+
+    async def test_right_click_at_current(
+        self, engine_with_mocks: DesktopEngine, mock_pag: MagicMock,
+    ) -> None:
+        await engine_with_mocks.right_click_at_current()
+        mock_pag.rightClick.assert_called_once_with()
+
     async def test_move_mouse(
         self, engine_with_mocks: DesktopEngine, mock_pag: MagicMock,
     ) -> None:

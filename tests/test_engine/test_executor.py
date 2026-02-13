@@ -36,6 +36,9 @@ def mock_engine() -> MagicMock:
     engine.click = AsyncMock()
     engine.double_click = AsyncMock()
     engine.right_click = AsyncMock()
+    engine.click_at_current = AsyncMock()
+    engine.double_click_at_current = AsyncMock()
+    engine.right_click_at_current = AsyncMock()
     engine.type_text = AsyncMock()
     engine.press_key = AsyncMock()
     engine.key_combo = AsyncMock()
@@ -203,7 +206,9 @@ class TestClickAtAction:
         result = await executor.execute_step(step)
         assert result.status == StepStatus.PASSED
         mock_humanizer.move_to.assert_awaited_once()
-        mock_engine.click.assert_awaited_once_with(50, 60)
+        # After humanized move, clicks at current position (no teleport)
+        mock_engine.click_at_current.assert_awaited_once()
+        mock_engine.click.assert_not_awaited()
 
 
 class TestTypeTextAction:

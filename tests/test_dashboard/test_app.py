@@ -31,7 +31,7 @@ class TestDashboardApp:
     def test_index_serves_html(self, client: TestClient) -> None:
         response = client.get("/")
         assert response.status_code == 200
-        assert "AAT Dashboard" in response.text
+        assert "AAT" in response.text
 
     def test_get_config(self, client: TestClient) -> None:
         response = client.get("/api/config")

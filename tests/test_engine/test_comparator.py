@@ -115,6 +115,7 @@ class TestComparatorCheckAssert:
         comparator = Comparator()
         engine = MockEngine(page_text="Hello World")
         step = MagicMock()
+        step.expected = []  # no expected list — use inline assert_type
         step.assert_type = AssertType.TEXT_VISIBLE
         step.value = "Hello"
         await comparator.check_assert(step, engine)  # Should not raise
@@ -124,6 +125,7 @@ class TestComparatorCheckAssert:
         comparator = Comparator()
         engine = MockEngine(url="https://example.com/login")
         step = MagicMock()
+        step.expected = []  # no expected list — use inline assert_type
         step.assert_type = AssertType.URL_CONTAINS
         step.value = "dashboard"
         with pytest.raises(StepExecutionError):

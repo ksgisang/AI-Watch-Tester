@@ -80,7 +80,7 @@ class DesktopEngine(BaseEngine):
         try:
             pag = self.pag
             pag.FAILSAFE = True
-            pag.PAUSE = 0.0
+            pag.PAUSE = 0.1
 
             pw = await async_playwright().start()
             self._playwright = pw
@@ -162,6 +162,18 @@ class DesktopEngine(BaseEngine):
         """Right-click at coordinates via PyAutoGUI."""
         await asyncio.to_thread(self.pag.rightClick, x, y)
         self._mouse_x, self._mouse_y = x, y
+
+    async def click_at_current(self) -> None:
+        """Click at current mouse position (no move)."""
+        await asyncio.to_thread(self.pag.click)
+
+    async def double_click_at_current(self) -> None:
+        """Double-click at current mouse position (no move)."""
+        await asyncio.to_thread(self.pag.doubleClick)
+
+    async def right_click_at_current(self) -> None:
+        """Right-click at current mouse position (no move)."""
+        await asyncio.to_thread(self.pag.rightClick)
 
     async def move_mouse(self, x: int, y: int) -> None:
         """Move mouse pointer via PyAutoGUI (no click)."""
