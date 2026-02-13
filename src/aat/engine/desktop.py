@@ -106,6 +106,22 @@ class DesktopEngine(BaseEngine):
             )
             self._context.set_default_timeout(self._config.timeout_ms)
             self._page = await self._context.new_page()
+
+            # Move browser window to configured position (CDP, Chromium only)
+            if self._config.window_x is not None or self._config.window_y is not None:
+                x = self._config.window_x or 0
+                y = self._config.window_y or 0
+                try:
+                    cdp = await self._page.context.new_cdp_session(self._page)
+                    window = await cdp.send("Browser.getWindowForTarget")
+                    await cdp.send("Browser.setWindowBounds", {
+                        "windowId": window["windowId"],
+                        "bounds": {"left": x, "top": y},
+                    })
+                    await cdp.detach()
+                except Exception:  # noqa: BLE001
+                    _log.debug("CDP window positioning not supported")
+
             await self._update_window_offset()
         except EngineError:
             raise

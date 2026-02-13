@@ -131,6 +131,8 @@ class EngineConfig(BaseModel):
     viewport_width: int = Field(default=1280, ge=320, le=3840)
     viewport_height: int = Field(default=720, ge=240, le=2160)
     timeout_ms: int = Field(default=30000, ge=1000, le=120000)
+    window_x: int | None = Field(default=None, description="Browser window X position")
+    window_y: int | None = Field(default=None, description="Browser window Y position")
 
 
 class MatchingConfig(BaseModel):

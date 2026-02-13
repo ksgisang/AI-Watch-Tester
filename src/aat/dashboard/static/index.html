@@ -610,6 +610,13 @@
             </select>
           </div>
           <div class="field-row">
+            <label>창 위치</label>
+            <div style="display:flex;gap:4px;flex:1">
+              <input class="input" id="cfgWindowX" type="number" placeholder="X" style="flex:1">
+              <input class="input" id="cfgWindowY" type="number" placeholder="Y" style="flex:1">
+            </div>
+          </div>
+          <div class="field-row">
             <label>승인 방식</label>
             <select class="input" id="cfgApproval">
               <option value="manual">manual</option>
@@ -1406,6 +1413,8 @@ async function loadConfig() {
       document.getElementById('cfgEngine').value = data.engine.type || 'web';
       document.getElementById('cfgBrowser').value = data.engine.browser || 'chromium';
       document.getElementById('cfgHeadless').value = String(data.engine.headless || false);
+      document.getElementById('cfgWindowX').value = data.engine.window_x ?? '';
+      document.getElementById('cfgWindowY').value = data.engine.window_y ?? '';
     }
     if (data.ai) {
       document.getElementById('cfgProvider').value = data.ai.provider || 'claude';
@@ -1439,6 +1448,8 @@ async function saveConfig() {
       type: document.getElementById('cfgEngine').value,
       browser: document.getElementById('cfgBrowser').value,
       headless: document.getElementById('cfgHeadless').value === 'true',
+      window_x: document.getElementById('cfgWindowX').value ? parseInt(document.getElementById('cfgWindowX').value) : null,
+      window_y: document.getElementById('cfgWindowY').value ? parseInt(document.getElementById('cfgWindowY').value) : null,
     },
     ai: {
       provider: document.getElementById('cfgProvider').value,
