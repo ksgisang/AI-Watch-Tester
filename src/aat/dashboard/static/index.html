@@ -678,11 +678,9 @@
         </div>
         <ul class="doc-list" id="docList"></ul>
         <div style="display:flex;gap:6px;margin-top:4px;align-items:center;flex-wrap:wrap">
-          <button class="btn btn-outline btn-sm" onclick="uploadFiles()">파일 업로드</button>
-          <button class="btn btn-outline btn-sm" onclick="analyzeAndGenerate()">분석 및 생성</button>
-          <span style="flex:1"></span>
           <span id="genStatus" style="font-size:11px; color:var(--text-secondary);"></span>
-          <button class="btn btn-primary btn-sm" onclick="generateScenarios()" id="btnGenerate">시나리오 생성</button>
+          <span style="flex:1"></span>
+          <button class="btn btn-primary btn-sm" onclick="generateFromDocument()" id="btnGenerate">시나리오 생성</button>
         </div>
       </div>
 
@@ -1356,12 +1354,20 @@ function setupDropZone() {
 
 function showPendingFiles() {
   const zone = document.getElementById('dropZone');
+  const docList = document.getElementById('docList');
   if (pendingFiles.length === 0) {
     zone.textContent = '파일을 드래그하거나 클릭하여 선택';
+    docList.innerHTML = '';
     return;
   }
-  const names = pendingFiles.map(f => f.name).join(', ');
-  zone.textContent = `${pendingFiles.length}개 파일 선택됨: ${names}`;
+  zone.textContent = `${pendingFiles.length}개 파일 선택됨`;
+  docList.innerHTML = '';
+  for (const f of pendingFiles) {
+    const li = document.createElement('li');
+    li.className = 'doc-item';
+    li.innerHTML = `<span class="name">${escHtml(f.name)}</span><span>${formatSize(f.size)}</span>`;
+    docList.appendChild(li);
+  }
 }
 
 async function uploadFiles() {
@@ -1384,7 +1390,6 @@ async function uploadFiles() {
       addLog('success', `${data.count}개 파일 업로드 완료`);
       pendingFiles = [];
       showPendingFiles();
-      loadDocuments();
     }
   } catch (e) {
     addLog('error', `업로드 실패: ${e.message}`);
@@ -1493,22 +1498,70 @@ function loadScenariosFromPath() {
   loadScenarios(path || undefined);
 }
 
-async function generateScenarios() {
+async function generateFromDocument() {
   const text = document.getElementById('docTextInput').value.trim();
-  if (!text) {
-    addLog('warning', '기획서 내용을 입력해주세요.');
+  const hasFiles = pendingFiles.length > 0;
+
+  if (!text && !hasFiles) {
+    addLog('warning', '기획서 내용을 입력하거나 파일을 첨부해주세요.');
     return;
   }
+
   const btn = document.getElementById('btnGenerate');
   const status = document.getElementById('genStatus');
   btn.disabled = true;
   btn.textContent = '생성 중...';
+
+  let documentText = text;
+
+  // Step 1: Upload files and get content
+  if (hasFiles) {
+    status.textContent = '파일 업로드 중...';
+    const formData = new FormData();
+    for (const f of pendingFiles) {
+      formData.append('files', f);
+    }
+    try {
+      const res = await fetch('/api/documents/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.error) {
+        addLog('error', data.error);
+        btn.disabled = false;
+        btn.textContent = '시나리오 생성';
+        status.textContent = '';
+        return;
+      }
+      addLog('success', `${data.count}개 파일 업로드 완료`);
+      // Append file contents to document text
+      if (data.contents) {
+        for (const [name, content] of Object.entries(data.contents)) {
+          documentText += `\n\n--- ${name} ---\n${content}`;
+        }
+      }
+    } catch (e) {
+      addLog('error', `파일 업로드 실패: ${e.message}`);
+      btn.disabled = false;
+      btn.textContent = '시나리오 생성';
+      status.textContent = '';
+      return;
+    }
+  }
+
+  if (!documentText.trim()) {
+    addLog('warning', '기획서 내용이 비어있습니다.');
+    btn.disabled = false;
+    btn.textContent = '시나리오 생성';
+    status.textContent = '';
+    return;
+  }
+
+  // Step 2: Generate scenarios via AI
   status.textContent = 'AI가 시나리오를 생성하고 있습니다...';
   try {
     const resp = await fetch('/api/scenarios/generate', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ document_text: text })
+      body: JSON.stringify({ document_text: documentText })
     });
     const data = await resp.json();
     if (data.error) {
@@ -1519,12 +1572,12 @@ async function generateScenarios() {
     addLog('success', `시나리오 ${data.count}개 생성 완료: ${data.files.join(', ')}`);
     status.textContent = `${data.count}개 생성 완료`;
 
-    // 시나리오 경로를 임시 폴더로 설정
+    // Set scenario path to temp folder
     if (data.scenarios_path) {
       document.getElementById('scenarioPath').value = data.scenarios_path;
     }
 
-    // 목록에 직접 추가
+    // Populate scenario list directly
     const list = document.getElementById('scenarioList');
     list.innerHTML = '';
     allScenarioIds = [];
@@ -1553,6 +1606,10 @@ async function generateScenarios() {
       list.appendChild(item);
     });
     updateScenarioCount();
+
+    // Clear pending files
+    pendingFiles = [];
+    showPendingFiles();
   } catch (e) {
     addLog('error', `시나리오 생성 오류: ${e.message}`);
     status.textContent = '생성 오류';
@@ -1803,7 +1860,6 @@ function escHtml(text) {
 document.addEventListener('DOMContentLoaded', () => {
   connectWS();
   loadConfig();
-  loadDocuments();
   checkServerStatus();
   setupDropZone();
   onProviderChange(); // initialize model options

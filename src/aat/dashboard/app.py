@@ -746,6 +746,15 @@ async def _upload_documents(request: Request) -> JSONResponse:
             status_code=400,
         )
 
+    # Read text content of uploaded files for AI processing
+    contents: dict[str, str] = {}
+    for name in saved:
+        filepath = docs_dir / name
+        try:
+            contents[name] = filepath.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            pass  # skip binary files
+
     await _manager.broadcast(
         {
             "type": "info",
@@ -758,6 +767,7 @@ async def _upload_documents(request: Request) -> JSONResponse:
             "status": "ok",
             "uploaded": saved,
             "count": len(saved),
+            "contents": contents,
         }
     )
 

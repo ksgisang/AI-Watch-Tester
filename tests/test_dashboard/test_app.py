@@ -197,6 +197,8 @@ class TestDocuments:
         assert data["status"] == "ok"
         assert "test.md" in data["uploaded"]
         assert data["count"] == 1
+        assert "contents" in data
+        assert data["contents"]["test.md"] == "# Hello\n"
 
     def test_upload_multiple_files(self, client: TestClient) -> None:
         response = client.post(
@@ -209,6 +211,8 @@ class TestDocuments:
         assert response.status_code == 200
         data = response.json()
         assert data["count"] == 2
+        assert data["contents"]["a.md"] == "# A\n"
+        assert data["contents"]["b.txt"] == "hello\n"
 
     def test_upload_then_list(self, client: TestClient) -> None:
         client.post(
