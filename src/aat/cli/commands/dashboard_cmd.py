@@ -20,7 +20,7 @@ def dashboard_command(
 ) -> None:
     """Launch the AAT web dashboard."""
     try:
-        import uvicorn
+        import uvicorn  # type: ignore[import-not-found]
     except ImportError:
         typer.echo(
             "Dashboard requires web extras: pip install aat-devqa[web]",

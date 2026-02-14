@@ -83,6 +83,7 @@ python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
+warn_unused_ignores = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

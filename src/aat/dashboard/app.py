@@ -18,18 +18,18 @@ from aat.core.exceptions import AATError, DashboardError
 from aat.core.models import ApprovalMode, Config, StepStatus
 
 try:
-    from fastapi import (
+    from fastapi import (  # type: ignore[import-not-found]
         FastAPI,
         Request,
         WebSocket,
         WebSocketDisconnect,
     )
-    from fastapi.responses import (
+    from fastapi.responses import (  # type: ignore[import-not-found]
         FileResponse,
         HTMLResponse,
         JSONResponse,
     )
-    from fastapi.staticfiles import StaticFiles
+    from fastapi.staticfiles import StaticFiles  # type: ignore[import-not-found]
 except ImportError as e:
     msg = "Dashboard requires 'web' extras: pip install aat-devqa[web]"
     raise ImportError(msg) from e
