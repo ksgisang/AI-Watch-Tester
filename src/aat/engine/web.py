@@ -182,7 +182,7 @@ class WebEngine(BaseEngine):
 
         for strategy in strategies:
             try:
-                locator = strategy()
+                locator = strategy()  # type: ignore[no-untyped-call]
                 if await locator.is_visible(timeout=1000):
                     box = await locator.bounding_box()
                     if box:

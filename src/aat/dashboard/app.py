@@ -18,18 +18,18 @@ from aat.core.exceptions import AATError, DashboardError
 from aat.core.models import ApprovalMode, Config, StepStatus
 
 try:
-    from fastapi import (  # type: ignore[import-not-found]
+    from fastapi import (
         FastAPI,
         Request,
         WebSocket,
         WebSocketDisconnect,
     )
-    from fastapi.responses import (  # type: ignore[import-not-found]
+    from fastapi.responses import (
         FileResponse,
         HTMLResponse,
         JSONResponse,
     )
-    from fastapi.staticfiles import StaticFiles  # type: ignore[import-not-found]
+    from fastapi.staticfiles import StaticFiles
 except ImportError as e:
     msg = "Dashboard requires 'web' extras: pip install aat-devqa[web]"
     raise ImportError(msg) from e
@@ -250,7 +250,10 @@ def _get_scenario_guidance(error_str: str) -> str:
         )
 
     if "variables" in lower:
-        hints.append("시나리오 파일에 'variables' 섹션은 지원하지 않습니다. URL은 설정의 {{url}} 변수를 사용하세요")
+        hints.append(
+            "시나리오 파일에 'variables' 섹션은 지원하지 않습니다. "
+            "URL은 설정의 {{url}} 변수를 사용하세요"
+        )
 
     if not hints:
         hints.append("시나리오 YAML 파일의 형식이 올바르지 않습니다")
@@ -400,7 +403,13 @@ async def _generate_scenarios(request: Request) -> JSONResponse:
     # Validate API key for providers that require one
     if provider != "ollama" and not _current_config.ai.api_key:
         return JSONResponse(
-            content={"error": f"API 키가 설정되지 않았습니다. 설정 > API 키에 {provider} API 키를 입력하고 '설정 저장'을 클릭하세요."},
+            content={
+                "error": (
+                    f"API 키가 설정되지 않았습니다. "
+                    f"설정 > API 키에 {provider} API 키를 입력하고 "
+                    f"'설정 저장'을 클릭하세요."
+                ),
+            },
             status_code=400,
         )
 
@@ -801,13 +810,13 @@ async def _upload_documents(request: Request) -> JSONResponse:
         )
 
     # Read text content of uploaded files for AI processing
+    import contextlib
+
     contents: dict[str, str] = {}
     for name in saved:
         filepath = docs_dir / name
-        try:
+        with contextlib.suppress(UnicodeDecodeError, OSError):
             contents[name] = filepath.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
-            pass  # skip binary files
 
     await _manager.broadcast(
         {

@@ -265,10 +265,10 @@ class StepExecutor:
             confidence = target.confidence or 0.8
             coords = await self._engine.find_on_screen(target.image, confidence)
             if coords is not None:
-                from aat.core.models import MatchMethod, MatchResult as MR
+                from aat.core.models import MatchMethod, MatchResult
 
                 sx, sy = coords
-                result = MR(
+                result = MatchResult(
                     found=True,
                     x=sx,
                     y=sy,
@@ -371,11 +371,11 @@ class StepExecutor:
         if humanize:
             await self._humanizer.move_to_screen(self._engine, x, y)
         if double:
-            await self._engine.double_click_on_screen(x, y)
+            await self._engine.double_click_on_screen(x, y)  # type: ignore[attr-defined]
         elif right:
-            await self._engine.right_click_on_screen(x, y)
+            await self._engine.right_click_on_screen(x, y)  # type: ignore[attr-defined]
         else:
-            await self._engine.click_on_screen(x, y)
+            await self._engine.click_on_screen(x, y)  # type: ignore[attr-defined]
 
     async def _do_type(self, text: str, humanize: bool) -> None:
         """Type text with optional humanization.

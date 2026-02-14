@@ -11,7 +11,7 @@ from typing import Any
 from aat.core.events import EventEmitter
 
 try:
-    from fastapi import WebSocket  # type: ignore[import-not-found]  # noqa: TC002
+    from fastapi import WebSocket  # noqa: TC002
     from PIL import Image
 except ImportError as e:
     msg = "Dashboard requires 'web' extras: pip install aat-devqa[web]"

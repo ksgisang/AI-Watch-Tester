@@ -22,7 +22,8 @@ from aat.dashboard.app import create_app
 def client(tmp_path: Path) -> TestClient:
     """Create a test client with a temporary config."""
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("project_name: test-project\nai:\n  api_key: test-key-12345\n", encoding="utf-8")
+    config_text = "project_name: test-project\nai:\n  api_key: test-key-12345\n"
+    config_path.write_text(config_text, encoding="utf-8")
     app = create_app(config_path=config_path)
     return TestClient(app)
 

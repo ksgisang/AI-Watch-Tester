@@ -13,8 +13,6 @@ import logging
 from pathlib import Path  # noqa: TC003
 from typing import TYPE_CHECKING, Any
 
-_log = logging.getLogger(__name__)
-
 from playwright.async_api import (
     Browser,
     BrowserContext,
@@ -29,6 +27,8 @@ from aat.engine.base import BaseEngine
 
 if TYPE_CHECKING:
     import types
+
+_log = logging.getLogger(__name__)
 
 
 def _get_pyautogui() -> Any:
@@ -346,7 +346,7 @@ class DesktopEngine(BaseEngine):
 
         for strategy in strategies:
             try:
-                locator = strategy()
+                locator = strategy()  # type: ignore[no-untyped-call]
                 if await locator.is_visible(timeout=1000):
                     box = await locator.bounding_box()
                     if box:

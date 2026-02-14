@@ -70,7 +70,7 @@ class Humanizer:
         image matching results that are already in screen coordinates.
         """
         move_fn = (
-            engine.move_mouse_screen  # type: ignore[union-attr]
+            engine.move_mouse_screen
             if hasattr(engine, "move_mouse_screen")
             else engine.move_mouse
         )
@@ -82,7 +82,7 @@ class Humanizer:
         # Get current screen position from PyAutoGUI
         current_x, current_y = 0, 0
         if hasattr(engine, "pag"):
-            pos = engine.pag.position()  # type: ignore[union-attr]
+            pos = engine.pag.position()
             current_x, current_y = pos.x, pos.y
 
         duration = random.uniform(

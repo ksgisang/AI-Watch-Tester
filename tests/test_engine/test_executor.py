@@ -346,7 +346,7 @@ class TestFindAndClickScreenCoords:
         mock_humanizer: MagicMock,
         mock_waiter: MagicMock,
         mock_comparator: MagicMock,
-        tmp_path: "Path",
+        tmp_path: Path,
     ) -> None:
         """When engine has find_on_screen and image target, use screen coords."""
         engine = MagicMock()
@@ -382,7 +382,7 @@ class TestFindAndClickScreenCoords:
         mock_humanizer: MagicMock,
         mock_waiter: MagicMock,
         mock_comparator: MagicMock,
-        tmp_path: "Path",
+        tmp_path: Path,
     ) -> None:
         """When find_on_screen returns None, fall through to matcher."""
         engine = MagicMock()
