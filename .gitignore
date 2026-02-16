@@ -7,10 +7,8 @@ aat.config.yaml
 # Claude Code project guide (internal)
 CLAUDE.md
 
-# AAT data (may contain sensitive info)
-.aat/config.yaml
-.aat/learned.db
-.aat/screenshots/
+# AAT runtime data (config, learned DB, screenshots, uploaded docs)
+.aat/
 
 # Reports (large files)
 reports/

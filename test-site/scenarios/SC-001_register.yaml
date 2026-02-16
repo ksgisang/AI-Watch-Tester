@@ -1,0 +1,49 @@
+id: SC-001
+name: User Registration
+description: Register a new user account with name, email and password
+tags: [auth, register]
+
+steps:
+  - step: 1
+    action: navigate
+    value: "{{url}}/register"
+    description: Open the registration page
+
+  - step: 2
+    action: find_and_type
+    target:
+      text: "Name"
+    value: "Test User"
+    humanize: true
+    description: Enter name
+
+  - step: 3
+    action: find_and_type
+    target:
+      text: "Email"
+    value: "test@example.com"
+    humanize: true
+    description: Enter email address
+
+  - step: 4
+    action: find_and_type
+    target:
+      text: "Password"
+    value: "password123"
+    humanize: true
+    description: Enter password
+
+  - step: 5
+    action: find_and_click
+    target:
+      text: "Register"
+    humanize: true
+    description: Click the Register button
+
+  - step: 6
+    action: assert
+    assert_type: text_visible
+    expected:
+      - type: text_visible
+        value: "Registration successful"
+    description: Verify registration success message

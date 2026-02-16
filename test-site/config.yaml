@@ -1,0 +1,18 @@
+# AAT Configuration for test-site demo
+url: "http://localhost:5001"
+
+engine:
+  type: web
+  headless: false
+  viewport:
+    width: 1280
+    height: 720
+
+matching:
+  chain_order:
+    - template
+    - ocr
+  confidence: 0.7
+
+scenarios_dir: scenarios
+output_dir: output

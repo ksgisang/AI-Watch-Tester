@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Login — AAT Demo{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1>Login</h1>
+    <form method="POST" action="{{ url_for('login') }}">
+        <div class="form-group">
+            <label for="email">Email</label>
+            <input type="email" id="email" name="email" placeholder="Enter your email" required>
+        </div>
+        <div class="form-group">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" placeholder="Enter your password" required>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">Login</button>
+    </form>
+    <p style="text-align: center; margin-top: 20px; color: #888;">
+        Don't have an account? <a href="{{ url_for('register') }}">Register here</a>
+    </p>
+</div>
+{% endblock %}

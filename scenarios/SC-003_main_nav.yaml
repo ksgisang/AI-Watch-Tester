@@ -1,0 +1,71 @@
+id: SC-003
+name: Main Page Navigation
+description: Verify main page content and navigation after login
+tags: [navigation, main]
+
+steps:
+  - step: 1
+    action: navigate
+    value: "{{url}}/login"
+    description: Open the login page
+
+  - step: 2
+    action: find_and_type
+    target:
+      text: "Email"
+    value: "test@example.com"
+    humanize: true
+    description: Type email to login
+
+  - step: 3
+    action: find_and_type
+    target:
+      text: "Password"
+    value: "password123"
+    humanize: true
+    description: Type password to login
+
+  - step: 4
+    action: find_and_click
+    target:
+      text: "Login"
+    humanize: true
+    description: Click Login button
+
+  - step: 5
+    action: assert
+    assert_type: text_visible
+    expected:
+      - type: text_visible
+        value: "Welcome, Test User!"
+    description: Verify welcome message with user name
+
+  - step: 6
+    action: find_and_click
+    target:
+      text: "Home"
+    humanize: true
+    description: Navigate to Home via button
+
+  - step: 7
+    action: assert
+    assert_type: text_visible
+    expected:
+      - type: text_visible
+        value: "Welcome to AAT Demo"
+    description: Verify landing page content
+
+  - step: 8
+    action: find_and_click
+    target:
+      text: "Main"
+    humanize: true
+    description: Navigate back to Main via nav link
+
+  - step: 9
+    action: assert
+    assert_type: url_contains
+    expected:
+      - type: url_contains
+        value: "/main"
+    description: Verify on main page

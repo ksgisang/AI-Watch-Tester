@@ -1,0 +1,49 @@
+id: SC-002
+name: User Login
+description: Login with registered user credentials
+tags: [auth, login]
+
+steps:
+  - step: 1
+    action: navigate
+    value: "{{url}}/login"
+    description: Open the login page
+
+  - step: 2
+    action: find_and_type
+    target:
+      text: "Email"
+    value: "test@example.com"
+    humanize: true
+    description: Enter email address
+
+  - step: 3
+    action: find_and_type
+    target:
+      text: "Password"
+    value: "password123"
+    humanize: true
+    description: Enter password
+
+  - step: 4
+    action: find_and_click
+    target:
+      text: "Login"
+    humanize: true
+    description: Click the Login button
+
+  - step: 5
+    action: assert
+    assert_type: text_visible
+    expected:
+      - type: text_visible
+        value: "Welcome back"
+    description: Verify login success message
+
+  - step: 6
+    action: assert
+    assert_type: url_contains
+    expected:
+      - type: url_contains
+        value: "/main"
+    description: Verify redirect to main page

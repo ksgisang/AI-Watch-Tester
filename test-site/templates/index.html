@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Welcome — AAT Demo{% endblock %}
+
+{% block content %}
+<div class="card" style="text-align: center;">
+    <h1>Welcome to AAT Demo</h1>
+    <p style="font-size: 17px; color: #666; margin-bottom: 32px;">
+        This is a demo application for testing AAT automation capabilities.
+    </p>
+    <div class="btn-group" style="justify-content: center;">
+        <a href="{{ url_for('register') }}" class="btn btn-success">Register</a>
+        <a href="{{ url_for('login') }}" class="btn btn-primary">Login</a>
+    </div>
+</div>
+{% endblock %}

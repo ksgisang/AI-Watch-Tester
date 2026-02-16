@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Main — AAT Demo{% endblock %}
+
+{% block content %}
+<div class="card" style="text-align: center;">
+    <h1>Welcome, {{ name }}!</h1>
+    <p style="font-size: 17px; color: #666; margin-bottom: 32px;">
+        You are now logged in to the AAT Demo application.
+    </p>
+    <div class="btn-group" style="justify-content: center;">
+        <a href="{{ url_for('index') }}" class="btn btn-primary">Home</a>
+        <a href="{{ url_for('logout') }}" class="btn btn-danger">Logout</a>
+    </div>
+</div>
+{% endblock %}
