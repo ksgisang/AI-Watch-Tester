@@ -204,8 +204,18 @@ class OllamaAdapter(AIAdapter):
 
         data = await self._call_api(_SYSTEM_GENERATE_SCENARIOS, document_text)
 
+        # Ollama models may return {scenarios: [...]} instead of [...]
+        if isinstance(data, dict):
+            for key in ("scenarios", "test_scenarios", "tests", "data"):
+                if isinstance(data.get(key), list):
+                    data = data[key]
+                    break
+            else:
+                # Single scenario object — wrap in list
+                data = [data]
+
         if not isinstance(data, list):
-            msg = "Expected JSON array for scenarios"
+            msg = f"Expected JSON array for scenarios, got {type(data).__name__}"
             raise AdapterError(msg)
 
         try:
@@ -255,6 +265,7 @@ class OllamaAdapter(AIAdapter):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_text},
             ],
+            "format": "json",
             "stream": False,
             "options": {
                 "temperature": self._temperature,
@@ -262,11 +273,14 @@ class OllamaAdapter(AIAdapter):
         }
 
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            async with httpx.AsyncClient(timeout=300.0) as client:
                 response = await client.post(url, json=payload)
                 response.raise_for_status()
         except httpx.ConnectError as exc:
             msg = f"Cannot connect to Ollama at {self._base_url}. Is Ollama running?"
+            raise AdapterError(msg) from exc
+        except httpx.TimeoutException as exc:
+            msg = f"Ollama timeout after 300s. Model may be too slow for this task: {exc}"
             raise AdapterError(msg) from exc
         except httpx.HTTPStatusError as exc:
             msg = f"Ollama API error: {exc.response.status_code} — {exc.response.text[:300]}"
