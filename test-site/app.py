@@ -1,9 +1,13 @@
-"""AAT Demo Web Application — Flask single-file server."""
+"""AAT Demo Web Application — Flask single-file server.
+
+WARNING: Demo only. Do NOT use in production.
+Hardcoded secret key, in-memory store, no input sanitization.
+"""
 
 from flask import Flask, flash, redirect, render_template, request, session, url_for
 
 app = Flask(__name__)
-app.secret_key = "aat-demo-secret-key-2026"
+app.secret_key = "aat-demo-secret-key-2026"  # noqa: S105  # Demo only
 
 # In-memory user store
 users: dict[str, dict[str, str]] = {}
