@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     # Sentry (optional — set DSN to enable)
     sentry_dsn: str = ""
 
+    # API (v1 wait mode timeout in seconds)
+    api_timeout: int = 300
+
     # Playwright (cloud worker)
     playwright_headless: bool = True
 

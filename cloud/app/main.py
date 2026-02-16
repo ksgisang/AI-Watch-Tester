@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import engine
 from app.models import Base
-from app.routers import tests
+from app.routers import keys, tests, v1
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +103,8 @@ if _ss_dir.exists():
 
 # -- Routers --
 app.include_router(tests.router)
+app.include_router(keys.router)
+app.include_router(v1.router)
 
 
 # -- Rate limit response headers --

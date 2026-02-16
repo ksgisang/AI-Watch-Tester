@@ -13,7 +13,8 @@
     "status": "Status",
     "signOut": "Sign Out",
     "login": "Login",
-    "signUp": "Sign Up"
+    "signUp": "Sign Up",
+    "settings": "Settings"
   },
   "landing": {
     "heroLine1": "Just enter a URL",
@@ -183,6 +184,25 @@
     "workerSlots": "{active} / {max} slots active",
     "modelsAvailable": "{count} model(s)",
     "autoRefresh": "Auto-refreshes every 30 seconds"
+  },
+  "settings": {
+    "title": "Settings",
+    "subtitle": "Manage your account and API keys",
+    "apiKeysTitle": "API Keys",
+    "apiKeysDesc": "Generate keys to authenticate CI/CD pipelines via X-API-Key header.",
+    "keyNamePlaceholder": "Key name (e.g. GitHub Actions)",
+    "generate": "Generate",
+    "generating": "Generating...",
+    "keyCreated": "API key created successfully!",
+    "copy": "Copy",
+    "copied": "Copied!",
+    "keyWarning": "Copy this key now. You won't be able to see it again.",
+    "noKeys": "No API keys yet.",
+    "created": "Created",
+    "lastUsed": "Last used",
+    "revoke": "Revoke",
+    "revokeConfirm": "Are you sure you want to revoke this API key? This cannot be undone.",
+    "loginRequired": "Please log in to access settings."
   },
   "fileUpload": {
     "dropHint": "Drop spec documents here or click to browse",

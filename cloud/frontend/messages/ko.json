@@ -13,7 +13,8 @@
     "status": "",
     "signOut": "",
     "login": "",
-    "signUp": ""
+    "signUp": "",
+    "settings": ""
   },
   "landing": {
     "heroLine1": "",
@@ -183,6 +184,25 @@
     "workerSlots": "",
     "modelsAvailable": "",
     "autoRefresh": ""
+  },
+  "settings": {
+    "title": "",
+    "subtitle": "",
+    "apiKeysTitle": "",
+    "apiKeysDesc": "",
+    "keyNamePlaceholder": "",
+    "generate": "",
+    "generating": "",
+    "keyCreated": "",
+    "copy": "",
+    "copied": "",
+    "keyWarning": "",
+    "noKeys": "",
+    "created": "",
+    "lastUsed": "",
+    "revoke": "",
+    "revokeConfirm": "",
+    "loginRequired": ""
   },
   "fileUpload": {
     "dropHint": "",

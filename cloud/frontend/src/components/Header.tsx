@@ -43,6 +43,12 @@ export default function Header() {
               >
                 {t("status")}
               </Link>
+              <Link
+                href="/settings"
+                className="text-sm text-gray-600 hover:text-gray-900"
+              >
+                {t("settings")}
+              </Link>
               <span className="text-xs text-gray-400">{user.email}</span>
               <button
                 onClick={handleSignOut}

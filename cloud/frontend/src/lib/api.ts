@@ -188,4 +188,48 @@ export async function fetchHealth(): Promise<HealthResponse> {
   return res.json();
 }
 
+// -- API Keys --
+
+export interface ApiKeyItem {
+  id: number;
+  prefix: string;
+  name: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export interface ApiKeyCreatedItem {
+  id: number;
+  key: string;
+  prefix: string;
+  name: string;
+  created_at: string;
+}
+
+export async function createApiKey(name: string): Promise<ApiKeyCreatedItem> {
+  const res = await authFetch("/api/keys", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || `Error ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function listApiKeys(): Promise<ApiKeyItem[]> {
+  const res = await authFetch("/api/keys");
+  if (!res.ok) throw new Error(`Error ${res.status}`);
+  return res.json();
+}
+
+export async function deleteApiKey(id: number): Promise<void> {
+  const res = await authFetch(`/api/keys/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || `Error ${res.status}`);
+  }
+}
+
 export { API_URL };

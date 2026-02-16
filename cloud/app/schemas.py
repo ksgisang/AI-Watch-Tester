@@ -79,3 +79,34 @@ class ErrorResponse(BaseModel):
     """Error response body."""
 
     detail: str
+
+
+# -- API Keys --
+
+
+class ApiKeyCreate(BaseModel):
+    """POST /api/keys request body."""
+
+    name: str
+
+
+class ApiKeyResponse(BaseModel):
+    """API key in list responses (no full key)."""
+
+    id: int
+    prefix: str
+    name: str
+    created_at: datetime
+    last_used_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class ApiKeyCreated(BaseModel):
+    """POST /api/keys response (full key shown once)."""
+
+    id: int
+    key: str
+    prefix: str
+    name: str
+    created_at: datetime
