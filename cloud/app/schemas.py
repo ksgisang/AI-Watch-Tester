@@ -29,6 +29,10 @@ class TestResponse(BaseModel):
     target_url: str
     status: TestStatus
     result_json: str | None = None
+    scenario_yaml: str | None = None
+    error_message: str | None = None
+    steps_total: int = 0
+    steps_completed: int = 0
     created_at: datetime
     updated_at: datetime
 

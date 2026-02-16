@@ -12,6 +12,16 @@ aiosqlite>=0.20.0        # SQLite async (dev)
 # Auth — Supabase JWT verification (ES256 via JWKS)
 PyJWT[crypto]>=2.8.0
 
+# WebSocket
+websockets>=12.0
+
+# Worker — AAT core (install from project root: pip install -e .)
+pyyaml>=6.0
+
+# Optional: structured logging + error tracking
+# structlog>=24.0
+# sentry-sdk[fastapi]>=2.0
+
 # Testing
 pytest>=8.0
 pytest-asyncio>=0.24.0

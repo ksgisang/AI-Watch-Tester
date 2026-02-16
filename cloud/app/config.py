@@ -29,6 +29,24 @@ class Settings(BaseSettings):
     rate_limit_free: int = 5
     rate_limit_pro: int = -1  # -1 = unlimited
 
+    # Worker
+    max_concurrent: int = 2
+    worker_poll_interval: float = 2.0  # seconds
+
+    # AI provider for scenario generation
+    ai_provider: str = "ollama"  # claude, openai, ollama
+    ai_api_key: str = ""
+    ai_model: str = ""  # auto-select based on provider if empty
+
+    # Daily limit (Pro tier, -1 = unlimited)
+    daily_limit_pro: int = 20
+
+    # Sentry (optional — set DSN to enable)
+    sentry_dsn: str = ""
+
+    # Playwright (cloud worker)
+    playwright_headless: bool = True
+
     model_config = {"env_prefix": "AWT_", "env_file": ".env", "extra": "ignore"}
 
 

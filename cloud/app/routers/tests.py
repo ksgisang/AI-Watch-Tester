@@ -1,8 +1,8 @@
-"""Test CRUD endpoints."""
+"""Test CRUD + WebSocket endpoints."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +11,7 @@ from app.database import get_db
 from app.middleware import check_rate_limit
 from app.models import Test, TestStatus, User
 from app.schemas import TestCreate, TestListResponse, TestResponse
+from app.ws import ws_manager
 
 router = APIRouter(prefix="/api/tests", tags=["tests"])
 
@@ -86,3 +87,24 @@ async def get_test(
         raise HTTPException(status_code=404, detail="Test not found")
 
     return test
+
+
+# ---------------------------------------------------------------------------
+# WebSocket — per-test live progress
+# ---------------------------------------------------------------------------
+
+
+@router.websocket("/{test_id}/ws")
+async def test_websocket(websocket: WebSocket, test_id: int) -> None:
+    """WebSocket for live test progress.
+
+    Events sent: test_start, scenarios_generated, step_start, step_done,
+    step_fail, test_complete, test_fail.
+    """
+    await ws_manager.connect(test_id, websocket)
+    try:
+        while True:
+            # Keep connection alive; client can send pings
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(test_id, websocket)

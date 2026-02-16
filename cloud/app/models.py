@@ -41,6 +41,10 @@ class Test(Base):
         Enum(TestStatus), default=TestStatus.QUEUED, nullable=False
     )
     result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scenario_yaml: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    steps_total: Mapped[int] = mapped_column(Integer, default=0)
+    steps_completed: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
