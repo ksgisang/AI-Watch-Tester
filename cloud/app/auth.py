@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 import jwt
+from jwt import PyJWKClient
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,39 +17,90 @@ from app.models import User, UserTier
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# JWKS client — fetches public keys from Supabase for ES256 verification
+# ---------------------------------------------------------------------------
+
+_jwks_client: PyJWKClient | None = None
+
+
+def _get_jwks_client() -> PyJWKClient:
+    """Lazily create and cache a JWKS client for the Supabase project."""
+    global _jwks_client  # noqa: PLW0603
+
+    if _jwks_client is not None:
+        return _jwks_client
+
+    if not settings.supabase_url:
+        raise HTTPException(
+            status_code=503,
+            detail="Supabase not configured. Set AWT_SUPABASE_URL.",
+        )
+
+    jwks_url = f"{settings.supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
+    _jwks_client = PyJWKClient(jwks_url, cache_keys=True)
+    return _jwks_client
+
 
 def verify_supabase_token(token: str) -> dict[str, Any]:
     """Verify a Supabase JWT access token and return decoded payload.
 
-    Supabase issues standard JWTs signed with the project's JWT secret (HS256).
-    The payload contains: sub (user ID), email, role, exp, etc.
+    Supabase uses ES256 (ECDSA) JWTs signed with a project-specific key pair.
+    The public key is fetched from the JWKS endpoint.
 
     Raises HTTPException 401/503 on failure.
     """
-    if not settings.supabase_jwt_secret:
-        raise HTTPException(
-            status_code=503,
-            detail="Supabase not configured. Set AWT_SUPABASE_JWT_SECRET.",
-        )
+    # Try ES256 via JWKS first (current Supabase default)
+    if settings.supabase_url:
+        try:
+            client = _get_jwks_client()
+            signing_key = client.get_signing_key_from_jwt(token)
+            payload = jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=["ES256"],
+                audience="authenticated",
+            )
+            return payload
+        except jwt.ExpiredSignatureError as exc:
+            raise HTTPException(
+                status_code=401,
+                detail="Token expired. Please login again.",
+            ) from exc
+        except jwt.InvalidTokenError as exc:
+            raise HTTPException(
+                status_code=401,
+                detail=f"Invalid token: {exc}",
+            ) from exc
+        except Exception as exc:
+            # JWKS fetch failure — fall through to HS256 if configured
+            logger.warning("JWKS verification failed: %s", exc)
 
-    try:
-        payload = jwt.decode(
-            token,
-            settings.supabase_jwt_secret,
-            algorithms=["HS256"],
-            audience="authenticated",
-        )
-        return payload
-    except jwt.ExpiredSignatureError as exc:
-        raise HTTPException(
-            status_code=401,
-            detail="Token expired. Please login again.",
-        ) from exc
-    except jwt.InvalidTokenError as exc:
-        raise HTTPException(
-            status_code=401,
-            detail=f"Invalid token: {exc}",
-        ) from exc
+    # Fallback: HS256 with JWT secret (legacy or local dev)
+    if settings.supabase_jwt_secret:
+        try:
+            payload = jwt.decode(
+                token,
+                settings.supabase_jwt_secret,
+                algorithms=["HS256"],
+                audience="authenticated",
+            )
+            return payload
+        except jwt.ExpiredSignatureError as exc:
+            raise HTTPException(
+                status_code=401,
+                detail="Token expired. Please login again.",
+            ) from exc
+        except jwt.InvalidTokenError as exc:
+            raise HTTPException(
+                status_code=401,
+                detail=f"Invalid token: {exc}",
+            ) from exc
+
+    raise HTTPException(
+        status_code=503,
+        detail="Supabase not configured. Set AWT_SUPABASE_URL or AWT_SUPABASE_JWT_SECRET.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -71,17 +123,7 @@ async def get_current_user(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """Dependency: verify Supabase JWT → return or create User record.
-
-    Supabase JWT payload example:
-        {
-            "sub": "uuid-user-id",
-            "email": "user@example.com",
-            "role": "authenticated",
-            "aud": "authenticated",
-            ...
-        }
-    """
+    """Dependency: verify Supabase JWT → return or create User record."""
     token = _extract_bearer_token(request)
     payload = verify_supabase_token(token)
 
