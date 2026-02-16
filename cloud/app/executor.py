@@ -6,12 +6,14 @@ Reuses AAT core modules (aat package must be installed).
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import time
 from pathlib import Path
 from typing import Any
 
+import yaml
 from sqlalchemy import select
 
 from app.config import settings
@@ -53,6 +55,32 @@ Analyze the following web page and generate user-perspective E2E test scenarios 
 Return ONLY valid YAML scenario definitions.\
 """
 
+_SCENARIO_PROMPT_WITH_DOCS = """\
+You are an E2E test scenario generator.
+
+Analyze the following web page AND the uploaded specification documents to generate \
+user-perspective E2E test scenarios in YAML format.
+
+## Target
+- URL: {url}
+
+## Page Content (truncated)
+{page_text}
+
+## Specification Documents
+{doc_text}
+
+## Instructions
+1. Use the specification documents as the PRIMARY source for identifying test scenarios
+2. Cross-reference with the actual page content to verify available UI elements
+3. Generate 1-5 test scenarios covering the most important flows described in the documents
+4. Each scenario should have clear steps: navigate, click, type, assert
+5. Use text-based targets (not image) for reliability
+6. Keep steps concise and actionable
+
+Return ONLY valid YAML scenario definitions.\
+"""
+
 
 # ---------------------------------------------------------------------------
 # Screenshot helper
@@ -68,18 +96,144 @@ def _screenshot_dir_for_test(test_id: int) -> Path:
 
 
 async def _save_screenshot(
-    engine: Any, test_id: int, label: str
+    engine: Any,
+    test_id: int,
+    label: str,
+    *,
+    ws: WSManager | None = None,
+    step: int = 0,
+    timing: str = "",
 ) -> str | None:
-    """Save engine screenshot to file. Returns relative path or None."""
+    """Save engine screenshot to file and optionally stream via WebSocket.
+
+    Returns relative path or None.
+    """
     try:
         png_bytes = await engine.screenshot()
         d = _screenshot_dir_for_test(test_id)
         path = d / f"{label}.png"
         path.write_bytes(png_bytes)
+
+        # Stream to frontend via WebSocket
+        if ws and timing:
+            b64 = base64.b64encode(png_bytes).decode("ascii")
+            await ws.broadcast(test_id, {
+                "type": "screenshot",
+                "step": step,
+                "timing": timing,
+                "image": f"data:image/png;base64,{b64}",
+            })
+
         return str(path)
     except Exception as exc:
         logger.debug("Screenshot save failed (%s): %s", label, exc)
         return None
+
+
+# ---------------------------------------------------------------------------
+# Scenario generation (Phase 1: navigate + AI generate)
+# ---------------------------------------------------------------------------
+
+
+async def generate_scenarios_for_test(
+    test_id: int, ws: WSManager | None = None
+) -> dict[str, Any]:
+    """Navigate to URL, capture page, generate scenarios via AI, save YAML.
+
+    Returns dict: {scenario_yaml, steps_total, error?}
+    """
+    async with async_session() as db:
+        test = (await db.execute(select(Test).where(Test.id == test_id))).scalar_one()
+        target_url = test.target_url
+        doc_text = test.doc_text
+
+    try:
+        from aat.core.models import AIConfig, EngineConfig
+        from aat.adapters import ADAPTER_REGISTRY
+        from aat.engine.web import WebEngine
+    except ImportError as exc:
+        msg = f"AAT core not installed: {exc}. Run 'pip install -e .' from project root."
+        logger.error(msg)
+        return {"error": msg}
+
+    engine_config = EngineConfig(type="web", headless=settings.playwright_headless)
+    engine = WebEngine(engine_config)
+
+    try:
+        await engine.start()
+        await engine.navigate(target_url)
+        page_text = await engine.get_page_text()
+        screenshot = await engine.screenshot()
+
+        # Save initial screenshot + stream to frontend
+        await _save_screenshot(
+            engine, test_id, "initial", ws=ws, step=0, timing="initial"
+        )
+
+        # Generate scenarios via AI
+        ai_config = AIConfig(
+            provider=settings.ai_provider,
+            api_key=settings.ai_api_key,
+            model=settings.ai_model or _DEFAULT_MODELS.get(settings.ai_provider, ""),
+        )
+
+        adapter_cls = ADAPTER_REGISTRY.get(ai_config.provider)
+        if adapter_cls is None:
+            return {"error": f"Unknown AI provider: {ai_config.provider}"}
+
+        adapter = adapter_cls(ai_config)
+
+        # Use document-enhanced prompt if doc_text is available
+        if doc_text:
+            prompt = _SCENARIO_PROMPT_WITH_DOCS.format(
+                url=target_url,
+                page_text=page_text[:8000],
+                doc_text=doc_text[:16000],
+            )
+        else:
+            prompt = _SCENARIO_PROMPT.format(url=target_url, page_text=page_text[:8000])
+
+        scenarios = await adapter.generate_scenarios(prompt, images=[screenshot])
+
+        if not scenarios:
+            return {"error": "AI generated no scenarios"}
+
+        # Serialize to YAML
+        scenario_dicts = []
+        for s in scenarios:
+            sd = s.model_dump(mode="json", exclude_none=True)
+            scenario_dicts.append(sd)
+        scenario_yaml = yaml.safe_dump(
+            scenario_dicts, default_flow_style=False, allow_unicode=True
+        )
+
+        total_steps = sum(len(s.steps) for s in scenarios)
+
+        # Update DB
+        async with async_session() as db:
+            test = (await db.execute(select(Test).where(Test.id == test_id))).scalar_one()
+            test.scenario_yaml = scenario_yaml
+            test.steps_total = total_steps
+            await db.commit()
+
+        # Notify frontend
+        if ws:
+            await ws.broadcast(test_id, {
+                "type": "scenarios_ready",
+                "scenario_yaml": scenario_yaml,
+                "steps_total": total_steps,
+            })
+
+        return {"scenario_yaml": scenario_yaml, "steps_total": total_steps}
+
+    except Exception as exc:
+        logger.exception("Scenario generation failed for test %d", test_id)
+        return {"error": str(exc)}
+    finally:
+        try:
+            await engine.stop()
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -90,11 +244,8 @@ async def _save_screenshot(
 async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, Any]:
     """Execute a single test end-to-end.
 
-    1. Navigate to target URL with headless Playwright
-    2. Capture page content + screenshot
-    3. Generate test scenarios via AI adapter
-    4. Execute each scenario step by step (with per-step screenshots)
-    5. Return aggregated results
+    If scenario_yaml already exists in DB (review mode), parse and execute it.
+    Otherwise, generate scenarios first, then execute (auto mode).
 
     Returns dict: {passed, scenarios, duration_ms, error?}
     """
@@ -102,6 +253,7 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
     async with async_session() as db:
         test = (await db.execute(select(Test).where(Test.id == test_id))).scalar_one()
         target_url = test.target_url
+        existing_yaml = test.scenario_yaml
 
     start = time.monotonic()
 
@@ -112,6 +264,7 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
             EngineConfig,
             HumanizerConfig,
             MatchingConfig,
+            Scenario,
         )
         from aat.adapters import ADAPTER_REGISTRY
         from aat.engine.web import WebEngine
@@ -132,53 +285,58 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
 
     try:
         await engine.start()
-
-        # -- Navigate & capture page --
         await engine.navigate(target_url)
-        page_text = await engine.get_page_text()
-        screenshot = await engine.screenshot()
 
-        # Save initial screenshot
-        init_ss = await _save_screenshot(engine, test_id, "initial")
-
-        # -- Generate scenarios via AI --
-        ai_config = AIConfig(
-            provider=settings.ai_provider,
-            api_key=settings.ai_api_key,
-            model=settings.ai_model or _DEFAULT_MODELS.get(settings.ai_provider, ""),
+        # Save initial screenshot + stream to frontend
+        init_ss = await _save_screenshot(
+            engine, test_id, "initial", ws=ws, step=0, timing="initial"
         )
 
-        adapter_cls = ADAPTER_REGISTRY.get(ai_config.provider)
-        if adapter_cls is None:
-            return {
-                "passed": False,
-                "error": f"Unknown AI provider: {ai_config.provider}",
-                "duration_ms": _elapsed(start),
-            }
+        # -- Load or generate scenarios --
+        if existing_yaml:
+            # Review mode: parse pre-existing YAML
+            raw = yaml.safe_load(existing_yaml)
+            if isinstance(raw, dict):
+                raw = [raw]
+            scenarios = [Scenario.model_validate(item) for item in raw]
+        else:
+            # Auto mode: generate scenarios inline
+            page_text = await engine.get_page_text()
+            screenshot = await engine.screenshot()
 
-        adapter = adapter_cls(ai_config)
-
-        prompt = _SCENARIO_PROMPT.format(
-            url=target_url,
-            page_text=page_text[:8000],
-        )
-        scenarios = await adapter.generate_scenarios(prompt, images=[screenshot])
+            ai_config = AIConfig(
+                provider=settings.ai_provider,
+                api_key=settings.ai_api_key,
+                model=settings.ai_model or _DEFAULT_MODELS.get(settings.ai_provider, ""),
+            )
+            adapter_cls = ADAPTER_REGISTRY.get(ai_config.provider)
+            if adapter_cls is None:
+                return {
+                    "passed": False,
+                    "error": f"Unknown AI provider: {ai_config.provider}",
+                    "duration_ms": _elapsed(start),
+                }
+            adapter = adapter_cls(ai_config)
+            prompt = _SCENARIO_PROMPT.format(url=target_url, page_text=page_text[:8000])
+            scenarios = await adapter.generate_scenarios(prompt, images=[screenshot])
 
         if not scenarios:
             return {
                 "passed": False,
-                "error": "AI generated no scenarios",
+                "error": "No scenarios to execute",
                 "duration_ms": _elapsed(start),
             }
 
         # -- Save scenario info to DB --
         total_steps = sum(len(s.steps) for s in scenarios)
-        scenario_data = [
-            {"id": s.id, "name": s.name, "steps": len(s.steps)} for s in scenarios
-        ]
         async with async_session() as db:
             test = (await db.execute(select(Test).where(Test.id == test_id))).scalar_one()
-            test.scenario_yaml = json.dumps(scenario_data, ensure_ascii=False)
+            if not existing_yaml:
+                # Auto mode: save generated YAML
+                scenario_dicts = [s.model_dump(mode="json", exclude_none=True) for s in scenarios]
+                test.scenario_yaml = yaml.safe_dump(
+                    scenario_dicts, default_flow_style=False, allow_unicode=True
+                )
             test.steps_total = total_steps
             await db.commit()
 
@@ -239,7 +397,8 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
 
                 # Before-screenshot
                 ss_before = await _save_screenshot(
-                    engine, test_id, f"step_{step_num}_before"
+                    engine, test_id, f"step_{step_num}_before",
+                    ws=ws, step=step_num, timing="before",
                 )
 
                 try:
@@ -248,7 +407,8 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
 
                     # After-screenshot
                     ss_after = await _save_screenshot(
-                        engine, test_id, f"step_{step_num}_after"
+                        engine, test_id, f"step_{step_num}_after",
+                        ws=ws, step=step_num, timing="after",
                     )
 
                     step_results.append({
@@ -277,7 +437,8 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
 
                     # Error-screenshot
                     ss_error = await _save_screenshot(
-                        engine, test_id, f"step_{step_num}_error"
+                        engine, test_id, f"step_{step_num}_error",
+                        ws=ws, step=step_num, timing="error",
                     )
 
                     step_results.append({

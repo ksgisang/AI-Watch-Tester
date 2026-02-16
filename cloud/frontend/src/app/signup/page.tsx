@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { createClient } from "@/lib/supabase";
 
 export default function SignupPage() {
@@ -11,6 +12,7 @@ export default function SignupPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const t = useTranslations("signup");
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,7 +38,7 @@ export default function SignupPage() {
     });
 
     if (loginError) {
-      setError("Account created. Please login.");
+      setError(t("accountCreated"));
       setLoading(false);
       router.push("/login");
       return;
@@ -49,13 +51,13 @@ export default function SignupPage() {
     <div className="flex min-h-[80vh] items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <h1 className="mb-6 text-center text-2xl font-bold text-gray-900">
-          Sign Up
+          {t("title")}
         </h1>
 
         <form onSubmit={handleSignup} className="space-y-4">
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">
-              Email
+              {t("email")}
             </label>
             <input
               type="email"
@@ -63,13 +65,13 @@ export default function SignupPage() {
               onChange={(e) => setEmail(e.target.value)}
               required
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-              placeholder="you@example.com"
+              placeholder={t("emailPlaceholder")}
             />
           </div>
 
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">
-              Password
+              {t("password")}
             </label>
             <input
               type="password"
@@ -78,7 +80,7 @@ export default function SignupPage() {
               required
               minLength={6}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-              placeholder="At least 6 characters"
+              placeholder={t("passwordPlaceholder")}
             />
           </div>
 
@@ -93,14 +95,14 @@ export default function SignupPage() {
             disabled={loading}
             className="w-full rounded-lg bg-blue-600 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
           >
-            {loading ? "Creating account..." : "Sign Up"}
+            {loading ? t("submitting") : t("submit")}
           </button>
         </form>
 
         <p className="mt-4 text-center text-sm text-gray-500">
-          Already have an account?{" "}
+          {t("hasAccount")}{" "}
           <Link href="/login" className="text-blue-600 hover:underline">
-            Login
+            {t("loginLink")}
           </Link>
         </p>
       </div>

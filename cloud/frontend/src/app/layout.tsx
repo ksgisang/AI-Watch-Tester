@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { NextIntlClientProvider } from "next-intl";
+import { getLocale, getMessages } from "next-intl/server";
 import "./globals.css";
 import { AuthProvider } from "@/components/AuthProvider";
 import Header from "@/components/Header";
@@ -16,23 +18,28 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "AWT Cloud — AI Web Tester",
-  description: "URL만 넣으면 AI가 테스트합니다",
+  description: "Just enter a URL and AI tests it for you",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const locale = await getLocale();
+  const messages = await getMessages();
+
   return (
-    <html lang="ko">
+    <html lang={locale}>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <AuthProvider>
-          <Header />
-          <main>{children}</main>
-        </AuthProvider>
+        <NextIntlClientProvider messages={messages}>
+          <AuthProvider>
+            <Header />
+            <main>{children}</main>
+          </AuthProvider>
+        </NextIntlClientProvider>
       </body>
     </html>
   );

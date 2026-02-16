@@ -2,15 +2,34 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from pathlib import Path
+
+import yaml
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
+from app.config import settings
 from app.database import get_db
+from app.docparse import allowed_extension, extract_text
 from app.middleware import check_rate_limit
 from app.models import Test, TestStatus, User
-from app.schemas import TestCreate, TestListResponse, TestResponse
+from app.schemas import (
+    ScenarioUpdate,
+    TestCreate,
+    TestListResponse,
+    TestResponse,
+    UploadResponse,
+)
 from app.ws import ws_manager
 
 router = APIRouter(prefix="/api/tests", tags=["tests"])
@@ -22,15 +41,18 @@ async def create_test(
     user: User = Depends(check_rate_limit),
     db: AsyncSession = Depends(get_db),
 ) -> Test:
-    """Create a new test (status=queued).
+    """Create a new test.
 
-    The test is saved to DB but not executed yet (stub).
-    Actual execution will be implemented in a later gate.
+    mode=review → GENERATING (AI generates, user reviews before execution)
+    mode=auto → QUEUED (generate + execute immediately)
     """
+    initial_status = (
+        TestStatus.GENERATING if body.mode == "review" else TestStatus.QUEUED
+    )
     test = Test(
         user_id=user.id,
         target_url=str(body.target_url),
-        status=TestStatus.QUEUED,
+        status=initial_status,
     )
     db.add(test)
     await db.commit()
@@ -87,6 +109,141 @@ async def get_test(
         raise HTTPException(status_code=404, detail="Test not found")
 
     return test
+
+
+@router.put("/{test_id}/scenarios", response_model=TestResponse)
+async def update_scenarios(
+    test_id: int,
+    body: ScenarioUpdate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Test:
+    """Update scenario YAML (only allowed in REVIEW status)."""
+    query = select(Test).where(Test.id == test_id, Test.user_id == user.id)
+    test = (await db.execute(query)).scalar_one_or_none()
+    if test is None:
+        raise HTTPException(status_code=404, detail="Test not found")
+    if test.status != TestStatus.REVIEW:
+        raise HTTPException(
+            status_code=409, detail=f"Cannot edit scenarios in '{test.status.value}' status"
+        )
+
+    # Validate YAML syntax
+    try:
+        parsed = yaml.safe_load(body.scenario_yaml)
+    except yaml.YAMLError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid YAML: {exc}")
+    if not parsed:
+        raise HTTPException(status_code=422, detail="Empty scenario YAML")
+
+    # Validate with Scenario model
+    try:
+        from aat.core.models import Scenario
+
+        items = parsed if isinstance(parsed, list) else [parsed]
+        scenarios = [Scenario.model_validate(item) for item in items]
+    except ImportError:
+        pass  # AAT not installed — skip model validation
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Scenario validation error: {exc}")
+
+    test.scenario_yaml = body.scenario_yaml
+    test.steps_total = sum(
+        len(s.steps) for s in scenarios
+    ) if "scenarios" in dir() else test.steps_total
+    await db.commit()
+    await db.refresh(test)
+    return test
+
+
+@router.post("/{test_id}/approve", response_model=TestResponse)
+async def approve_test(
+    test_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Test:
+    """Approve scenarios and queue test for execution (REVIEW → QUEUED)."""
+    query = select(Test).where(Test.id == test_id, Test.user_id == user.id)
+    test = (await db.execute(query)).scalar_one_or_none()
+    if test is None:
+        raise HTTPException(status_code=404, detail="Test not found")
+    if test.status != TestStatus.REVIEW:
+        raise HTTPException(
+            status_code=409, detail=f"Cannot approve test in '{test.status.value}' status"
+        )
+    if not test.scenario_yaml:
+        raise HTTPException(status_code=422, detail="No scenarios to approve")
+
+    test.status = TestStatus.QUEUED
+    await db.commit()
+    await db.refresh(test)
+    return test
+
+
+@router.post("/{test_id}/upload", response_model=UploadResponse)
+async def upload_document(
+    test_id: int,
+    file: UploadFile,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Upload a document for AI-assisted scenario generation.
+
+    Supported formats: .md, .txt, .pdf, .docx. Max 10MB.
+    Extracts text and appends to test.doc_text.
+    """
+    query = select(Test).where(Test.id == test_id, Test.user_id == user.id)
+    test = (await db.execute(query)).scalar_one_or_none()
+    if test is None:
+        raise HTTPException(status_code=404, detail="Test not found")
+    if test.status not in (TestStatus.GENERATING, TestStatus.REVIEW):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot upload documents in '{test.status.value}' status",
+        )
+
+    # Validate filename
+    filename = file.filename or "unknown"
+    if not allowed_extension(filename):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported file type. Allowed: .md, .txt, .pdf, .docx",
+        )
+
+    # Read file content with size check
+    content = await file.read()
+    if len(content) > settings.upload_max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Max {settings.upload_max_bytes // (1024*1024)}MB",
+        )
+
+    # Save file to disk
+    upload_dir = Path(settings.upload_dir) / str(test_id)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    file_path = upload_dir / filename
+    file_path.write_bytes(content)
+
+    # Extract text
+    try:
+        text = extract_text(file_path)
+    except ValueError as exc:
+        file_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    # Append to doc_text (support multiple uploads)
+    header = f"\n\n--- {filename} ---\n\n"
+    if test.doc_text:
+        test.doc_text += header + text
+    else:
+        test.doc_text = f"--- {filename} ---\n\n" + text
+    await db.commit()
+
+    return {
+        "filename": filename,
+        "size": len(content),
+        "extracted_chars": len(text),
+    }
 
 
 # ---------------------------------------------------------------------------

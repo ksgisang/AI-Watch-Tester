@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useAuth } from "@/components/AuthProvider";
 import { getTest, API_URL, type TestItem } from "@/lib/api";
 
@@ -43,8 +44,6 @@ const STATUS_BADGE: Record<string, string> = {
 
 function screenshotUrl(path: string | undefined | null): string | null {
   if (!path) return null;
-  // path is like "cloud/screenshots/1/step_1_before.png"
-  // serve from backend static mount at /screenshots/
   const relative = path.replace(/^cloud\/screenshots\//, "");
   return `${API_URL}/screenshots/${relative}`;
 }
@@ -53,6 +52,8 @@ export default function TestDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
+  const t = useTranslations("testDetail");
+  const tc = useTranslations("common");
   const [test, setTest] = useState<TestItem | null>(null);
   const [result, setResult] = useState<ResultJSON | null>(null);
   const [loading, setLoading] = useState(true);
@@ -85,7 +86,7 @@ export default function TestDetailPage() {
   if (authLoading || loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
-        <p className="text-gray-500">Loading...</p>
+        <p className="text-gray-500">{tc("loading")}</p>
       </div>
     );
   }
@@ -107,13 +108,13 @@ export default function TestDetailPage() {
         onClick={() => router.push("/tests")}
         className="mb-4 text-sm text-gray-500 hover:text-gray-700"
       >
-        &larr; Back to History
+        &larr; {t("backToHistory")}
       </button>
 
       <div className="mb-6 flex items-start justify-between">
         <div>
           <h1 className="text-xl font-bold text-gray-900">
-            Test #{test.id}
+            {t("testTitle", { id: test.id })}
           </h1>
           <p className="mt-1 text-sm text-gray-600">{test.target_url}</p>
           <p className="mt-0.5 text-xs text-gray-400">
@@ -142,9 +143,9 @@ export default function TestDetailPage() {
       {test.steps_total > 0 && (
         <div className="mb-6 rounded-lg border border-gray-200 p-4">
           <div className="mb-2 flex items-center justify-between text-sm">
-            <span className="text-gray-600">Progress</span>
+            <span className="text-gray-600">{t("progress")}</span>
             <span className="text-gray-900">
-              {test.steps_completed} / {test.steps_total} steps
+              {t("stepsCount", { completed: test.steps_completed, total: test.steps_total })}
             </span>
           </div>
           <div className="h-2 rounded-full bg-gray-100">
@@ -178,7 +179,7 @@ export default function TestDetailPage() {
                   : "bg-red-100 text-red-700"
               }`}
             >
-              {scenario.passed ? "PASSED" : "FAILED"}
+              {scenario.passed ? t("passed") : t("failed")}
             </span>
           </div>
 
@@ -198,7 +199,7 @@ export default function TestDetailPage() {
                     {step.step}
                   </span>
                   <span className="text-sm text-gray-700">
-                    {step.action || `Step ${step.step}`}
+                    {step.action || t("stepLabel", { step: step.step })}
                   </span>
                   <span
                     className={`ml-auto text-xs ${
@@ -236,7 +237,7 @@ export default function TestDetailPage() {
                           loading="lazy"
                         />
                         <span className="text-[10px] text-gray-400">
-                          before
+                          {t("before")}
                         </span>
                       </div>
                     )}
@@ -249,7 +250,7 @@ export default function TestDetailPage() {
                           loading="lazy"
                         />
                         <span className="text-[10px] text-gray-400">
-                          after
+                          {t("after")}
                         </span>
                       </div>
                     )}
@@ -261,7 +262,7 @@ export default function TestDetailPage() {
                           className="h-24 rounded border border-red-200 object-cover"
                           loading="lazy"
                         />
-                        <span className="text-[10px] text-red-400">error</span>
+                        <span className="text-[10px] text-red-400">{t("error")}</span>
                       </div>
                     )}
                   </div>

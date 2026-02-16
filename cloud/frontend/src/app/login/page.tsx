@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { createClient } from "@/lib/supabase";
 
 export default function LoginPage() {
@@ -11,6 +12,7 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const t = useTranslations("login");
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,13 +38,13 @@ export default function LoginPage() {
     <div className="flex min-h-[80vh] items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <h1 className="mb-6 text-center text-2xl font-bold text-gray-900">
-          Login
+          {t("title")}
         </h1>
 
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">
-              Email
+              {t("email")}
             </label>
             <input
               type="email"
@@ -50,13 +52,13 @@ export default function LoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               required
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-              placeholder="you@example.com"
+              placeholder={t("emailPlaceholder")}
             />
           </div>
 
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">
-              Password
+              {t("password")}
             </label>
             <input
               type="password"
@@ -64,7 +66,7 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               required
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-              placeholder="Password"
+              placeholder={t("passwordPlaceholder")}
             />
           </div>
 
@@ -79,14 +81,14 @@ export default function LoginPage() {
             disabled={loading}
             className="w-full rounded-lg bg-blue-600 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
           >
-            {loading ? "Logging in..." : "Login"}
+            {loading ? t("submitting") : t("submit")}
           </button>
         </form>
 
         <p className="mt-4 text-center text-sm text-gray-500">
-          Don&apos;t have an account?{" "}
+          {t("noAccount")}{" "}
           <Link href="/signup" className="text-blue-600 hover:underline">
-            Sign up
+            {t("signUpLink")}
           </Link>
         </p>
       </div>

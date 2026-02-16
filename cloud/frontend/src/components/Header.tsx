@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useAuth } from "./AuthProvider";
 
 export default function Header() {
   const { user, signOut } = useAuth();
   const router = useRouter();
+  const t = useTranslations("header");
 
   const handleSignOut = async () => {
     await signOut();
@@ -17,7 +19,7 @@ export default function Header() {
     <header className="border-b border-gray-200 bg-white">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
         <Link href="/" className="text-xl font-bold text-gray-900">
-          AWT Cloud
+          {t("brand")}
         </Link>
 
         <nav className="flex items-center gap-4">
@@ -27,20 +29,20 @@ export default function Header() {
                 href="/dashboard"
                 className="text-sm text-gray-600 hover:text-gray-900"
               >
-                Dashboard
+                {t("dashboard")}
               </Link>
               <Link
                 href="/tests"
                 className="text-sm text-gray-600 hover:text-gray-900"
               >
-                History
+                {t("history")}
               </Link>
               <span className="text-xs text-gray-400">{user.email}</span>
               <button
                 onClick={handleSignOut}
                 className="rounded bg-gray-100 px-3 py-1 text-sm text-gray-700 hover:bg-gray-200"
               >
-                Sign Out
+                {t("signOut")}
               </button>
             </>
           ) : (
@@ -49,13 +51,13 @@ export default function Header() {
                 href="/login"
                 className="text-sm text-gray-600 hover:text-gray-900"
               >
-                Login
+                {t("login")}
               </Link>
               <Link
                 href="/signup"
                 className="rounded bg-blue-600 px-4 py-1.5 text-sm text-white hover:bg-blue-700"
               >
-                Sign Up
+                {t("signUp")}
               </Link>
             </>
           )}

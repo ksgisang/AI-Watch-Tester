@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, HttpUrl
 
@@ -16,6 +17,13 @@ class TestCreate(BaseModel):
     """POST /api/tests request body."""
 
     target_url: HttpUrl
+    mode: Literal["review", "auto"] = "review"
+
+
+class ScenarioUpdate(BaseModel):
+    """PUT /api/tests/{id}/scenarios request body."""
+
+    scenario_yaml: str
 
 
 # -- Responses --
@@ -30,6 +38,7 @@ class TestResponse(BaseModel):
     status: TestStatus
     result_json: str | None = None
     scenario_yaml: str | None = None
+    doc_text: str | None = None
     error_message: str | None = None
     steps_total: int = 0
     steps_completed: int = 0
@@ -56,6 +65,14 @@ class UserResponse(BaseModel):
     tier: UserTier
 
     model_config = {"from_attributes": True}
+
+
+class UploadResponse(BaseModel):
+    """POST /api/tests/{id}/upload response."""
+
+    filename: str
+    size: int
+    extracted_chars: int
 
 
 class ErrorResponse(BaseModel):

@@ -16,6 +16,8 @@ class Base(DeclarativeBase):
 class TestStatus(str, enum.Enum):
     """Test execution status."""
 
+    GENERATING = "generating"
+    REVIEW = "review"
     QUEUED = "queued"
     RUNNING = "running"
     DONE = "done"
@@ -42,6 +44,7 @@ class Test(Base):
     )
     result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     scenario_yaml: Mapped[str | None] = mapped_column(Text, nullable=True)
+    doc_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     steps_total: Mapped[int] = mapped_column(Integer, default=0)
     steps_completed: Mapped[int] = mapped_column(Integer, default=0)

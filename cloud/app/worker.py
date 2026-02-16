@@ -14,7 +14,7 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.database import async_session
-from app.executor import execute_test
+from app.executor import execute_test, generate_scenarios_for_test
 from app.models import Test, TestStatus
 from app.ws import ws_manager
 
@@ -66,10 +66,11 @@ class Worker:
             try:
                 # Only claim a test if we have a free slot
                 if self._active < settings.max_concurrent:
-                    test_id = await self._claim_next()
-                    if test_id is not None:
+                    claimed = await self._claim_next()
+                    if claimed is not None:
+                        test_id, original_status = claimed
                         self._active += 1
-                        asyncio.create_task(self._run(test_id))
+                        asyncio.create_task(self._run(test_id, original_status))
                         continue  # Check for more immediately
             except Exception:
                 logger.exception("Worker poll error")
@@ -77,36 +78,43 @@ class Worker:
             await asyncio.sleep(settings.worker_poll_interval)
 
     async def _recover_stuck(self) -> None:
-        """Reset any RUNNING tests back to QUEUED (from previous crash)."""
+        """Reset any RUNNING tests back to appropriate state (from previous crash)."""
         async with async_session() as db:
             result = await db.execute(
                 select(Test).where(Test.status == TestStatus.RUNNING)
             )
             stuck = list(result.scalars().all())
             for test in stuck:
-                test.status = TestStatus.QUEUED
-                logger.warning("Recovered stuck test %d → QUEUED", test.id)
+                # If scenario_yaml exists, it was mid-execution → QUEUED
+                # If not, it was mid-generation → GENERATING
+                if test.scenario_yaml:
+                    test.status = TestStatus.QUEUED
+                    logger.warning("Recovered stuck test %d → QUEUED", test.id)
+                else:
+                    test.status = TestStatus.GENERATING
+                    logger.warning("Recovered stuck test %d → GENERATING", test.id)
             if stuck:
                 await db.commit()
 
-    async def _claim_next(self) -> int | None:
-        """Atomically claim the next queued test (mark as RUNNING).
+    async def _claim_next(self) -> tuple[int, TestStatus] | None:
+        """Atomically claim the next GENERATING or QUEUED test.
 
-        Uses SELECT ... FOR UPDATE on PostgreSQL to prevent race conditions
-        when multiple workers poll simultaneously. SQLite ignores FOR UPDATE
-        (single-writer), so this is safe for both backends.
-        # NOTE: 멀티 워커 확장 시 FOR UPDATE 필수 — 없으면 동일 테스트 중복 실행 가능
+        Returns (test_id, original_status) or None.
+        GENERATING has priority over QUEUED.
         """
         _is_sqlite = settings.database_url.startswith("sqlite")
 
         async with async_session() as db:
             stmt = (
                 select(Test)
-                .where(Test.status == TestStatus.QUEUED)
-                .order_by(Test.created_at.asc())
+                .where(Test.status.in_([TestStatus.GENERATING, TestStatus.QUEUED]))
+                .order_by(
+                    # GENERATING first, then QUEUED
+                    (Test.status == TestStatus.QUEUED).asc(),
+                    Test.created_at.asc(),
+                )
                 .limit(1)
             )
-            # FOR UPDATE: PostgreSQL에서 행 잠금. SQLite는 미지원이므로 skip.
             if not _is_sqlite:
                 stmt = stmt.with_for_update(skip_locked=True)
 
@@ -115,50 +123,24 @@ class Worker:
             if test is None:
                 return None
 
+            original_status = test.status
             test.status = TestStatus.RUNNING
             test.updated_at = datetime.now(timezone.utc)
             await db.commit()
-            logger.info("Claimed test %d for execution", test.id)
-            return test.id
+            logger.info("Claimed test %d (%s) for processing", test.id, original_status.value)
+            return test.id, original_status
 
-    async def _run(self, test_id: int) -> None:
-        """Execute a test and update its DB status."""
+    async def _run(self, test_id: int, original_status: TestStatus) -> None:
+        """Process a test based on its original status.
+
+        GENERATING → generate scenarios → REVIEW (wait for user)
+        QUEUED → execute test → DONE/FAILED
+        """
         try:
-            await ws_manager.broadcast(
-                test_id, {"type": "test_start", "test_id": test_id}
-            )
-
-            result = await execute_test(test_id, ws_manager)
-
-            # Update DB with results
-            async with async_session() as db:
-                test = (
-                    await db.execute(select(Test).where(Test.id == test_id))
-                ).scalar_one()
-                test.status = (
-                    TestStatus.DONE if result.get("passed") else TestStatus.FAILED
-                )
-                test.result_json = json.dumps(result, default=str)
-                if result.get("error"):
-                    test.error_message = result["error"]
-                test.updated_at = datetime.now(timezone.utc)
-                await db.commit()
-
-            await ws_manager.broadcast(
-                test_id,
-                {
-                    "type": "test_complete",
-                    "test_id": test_id,
-                    "passed": result.get("passed", False),
-                },
-            )
-            logger.info(
-                "Test %d completed (passed=%s, %.0fms)",
-                test_id,
-                result.get("passed"),
-                result.get("duration_ms", 0),
-            )
-
+            if original_status == TestStatus.GENERATING:
+                await self._run_generate(test_id)
+            else:
+                await self._run_execute(test_id)
         except Exception as exc:
             logger.exception("Test %d failed unexpectedly", test_id)
             async with async_session() as db:
@@ -178,6 +160,70 @@ class Worker:
             )
         finally:
             self._active -= 1
+
+    async def _run_generate(self, test_id: int) -> None:
+        """Generate scenarios and transition to REVIEW."""
+        await ws_manager.broadcast(
+            test_id, {"type": "test_start", "test_id": test_id, "phase": "generate"}
+        )
+
+        result = await generate_scenarios_for_test(test_id, ws_manager)
+
+        async with async_session() as db:
+            test = (
+                await db.execute(select(Test).where(Test.id == test_id))
+            ).scalar_one()
+            if result.get("error"):
+                test.status = TestStatus.FAILED
+                test.error_message = result["error"]
+            else:
+                test.status = TestStatus.REVIEW
+            test.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+
+        if result.get("error"):
+            await ws_manager.broadcast(
+                test_id,
+                {"type": "test_fail", "test_id": test_id, "error": result["error"]},
+            )
+        else:
+            logger.info("Test %d scenarios generated → REVIEW", test_id)
+
+    async def _run_execute(self, test_id: int) -> None:
+        """Execute test scenarios and transition to DONE/FAILED."""
+        await ws_manager.broadcast(
+            test_id, {"type": "test_start", "test_id": test_id}
+        )
+
+        result = await execute_test(test_id, ws_manager)
+
+        async with async_session() as db:
+            test = (
+                await db.execute(select(Test).where(Test.id == test_id))
+            ).scalar_one()
+            test.status = (
+                TestStatus.DONE if result.get("passed") else TestStatus.FAILED
+            )
+            test.result_json = json.dumps(result, default=str)
+            if result.get("error"):
+                test.error_message = result["error"]
+            test.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+
+        await ws_manager.broadcast(
+            test_id,
+            {
+                "type": "test_complete",
+                "test_id": test_id,
+                "passed": result.get("passed", False),
+            },
+        )
+        logger.info(
+            "Test %d completed (passed=%s, %.0fms)",
+            test_id,
+            result.get("passed"),
+            result.get("duration_ms", 0),
+        )
 
 
 worker = Worker()

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useAuth } from "@/components/AuthProvider";
 import { listTests, type TestItem } from "@/lib/api";
 
@@ -15,6 +16,8 @@ const STATUS_COLORS: Record<string, string> = {
 export default function TestsPage() {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
+  const t = useTranslations("tests");
+  const tc = useTranslations("common");
   const [tests, setTests] = useState<TestItem[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -52,7 +55,7 @@ export default function TestsPage() {
   if (authLoading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
-        <p className="text-gray-500">Loading...</p>
+        <p className="text-gray-500">{tc("loading")}</p>
       </div>
     );
   }
@@ -60,18 +63,18 @@ export default function TestsPage() {
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Test History</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t("title")}</h1>
         <button
           onClick={() => router.push("/dashboard")}
           className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm text-white hover:bg-blue-700"
         >
-          New Test
+          {t("newTest")}
         </button>
       </div>
 
       {/* Filter */}
       <div className="mb-4 flex gap-2">
-        {["all", "passed", "failed"].map((f) => (
+        {(["all", "passed", "failed"] as const).map((f) => (
           <button
             key={f}
             onClick={() => setFilter(f)}
@@ -81,25 +84,25 @@ export default function TestsPage() {
                 : "bg-gray-100 text-gray-600 hover:bg-gray-200"
             }`}
           >
-            {f === "all" ? "All" : f === "passed" ? "Passed" : "Failed"}
+            {f === "all" ? t("filterAll") : f === "passed" ? t("filterPassed") : t("filterFailed")}
           </button>
         ))}
         <span className="ml-auto text-xs text-gray-400">
-          {total} total tests
+          {t("totalTests", { total })}
         </span>
       </div>
 
       {/* List */}
       {loading ? (
-        <p className="py-8 text-center text-gray-500">Loading...</p>
+        <p className="py-8 text-center text-gray-500">{tc("loading")}</p>
       ) : filtered.length === 0 ? (
         <p className="py-8 text-center text-gray-500">
-          No tests found.{" "}
+          {t("noTests")}{" "}
           <button
             onClick={() => router.push("/dashboard")}
             className="text-blue-600 hover:underline"
           >
-            Run your first test
+            {t("firstTest")}
           </button>
         </p>
       ) : (
@@ -118,7 +121,7 @@ export default function TestsPage() {
                   #{test.id} &middot;{" "}
                   {new Date(test.created_at).toLocaleString()}
                   {test.steps_total > 0 &&
-                    ` · ${test.steps_completed}/${test.steps_total} steps`}
+                    ` · ${t("stepsInfo", { completed: test.steps_completed, total: test.steps_total })}`}
                 </p>
               </div>
               <span
@@ -141,15 +144,15 @@ export default function TestsPage() {
             disabled={page <= 1}
             className="rounded border px-3 py-1 text-sm disabled:opacity-50"
           >
-            Prev
+            {t("prev")}
           </button>
-          <span className="px-2 py-1 text-sm text-gray-500">Page {page}</span>
+          <span className="px-2 py-1 text-sm text-gray-500">{t("pageLabel", { page })}</span>
           <button
             onClick={() => setPage((p) => p + 1)}
             disabled={page * 20 >= total}
             className="rounded border px-3 py-1 text-sm disabled:opacity-50"
           >
-            Next
+            {t("next")}
           </button>
         </div>
       )}
