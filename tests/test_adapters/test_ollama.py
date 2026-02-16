@@ -349,7 +349,8 @@ async def test_generate_scenarios_success(adapter: OllamaAdapter) -> None:
 @pytest.mark.asyncio
 async def test_generate_scenarios_not_array(adapter: OllamaAdapter) -> None:
     """generate_scenarios raises AdapterError if response is not a JSON array."""
-    mock_data = {"scenarios": []}
+    # String response — not dict, not list → "Expected JSON array"
+    mock_data = "here are some scenarios for you"
 
     mock_client = AsyncMock()
     mock_client.post.return_value = _mock_ollama_response(mock_data)
