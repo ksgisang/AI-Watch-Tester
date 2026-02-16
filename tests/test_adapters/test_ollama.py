@@ -180,9 +180,7 @@ async def test_analyze_failure_ignores_screenshots(adapter: OllamaAdapter) -> No
         mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
         mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        result = await adapter.analyze_failure(
-            _make_test_result(), screenshots=[b"fake_image"]
-        )
+        result = await adapter.analyze_failure(_make_test_result(), screenshots=[b"fake_image"])
 
     assert result.severity == Severity.WARNING
 

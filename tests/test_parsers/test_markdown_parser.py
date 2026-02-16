@@ -138,8 +138,6 @@ class TestParseTxt:
 
 class TestErrors:
     @pytest.mark.asyncio()
-    async def test_nonexistent_file_raises_parser_error(
-        self, parser: MarkdownParser
-    ) -> None:
+    async def test_nonexistent_file_raises_parser_error(self, parser: MarkdownParser) -> None:
         with pytest.raises(ParserError, match="Cannot read file"):
             await parser.parse(Path("/tmp/nonexistent_aat_test_file.md"))

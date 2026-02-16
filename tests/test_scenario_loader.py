@@ -231,3 +231,36 @@ class TestLoadScenarios:
         scenarios = load_scenarios(tmp_path)
         assert len(scenarios) == 1
         assert scenarios[0].id == "SC-001"
+
+
+# ── Unresolved Variable Detection ──
+
+
+class TestFindUnresolvedVars:
+    def test_finds_unresolved_in_string(self) -> None:
+        from aat.core.scenario_loader import find_unresolved_vars
+
+        result = find_unresolved_vars("{{url}}/page")
+        assert "{{url}}" in result
+
+    def test_finds_unresolved_in_nested_dict(self) -> None:
+        from aat.core.scenario_loader import find_unresolved_vars
+
+        data = {"steps": [{"value": "{{url}}/login", "target": {"text": "{{name}}"}}]}
+        result = find_unresolved_vars(data)
+        assert "{{url}}" in result
+        assert "{{name}}" in result
+
+    def test_no_unresolved(self) -> None:
+        from aat.core.scenario_loader import find_unresolved_vars
+
+        data = {"value": "https://example.com/login"}
+        result = find_unresolved_vars(data)
+        assert result == set()
+
+    def test_empty_data(self) -> None:
+        from aat.core.scenario_loader import find_unresolved_vars
+
+        assert find_unresolved_vars(42) == set()
+        assert find_unresolved_vars(None) == set()
+        assert find_unresolved_vars([]) == set()

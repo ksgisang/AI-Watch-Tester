@@ -683,13 +683,20 @@ class TestConfigApprovalMode:
 class TestLoopIterationBranchFields:
     def test_defaults_none(self) -> None:
         step = StepResult(
-            step=1, action=ActionType.NAVIGATE,
-            status=StepStatus.PASSED, description="x",
+            step=1,
+            action=ActionType.NAVIGATE,
+            status=StepStatus.PASSED,
+            description="x",
         )
         tr = TestResult(
-            scenario_id="SC-001", scenario_name="Test",
-            passed=True, steps=[step],
-            total_steps=1, passed_steps=1, failed_steps=0, duration_ms=100.0,
+            scenario_id="SC-001",
+            scenario_name="Test",
+            passed=True,
+            steps=[step],
+            total_steps=1,
+            passed_steps=1,
+            failed_steps=0,
+            duration_ms=100.0,
         )
         it = LoopIteration(iteration=1, test_result=tr)
         assert it.branch_name is None
@@ -697,17 +704,26 @@ class TestLoopIterationBranchFields:
 
     def test_with_branch_info(self) -> None:
         step = StepResult(
-            step=1, action=ActionType.NAVIGATE,
-            status=StepStatus.PASSED, description="x",
+            step=1,
+            action=ActionType.NAVIGATE,
+            status=StepStatus.PASSED,
+            description="x",
         )
         tr = TestResult(
-            scenario_id="SC-001", scenario_name="Test",
-            passed=True, steps=[step],
-            total_steps=1, passed_steps=1, failed_steps=0, duration_ms=100.0,
+            scenario_id="SC-001",
+            scenario_name="Test",
+            passed=True,
+            steps=[step],
+            total_steps=1,
+            passed_steps=1,
+            failed_steps=0,
+            duration_ms=100.0,
         )
         it = LoopIteration(
-            iteration=1, test_result=tr,
-            branch_name="aat/fix-001", commit_hash="abc1234",
+            iteration=1,
+            test_result=tr,
+            branch_name="aat/fix-001",
+            commit_hash="abc1234",
         )
         assert it.branch_name == "aat/fix-001"
         assert it.commit_hash == "abc1234"

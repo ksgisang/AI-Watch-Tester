@@ -138,7 +138,8 @@ class TemplateMatcher(BaseMatcher):
         if max_val < threshold:
             logger.debug(
                 "Template single-scale: best=%.3f < threshold=%.3f",
-                max_val, threshold,
+                max_val,
+                threshold,
             )
             return None
 
@@ -194,7 +195,8 @@ class TemplateMatcher(BaseMatcher):
         if best is None or best[4] < threshold:
             logger.debug(
                 "Template multi-scale: best=%.3f < threshold=%.3f",
-                best[4] if best else 0.0, threshold,
+                best[4] if best else 0.0,
+                threshold,
             )
             return None
         return best

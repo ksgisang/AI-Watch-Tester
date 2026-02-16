@@ -77,7 +77,9 @@ class TestCLIEventHandler:
         assert "Navigate to page" in text
 
     def test_step_result_passed(
-        self, cli: CLIEventHandler, capsys: pytest.CaptureFixture[str],
+        self,
+        cli: CLIEventHandler,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         """step_result() prints OK when step passes."""
         cli.step_result(1, passed=True, description="Navigate")
@@ -86,7 +88,9 @@ class TestCLIEventHandler:
         assert "OK" in text
 
     def test_step_result_failed(
-        self, cli: CLIEventHandler, capsys: pytest.CaptureFixture[str],
+        self,
+        cli: CLIEventHandler,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         """step_result() prints FAILED when step fails."""
         cli.step_result(2, passed=False, description="Click button")
@@ -95,7 +99,9 @@ class TestCLIEventHandler:
         assert "FAILED" in text
 
     def test_step_result_failed_with_error(
-        self, cli: CLIEventHandler, capsys: pytest.CaptureFixture[str],
+        self,
+        cli: CLIEventHandler,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         """step_result() prints FAILED with reason when error is provided."""
         cli.step_result(2, passed=False, description="Click button", error="Element not found")
@@ -113,7 +119,9 @@ class TestCLIEventHandler:
         assert "Analyzing docs" in text
 
     def test_prompt(
-        self, cli: CLIEventHandler, capsys: pytest.CaptureFixture[str],
+        self,
+        cli: CLIEventHandler,
+        capsys: pytest.CaptureFixture[str],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """prompt() asks user for input via typer.prompt."""
@@ -122,7 +130,9 @@ class TestCLIEventHandler:
         assert result == "user_answer"
 
     def test_prompt_with_options(
-        self, cli: CLIEventHandler, capsys: pytest.CaptureFixture[str],
+        self,
+        cli: CLIEventHandler,
+        capsys: pytest.CaptureFixture[str],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """prompt() prints numbered options before asking for input."""

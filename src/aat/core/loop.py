@@ -18,7 +18,6 @@ from aat.core.models import (
 )
 
 if TYPE_CHECKING:
-
     from aat.adapters.base import AIAdapter
     from aat.core.git_ops import GitOps
     from aat.core.models import AnalysisResult, Config, Scenario, StepResult
@@ -120,15 +119,24 @@ class DevQALoop:
                 # Dispatch to mode handler
                 if mode == ApprovalMode.MANUAL:
                     iteration = await self._handle_manual(
-                        iteration_num, test_result, analysis, scenarios,
+                        iteration_num,
+                        test_result,
+                        analysis,
+                        scenarios,
                     )
                 elif mode == ApprovalMode.BRANCH:
                     iteration = await self._handle_branch(
-                        iteration_num, test_result, analysis, scenarios,
+                        iteration_num,
+                        test_result,
+                        analysis,
+                        scenarios,
                     )
                 else:  # AUTO
                     iteration = await self._handle_auto(
-                        iteration_num, test_result, analysis, scenarios,
+                        iteration_num,
+                        test_result,
+                        analysis,
+                        scenarios,
                     )
 
                 iterations.append(iteration)
@@ -188,9 +196,7 @@ class DevQALoop:
         scenarios: list[Scenario],
     ) -> LoopIteration:
         """Manual mode: prompt approval, generate fix text only (no file changes)."""
-        approved = self._approval_callback(
-            f"{analysis.cause} — {analysis.suggestion}"
-        )
+        approved = self._approval_callback(f"{analysis.cause} — {analysis.suggestion}")
 
         if not approved:
             return LoopIteration(
@@ -230,7 +236,8 @@ class DevQALoop:
         async with self._git_ops.on_fix_branch(branch_name):
             written = await self._git_ops.apply_file_changes(fix.files_changed)
             commit_hash = await self._git_ops.commit_changes(
-                written, f"aat: {fix.description}",
+                written,
+                f"aat: {fix.description}",
             )
 
             # Re-test on the fix branch
@@ -295,7 +302,8 @@ class DevQALoop:
             raise LoopError(msg)
 
     async def _read_source_files(
-        self, analysis: AnalysisResult,
+        self,
+        analysis: AnalysisResult,
     ) -> dict[str, str]:
         """Read source files referenced in the analysis."""
         source_files: dict[str, str] = {}

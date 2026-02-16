@@ -70,9 +70,7 @@ class Humanizer:
         image matching results that are already in screen coordinates.
         """
         move_fn = (
-            engine.move_mouse_screen
-            if hasattr(engine, "move_mouse_screen")
-            else engine.move_mouse
+            engine.move_mouse_screen if hasattr(engine, "move_mouse_screen") else engine.move_mouse
         )
 
         if not self._config.enabled:

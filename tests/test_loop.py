@@ -133,9 +133,7 @@ def _make_mocks(
 @pytest.mark.asyncio
 async def test_all_pass_single_iteration() -> None:
     """All tests pass on first iteration -> success, 1 iteration."""
-    executor, adapter, reporter, engine = _make_mocks(
-        step_results=[[_make_passed_step()]]
-    )
+    executor, adapter, reporter, engine = _make_mocks(step_results=[[_make_passed_step()]])
 
     loop = DevQALoop(
         config=_make_config(),
@@ -169,8 +167,8 @@ async def test_fail_then_fix_then_pass() -> None:
     """Fail -> analyze -> approve -> fix -> re-test pass = success after 2 iterations."""
     executor, adapter, reporter, engine = _make_mocks(
         step_results=[
-            [_make_failed_step()],   # iteration 1: fail
-            [_make_passed_step()],   # iteration 2: pass
+            [_make_failed_step()],  # iteration 1: fail
+            [_make_passed_step()],  # iteration 2: pass
         ]
     )
 
@@ -219,9 +217,7 @@ async def test_fail_then_fix_then_pass() -> None:
 @pytest.mark.asyncio
 async def test_fail_deny_fix() -> None:
     """Fail -> analyze -> deny fix = failure with reason 'user denied fix'."""
-    executor, adapter, reporter, engine = _make_mocks(
-        step_results=[[_make_failed_step()]]
-    )
+    executor, adapter, reporter, engine = _make_mocks(step_results=[[_make_failed_step()]])
 
     loop = DevQALoop(
         config=_make_config(),
@@ -254,8 +250,8 @@ async def test_max_loops_exceeded() -> None:
     """All iterations fail -> max_loops exceeded."""
     executor, adapter, reporter, engine = _make_mocks(
         step_results=[
-            [_make_failed_step()],   # iteration 1
-            [_make_failed_step()],   # iteration 2
+            [_make_failed_step()],  # iteration 1
+            [_make_failed_step()],  # iteration 2
         ]
     )
 
@@ -313,9 +309,7 @@ async def test_engine_stop_called_on_error() -> None:
 @pytest.mark.asyncio
 async def test_skip_engine_lifecycle() -> None:
     """skip_engine_lifecycle=True skips engine.start() and engine.stop()."""
-    executor, adapter, reporter, engine = _make_mocks(
-        step_results=[[_make_passed_step()]]
-    )
+    executor, adapter, reporter, engine = _make_mocks(step_results=[[_make_passed_step()]])
 
     loop = DevQALoop(
         config=_make_config(),
@@ -344,8 +338,8 @@ async def test_branch_mode_creates_branch_and_commits() -> None:
     # iteration 2 (after branch handler returns retest pass): loop sees pass
     executor, adapter, reporter, engine = _make_mocks(
         step_results=[
-            [_make_failed_step()],   # initial test: fail
-            [_make_passed_step()],   # retest on branch: pass
+            [_make_failed_step()],  # initial test: fail
+            [_make_passed_step()],  # retest on branch: pass
         ]
     )
 
@@ -455,8 +449,8 @@ async def test_auto_mode_applies_fix_directly(tmp_path: Path) -> None:
     """Auto mode: applies fix directly to disk, retests."""
     executor, adapter, reporter, engine = _make_mocks(
         step_results=[
-            [_make_failed_step()],   # initial test: fail
-            [_make_passed_step()],   # retest after fix: pass
+            [_make_failed_step()],  # initial test: fail
+            [_make_passed_step()],  # retest after fix: pass
         ]
     )
 

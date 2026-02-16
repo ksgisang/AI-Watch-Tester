@@ -78,16 +78,16 @@ def test_generate_success(tmp_path: Path) -> None:
     mock_adapter = AsyncMock()
     mock_adapter.generate_scenarios.return_value = scenarios
 
-    with patch("aat.cli.commands.generate_cmd._get_parser", return_value=mock_parser), \
-         patch("aat.cli.commands.generate_cmd._get_adapter", return_value=mock_adapter), \
-         patch("aat.cli.commands.generate_cmd.load_config") as mock_load:
+    with (
+        patch("aat.cli.commands.generate_cmd._get_parser", return_value=mock_parser),
+        patch("aat.cli.commands.generate_cmd._get_adapter", return_value=mock_adapter),
+        patch("aat.cli.commands.generate_cmd.load_config") as mock_load,
+    ):
         mock_cfg = MagicMock()
         mock_cfg.scenarios_dir = str(output_dir)
         mock_load.return_value = mock_cfg
 
-        result = runner.invoke(
-            app, ["generate", "--from", str(doc)]
-        )
+        result = runner.invoke(app, ["generate", "--from", str(doc)])
         assert result.exit_code == 0
         assert "Generated" in result.output
         assert "2" in result.output
@@ -112,9 +112,11 @@ def test_generate_custom_output_dir(tmp_path: Path) -> None:
     mock_adapter = AsyncMock()
     mock_adapter.generate_scenarios.return_value = scenarios
 
-    with patch("aat.cli.commands.generate_cmd._get_parser", return_value=mock_parser), \
-         patch("aat.cli.commands.generate_cmd._get_adapter", return_value=mock_adapter), \
-         patch("aat.cli.commands.generate_cmd.load_config") as mock_load:
+    with (
+        patch("aat.cli.commands.generate_cmd._get_parser", return_value=mock_parser),
+        patch("aat.cli.commands.generate_cmd._get_adapter", return_value=mock_adapter),
+        patch("aat.cli.commands.generate_cmd.load_config") as mock_load,
+    ):
         mock_cfg = MagicMock()
         mock_cfg.scenarios_dir = str(tmp_path / "default_scenarios")
         mock_load.return_value = mock_cfg
@@ -145,16 +147,16 @@ def test_generate_yaml_content(tmp_path: Path) -> None:
     mock_adapter = AsyncMock()
     mock_adapter.generate_scenarios.return_value = [scenario]
 
-    with patch("aat.cli.commands.generate_cmd._get_parser", return_value=mock_parser), \
-         patch("aat.cli.commands.generate_cmd._get_adapter", return_value=mock_adapter), \
-         patch("aat.cli.commands.generate_cmd.load_config") as mock_load:
+    with (
+        patch("aat.cli.commands.generate_cmd._get_parser", return_value=mock_parser),
+        patch("aat.cli.commands.generate_cmd._get_adapter", return_value=mock_adapter),
+        patch("aat.cli.commands.generate_cmd.load_config") as mock_load,
+    ):
         mock_cfg = MagicMock()
         mock_cfg.scenarios_dir = str(output_dir)
         mock_load.return_value = mock_cfg
 
-        result = runner.invoke(
-            app, ["generate", "--from", str(doc)]
-        )
+        result = runner.invoke(app, ["generate", "--from", str(doc)])
         assert result.exit_code == 0
 
         # Check filename pattern
@@ -174,8 +176,10 @@ def test_generate_no_parser(tmp_path: Path) -> None:
     doc = tmp_path / "data.csv"
     doc.write_text("col1,col2\n", encoding="utf-8")
 
-    with patch("aat.cli.commands.generate_cmd._get_parser", return_value=None), \
-         patch("aat.cli.commands.generate_cmd.load_config") as mock_load:
+    with (
+        patch("aat.cli.commands.generate_cmd._get_parser", return_value=None),
+        patch("aat.cli.commands.generate_cmd.load_config") as mock_load,
+    ):
         mock_cfg = MagicMock()
         mock_cfg.scenarios_dir = str(tmp_path / "scenarios")
         mock_load.return_value = mock_cfg
@@ -197,9 +201,11 @@ def test_generate_empty_scenarios(tmp_path: Path) -> None:
     mock_adapter = AsyncMock()
     mock_adapter.generate_scenarios.return_value = []
 
-    with patch("aat.cli.commands.generate_cmd._get_parser", return_value=mock_parser), \
-         patch("aat.cli.commands.generate_cmd._get_adapter", return_value=mock_adapter), \
-         patch("aat.cli.commands.generate_cmd.load_config") as mock_load:
+    with (
+        patch("aat.cli.commands.generate_cmd._get_parser", return_value=mock_parser),
+        patch("aat.cli.commands.generate_cmd._get_adapter", return_value=mock_adapter),
+        patch("aat.cli.commands.generate_cmd.load_config") as mock_load,
+    ):
         mock_cfg = MagicMock()
         mock_cfg.scenarios_dir = str(tmp_path / "scenarios")
         mock_load.return_value = mock_cfg

@@ -23,9 +23,7 @@ from aat.matchers.hybrid import HybridMatcher
 
 def run_command(
     scenarios_path: str = typer.Argument(help="Scenario file or directory path."),
-    config_path: str | None = typer.Option(
-        None, "--config", "-c", help="Config file path."
-    ),
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Config file path."),
 ) -> None:
     """Run test scenarios."""
     try:
@@ -84,10 +82,7 @@ async def _run(scenarios_path: str, config_path: str | None) -> None:
                     total_failed += 1
                     status_str = typer.style(str(result.status.value).upper(), fg=typer.colors.RED)
 
-                typer.echo(
-                    f"  Step {result.step}: {status_str} "
-                    f"({result.elapsed_ms:.0f}ms)"
-                )
+                typer.echo(f"  Step {result.step}: {status_str} ({result.elapsed_ms:.0f}ms)")
 
                 if result.error_message:
                     typer.echo(f"    Error: {result.error_message}")

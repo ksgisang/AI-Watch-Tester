@@ -43,10 +43,12 @@ from aat.cli.commands.learned_cmd import learned_app  # noqa: E402
 from aat.cli.commands.loop_cmd import loop_command  # noqa: E402
 from aat.cli.commands.report_cmd import report_app  # noqa: E402
 from aat.cli.commands.run_cmd import run_command  # noqa: E402
+from aat.cli.commands.serve_cmd import serve_command  # noqa: E402
 from aat.cli.commands.start_cmd import start_command  # noqa: E402
 from aat.cli.commands.validate_cmd import validate_command  # noqa: E402
 
 app.command(name="start")(start_command)
+app.command(name="serve")(serve_command)
 app.command(name="dashboard")(dashboard_command)
 app.command(name="init")(init_command)
 app.add_typer(config_app, name="config")

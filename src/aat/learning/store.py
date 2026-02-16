@@ -36,8 +36,7 @@ _CREATE_IDX_TARGET = (
 )
 
 _CREATE_IDX_HASH = (
-    "CREATE INDEX IF NOT EXISTS idx_learned_hash "
-    "ON learned_elements(screenshot_hash);"
+    "CREATE INDEX IF NOT EXISTS idx_learned_hash ON learned_elements(screenshot_hash);"
 )
 
 

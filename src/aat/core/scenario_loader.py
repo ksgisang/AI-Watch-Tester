@@ -16,6 +16,7 @@ from aat.core.exceptions import ScenarioError
 from aat.core.models import Scenario
 
 _VAR_PATTERN = re.compile(r"\{\{(\s*[\w.]+\s*)\}\}")
+_UNRESOLVED_PATTERN = re.compile(r"\{\{[\w.]+\}\}")
 
 
 def load_scenario(path: Path, variables: dict[str, str] | None = None) -> Scenario:
@@ -33,6 +34,15 @@ def load_scenario(path: Path, variables: dict[str, str] | None = None) -> Scenar
     """
     data = _load_yaml(path)
     data = _substitute_vars(data, variables or {})
+    unresolved = find_unresolved_vars(data)
+    if unresolved:
+        import warnings
+
+        warnings.warn(
+            f"Unresolved variables in {path.name}: {', '.join(sorted(unresolved))}. "
+            "Check that the URL and other variables are configured.",
+            stacklevel=2,
+        )
     try:
         return Scenario.model_validate(data)
     except Exception as e:
@@ -125,6 +135,20 @@ def _substitute_vars(data: Any, variables: dict[str, str]) -> Any:
     if isinstance(data, list):
         return [_substitute_vars(item, variables) for item in data]
     return data
+
+
+def find_unresolved_vars(data: Any) -> set[str]:
+    """Find any remaining {{var}} placeholders in the data structure."""
+    found: set[str] = set()
+    if isinstance(data, str):
+        found.update(_UNRESOLVED_PATTERN.findall(data))
+    elif isinstance(data, dict):
+        for v in data.values():
+            found.update(find_unresolved_vars(v))
+    elif isinstance(data, list):
+        for item in data:
+            found.update(find_unresolved_vars(item))
+    return found
 
 
 def _resolve_var(var_name: str, variables: dict[str, str]) -> str:

@@ -51,8 +51,7 @@ class Comparator:
             current_url = await engine.get_url()
             if expected.value not in current_url:
                 raise StepExecutionError(
-                    f"URL does not contain '{expected.value}'. "
-                    f"Current: {current_url}",
+                    f"URL does not contain '{expected.value}'. Current: {current_url}",
                     step=0,
                     action="assert",
                 )
@@ -68,8 +67,7 @@ class Comparator:
             threshold = 1.0 - expected.tolerance
             if similarity < threshold:
                 raise StepExecutionError(
-                    f"Screenshot similarity {similarity:.2%} "
-                    f"below threshold {threshold:.2%}",
+                    f"Screenshot similarity {similarity:.2%} below threshold {threshold:.2%}",
                     step=0,
                     action="assert",
                 )

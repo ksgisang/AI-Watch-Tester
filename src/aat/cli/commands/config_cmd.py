@@ -20,9 +20,7 @@ config_app = typer.Typer(
 
 @config_app.command(name="show")
 def config_show(
-    config_path: str | None = typer.Option(
-        None, "--config", "-c", help="Config file path."
-    ),
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Config file path."),
 ) -> None:
     """Show current configuration."""
     try:
@@ -40,9 +38,7 @@ def config_show(
 def config_set(
     key: str = typer.Argument(help="Dotted config key (e.g. ai.provider)."),
     value: str = typer.Argument(help="Value to set."),
-    config_path: str | None = typer.Option(
-        None, "--config", "-c", help="Config file path."
-    ),
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Config file path."),
 ) -> None:
     """Set a configuration value by dotted key."""
     try:

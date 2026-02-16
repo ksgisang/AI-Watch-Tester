@@ -114,10 +114,13 @@ class DesktopEngine(BaseEngine):
                 try:
                     cdp = await self._page.context.new_cdp_session(self._page)
                     window = await cdp.send("Browser.getWindowForTarget")
-                    await cdp.send("Browser.setWindowBounds", {
-                        "windowId": window["windowId"],
-                        "bounds": {"left": x, "top": y},
-                    })
+                    await cdp.send(
+                        "Browser.setWindowBounds",
+                        {
+                            "windowId": window["windowId"],
+                            "bounds": {"left": x, "top": y},
+                        },
+                    )
                     await cdp.detach()
                 except Exception:  # noqa: BLE001
                     _log.debug("CDP window positioning not supported")

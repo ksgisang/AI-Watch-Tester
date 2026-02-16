@@ -31,7 +31,8 @@ async def test_ai_connection(config: AIConfig) -> tuple[bool, str]:
 async def _test_ollama(config: AIConfig) -> tuple[bool, str]:
     """Test Ollama connection by checking /api/tags."""
     base_url = (
-        config.api_key if config.api_key and config.api_key.startswith("http")
+        config.api_key
+        if config.api_key and config.api_key.startswith("http")
         else "http://localhost:11434"
     )
     try:

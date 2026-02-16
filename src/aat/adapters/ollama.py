@@ -108,7 +108,8 @@ class OllamaAdapter(AIAdapter):
         self._config = config
         # Use api_key field as base_url override, or default to localhost
         self._base_url = (
-            config.api_key if config.api_key and config.api_key.startswith("http")
+            config.api_key
+            if config.api_key and config.api_key.startswith("http")
             else _DEFAULT_OLLAMA_URL
         )
         self._model = config.model

@@ -42,8 +42,9 @@ class EventEmitter(ABC):
         ...
 
     @abstractmethod
-    def step_result(self, step_num: int, passed: bool, description: str,
-                    error: str | None = None) -> None:
+    def step_result(
+        self, step_num: int, passed: bool, description: str, error: str | None = None
+    ) -> None:
         """A test step completed."""
         ...
 
@@ -68,27 +69,34 @@ class CLIEventHandler(EventEmitter):
 
     def info(self, message: str) -> None:
         import typer
+
         typer.echo(message)
 
     def success(self, message: str) -> None:
         import typer
+
         typer.echo(typer.style(f"  [OK] {message}", fg=typer.colors.GREEN))
 
     def warning(self, message: str) -> None:
         import typer
+
         typer.echo(typer.style(f"  [WARN] {message}", fg=typer.colors.YELLOW))
 
     def error(self, message: str) -> None:
         import typer
+
         typer.echo(typer.style(f"  [ERROR] {message}", fg=typer.colors.RED), err=True)
 
     def step_start(self, step_num: int, total: int, description: str) -> None:
         import typer
+
         typer.echo(f"  Step {step_num}/{total}: {description}...", nl=False)
 
-    def step_result(self, step_num: int, passed: bool, description: str,
-                    error: str | None = None) -> None:
+    def step_result(
+        self, step_num: int, passed: bool, description: str, error: str | None = None
+    ) -> None:
         import typer
+
         if passed:
             typer.echo(typer.style(" OK", fg=typer.colors.GREEN))
         else:
@@ -98,10 +106,12 @@ class CLIEventHandler(EventEmitter):
 
     def progress(self, label: str, current: int, total: int) -> None:
         import typer
+
         typer.echo(f"  ({current}/{total}) {label}")
 
     def prompt(self, question: str, options: list[str] | None = None) -> str:
         import typer
+
         if options:
             for i, opt in enumerate(options, 1):
                 typer.echo(f"  [{i}] {opt}")
@@ -110,6 +120,7 @@ class CLIEventHandler(EventEmitter):
 
     def section(self, title: str) -> None:
         import typer
+
         typer.echo(f"\n{'=' * 50}")
         typer.echo(f"  {title}")
         typer.echo(f"{'=' * 50}")
@@ -138,21 +149,37 @@ class MessageBuffer(EventEmitter):
         self.messages.append({"type": "error", "text": message})
 
     def step_start(self, step_num: int, total: int, description: str) -> None:
-        self.messages.append({
-            "type": "step_start", "step": step_num, "total": total, "text": description,
-        })
+        self.messages.append(
+            {
+                "type": "step_start",
+                "step": step_num,
+                "total": total,
+                "text": description,
+            }
+        )
 
-    def step_result(self, step_num: int, passed: bool, description: str,
-                    error: str | None = None) -> None:
-        self.messages.append({
-            "type": "step_result", "step": step_num, "passed": passed,
-            "text": description, "error": error,
-        })
+    def step_result(
+        self, step_num: int, passed: bool, description: str, error: str | None = None
+    ) -> None:
+        self.messages.append(
+            {
+                "type": "step_result",
+                "step": step_num,
+                "passed": passed,
+                "text": description,
+                "error": error,
+            }
+        )
 
     def progress(self, label: str, current: int, total: int) -> None:
-        self.messages.append({
-            "type": "progress", "text": label, "current": current, "total": total,
-        })
+        self.messages.append(
+            {
+                "type": "progress",
+                "text": label,
+                "current": current,
+                "total": total,
+            }
+        )
 
     def prompt(self, question: str, options: list[str] | None = None) -> str:
         self.messages.append({"type": "prompt", "text": question, "options": options})

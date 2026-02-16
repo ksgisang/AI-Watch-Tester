@@ -38,12 +38,46 @@ from aat.dashboard.events_ws import ConnectionManager, WebSocketEventHandler
 from aat.dashboard.subprocess_manager import ProcessStatus, SubprocessManager
 
 # ---------------------------------------------------------------------------
+# AI provider auto-detection from environment variables
+# ---------------------------------------------------------------------------
+
+_ENV_PROVIDER_MAP: list[tuple[str, str, str]] = [
+    # (env_var_name, provider_name, default_model)
+    ("ANTHROPIC_API_KEY", "claude", "claude-sonnet-4-20250514"),
+    ("OPENAI_API_KEY", "openai", "gpt-4o"),
+    ("OLLAMA_HOST", "ollama", "codellama:7b"),
+]
+
+
+def _auto_detect_ai(config: Config) -> Config:
+    """Detect AI provider from environment variables if not explicitly set.
+
+    Checks ANTHROPIC_API_KEY, OPENAI_API_KEY, OLLAMA_HOST in order.
+    Only applies if config has no API key already set.
+    """
+    import os
+
+    if config.ai.api_key:
+        return config  # already configured
+
+    for env_var, provider, default_model in _ENV_PROVIDER_MAP:
+        value = os.environ.get(env_var, "")
+        if value:
+            config.ai.provider = provider
+            if provider != "ollama":
+                config.ai.api_key = value
+            config.ai.model = default_model
+            return config
+
+    return config
+
+
+# ---------------------------------------------------------------------------
 # Module state
 # ---------------------------------------------------------------------------
 
 _manager = ConnectionManager()
 _ws_handler = WebSocketEventHandler(_manager)
-_subprocess = SubprocessManager()
 
 
 def _on_server_line(line: str) -> None:
@@ -107,6 +141,9 @@ def create_app(config_path: Path | None = None) -> FastAPI:
     except AATError:
         _current_config = Config()
 
+    # Auto-detect AI provider from env vars if not configured
+    _current_config = _auto_detect_ai(_current_config)
+
     app = FastAPI(title="AAT Dashboard", version="0.2.0")
 
     # -- Static files ---------------------------------------------------
@@ -141,6 +178,9 @@ def create_app(config_path: Path | None = None) -> FastAPI:
     # Document management
     app.add_api_route("/api/documents/upload", _upload_documents, methods=["POST"])
     app.add_api_route("/api/documents", _list_documents, methods=["GET"])
+
+    # One-click test
+    app.add_api_route("/api/oneclick", _start_oneclick, methods=["POST"])
 
     # Preflight check
     app.add_api_route("/api/preflight", _preflight, methods=["POST"])
@@ -246,7 +286,7 @@ def _get_scenario_guidance(error_str: str) -> str:
             "  예: assert_type: text_visible\n"
             "      expected:\n"
             "        - type: text_visible\n"
-            "          value: \"확인할 텍스트\""
+            '          value: "확인할 텍스트"'
         )
 
     if "variables" in lower:
@@ -258,9 +298,8 @@ def _get_scenario_guidance(error_str: str) -> str:
     if not hints:
         hints.append("시나리오 YAML 파일의 형식이 올바르지 않습니다")
 
-    return (
-        "시나리오 형식 오류가 있습니다. 아래 사항을 확인해주세요:\n\n"
-        + "\n".join(f"• {h}" for h in hints)
+    return "시나리오 형식 오류가 있습니다. 아래 사항을 확인해주세요:\n\n" + "\n".join(
+        f"• {h}" for h in hints
     )
 
 
@@ -299,11 +338,13 @@ async def _list_scenarios(request: Request) -> JSONResponse:
     except AATError as exc:
         error_str = str(exc)
         guidance = _get_scenario_guidance(error_str)
-        return JSONResponse(content={
-            "scenarios": [],
-            "error": error_str,
-            "guidance": guidance,
-        })
+        return JSONResponse(
+            content={
+                "scenarios": [],
+                "error": error_str,
+                "guidance": guidance,
+            }
+        )
 
 
 async def _upload_scenario(request: Request) -> JSONResponse:
@@ -453,26 +494,32 @@ async def _generate_scenarios(request: Request) -> JSONResponse:
             yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
         saved_files.append(filename)
-        result_scenarios.append({
-            "id": sc.id,
-            "name": sc.name,
-            "description": sc.description,
-            "tags": sc.tags,
-            "steps_count": len(sc.steps),
-        })
+        result_scenarios.append(
+            {
+                "id": sc.id,
+                "name": sc.name,
+                "description": sc.description,
+                "tags": sc.tags,
+                "steps_count": len(sc.steps),
+            }
+        )
 
-    await _manager.broadcast({
-        "type": "success",
-        "message": f"시나리오 {len(scenarios)}개 생성 완료",
-    })
+    await _manager.broadcast(
+        {
+            "type": "success",
+            "message": f"시나리오 {len(scenarios)}개 생성 완료",
+        }
+    )
 
-    return JSONResponse(content={
-        "success": True,
-        "count": len(scenarios),
-        "files": saved_files,
-        "scenarios": result_scenarios,
-        "scenarios_path": str(temp_dir),
-    })
+    return JSONResponse(
+        content={
+            "success": True,
+            "count": len(scenarios),
+            "files": saved_files,
+            "scenarios": result_scenarios,
+            "scenarios_path": str(temp_dir),
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -554,7 +601,6 @@ async def _stop_run() -> JSONResponse:
         _run_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await _run_task
-    await _subprocess.stop()
     await _manager.broadcast({"type": "info", "message": "Test stopped"})
     return JSONResponse(content={"status": "stopped"})
 
@@ -565,7 +611,6 @@ async def _get_status() -> JSONResponse:
     return JSONResponse(
         content={
             "running": running,
-            "subprocess": _subprocess.status.value,
             "ws_clients": _manager.count,
             "server_running": _server_subprocess.is_running,
         }
@@ -573,8 +618,8 @@ async def _get_status() -> JSONResponse:
 
 
 async def _get_logs() -> JSONResponse:
-    """Get subprocess log lines."""
-    return JSONResponse(content={"logs": _subprocess.log_lines})
+    """Get execution log lines (events are streamed via WebSocket)."""
+    return JSONResponse(content={"logs": []})
 
 
 # ---------------------------------------------------------------------------
@@ -1137,8 +1182,7 @@ async def _preflight(request: Request) -> JSONResponse:
                     "status": "fail",
                     "message": "API 키가 설정되지 않았습니다",
                     "guidance": (
-                        f"설정 > API 키에 {provider} API 키를 입력하고 "
-                        "'설정 저장'을 클릭하세요."
+                        f"설정 > API 키에 {provider} API 키를 입력하고 '설정 저장'을 클릭하세요."
                     ),
                     "blocking": True,
                 }
@@ -1248,12 +1292,17 @@ def _resolve_scenario_path(scenario_path: str) -> Path:
     return path
 
 
-def _build_variables() -> dict[str, str]:
-    """Build template variables from current config."""
+def _build_variables(url_override: str | None = None) -> dict[str, str]:
+    """Build template variables from current config.
+
+    Args:
+        url_override: If provided, use this URL instead of config's url.
+    """
     variables: dict[str, str] = {}
     if _current_config:
-        if _current_config.url:
-            variables["url"] = _current_config.url.rstrip("/")
+        url = url_override or _current_config.url
+        if url:
+            variables["url"] = url.rstrip("/")
         variables["project_name"] = _current_config.project_name
     return variables
 
@@ -1522,3 +1571,280 @@ async def _execute_loop(
         if guidance:
             msg["guidance"] = guidance
         await _manager.broadcast(msg)
+
+
+# ---------------------------------------------------------------------------
+# One-click test: URL → generate → run → results
+# ---------------------------------------------------------------------------
+
+
+async def _start_oneclick(request: Request) -> JSONResponse:
+    """Start a one-click test: URL → AI scenario generation → run → results."""
+    global _run_task  # noqa: PLW0603
+
+    if _run_task and not _run_task.done():
+        return JSONResponse(
+            content={"error": "A test is already running"},
+            status_code=409,
+        )
+
+    if _current_config is None:
+        return JSONResponse(
+            content={"error": "No config loaded"},
+            status_code=400,
+        )
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    url = body.get("url", "")
+    if not url or not url.strip():
+        return JSONResponse(
+            content={"error": "URL is required"},
+            status_code=400,
+        )
+
+    url = url.strip()
+
+    # Validate AI provider is available
+    from aat.adapters import ADAPTER_REGISTRY
+
+    provider = _current_config.ai.provider
+    if provider not in ADAPTER_REGISTRY:
+        return JSONResponse(
+            content={"error": f"AI provider not configured: {provider}"},
+            status_code=400,
+        )
+
+    if provider != "ollama" and not _current_config.ai.api_key:
+        return JSONResponse(
+            content={
+                "error": (
+                    "API key is not set. "
+                    "Set ANTHROPIC_API_KEY or OPENAI_API_KEY environment variable, "
+                    "or configure it in Settings."
+                ),
+            },
+            status_code=400,
+        )
+
+    _run_task = asyncio.create_task(_execute_oneclick(url))
+    return JSONResponse(content={"status": "started", "url": url})
+
+
+async def _execute_oneclick(url: str) -> None:
+    """Execute one-click test: generate scenarios from URL, then run them."""
+    assert _current_config is not None
+
+    try:
+        import tempfile
+
+        import yaml
+
+        from aat.adapters import ADAPTER_REGISTRY
+        from aat.core.scenario_loader import load_scenarios
+        from aat.engine import ENGINE_REGISTRY
+        from aat.engine.comparator import Comparator
+        from aat.engine.executor import StepExecutor
+        from aat.engine.humanizer import Humanizer
+        from aat.engine.waiter import Waiter
+        from aat.matchers import MATCHER_REGISTRY
+        from aat.matchers.hybrid import HybridMatcher
+
+        await _manager.broadcast({"type": "oneclick_start", "url": url})
+
+        # Update config URL
+        _current_config.url = url
+
+        # Phase 1: Generate scenarios via AI
+        _ws_handler.section("Phase 1: AI Scenario Generation")
+        _ws_handler.info(f"Analyzing {url} and generating test scenarios...")
+        _ws_handler.progress("Generating scenarios", 0, 3)
+
+        adapter_cls = ADAPTER_REGISTRY[_current_config.ai.provider]
+        adapter = adapter_cls(_current_config.ai)
+
+        prompt_text = (
+            f"Target URL: {url}\n\n"
+            "Generate E2E test scenarios for this web application. "
+            "Start with a navigate step to the URL, then test the main user flows "
+            "visible on the page (login, navigation, form submission, etc.).\n"
+            "Use {{url}} as the base URL variable in navigate steps.\n"
+            "Keep scenarios simple and focused — 3 to 8 steps each."
+        )
+
+        try:
+            scenarios = await adapter.generate_scenarios(prompt_text)
+        except Exception as exc:  # noqa: BLE001
+            _ws_handler.error(f"Scenario generation failed: {exc}")
+            guidance = _get_error_guidance(exc)
+            msg: dict[str, Any] = {
+                "type": "oneclick_error",
+                "phase": "generate",
+                "error": str(exc),
+            }
+            if guidance:
+                msg["guidance"] = guidance
+            await _manager.broadcast(msg)
+            return
+
+        if not scenarios:
+            _ws_handler.error("AI generated no scenarios")
+            await _manager.broadcast(
+                {
+                    "type": "oneclick_error",
+                    "phase": "generate",
+                    "error": "No scenarios generated",
+                }
+            )
+            return
+
+        _ws_handler.success(f"Generated {len(scenarios)} scenario(s)")
+        _ws_handler.progress("Generating scenarios", 1, 3)
+
+        # Save generated scenarios to temp dir
+        temp_dir = Path(tempfile.mkdtemp(prefix="aat_oneclick_"))
+        for sc in scenarios:
+            safe_name = re.sub(r"[^a-z0-9_]", "", sc.name.replace(" ", "_").lower())
+            filename = f"{sc.id}_{safe_name}.yaml"
+            filepath = temp_dir / filename
+            data = sc.model_dump(mode="json", exclude_none=True)
+            for step in data.get("steps", []):
+                for key in list(step.keys()):
+                    if step[key] is None:
+                        del step[key]
+                target = step.get("target")
+                if target:
+                    step["target"] = {k: v for k, v in target.items() if v is not None}
+            with open(filepath, "w", encoding="utf-8") as f:
+                yaml.dump(
+                    data,
+                    f,
+                    allow_unicode=True,
+                    default_flow_style=False,
+                    sort_keys=False,
+                )
+
+        # Phase 2: Load and run scenarios
+        _ws_handler.section("Phase 2: Test Execution")
+        _ws_handler.progress("Running tests", 1, 3)
+
+        variables = _build_variables(url_override=url)
+        loaded_scenarios = load_scenarios(temp_dir, variables=variables)
+        _ws_handler.info(f"Running {len(loaded_scenarios)} scenario(s) against {url}")
+
+        # Assemble engine
+        engine_cls = ENGINE_REGISTRY.get(_current_config.engine.type)
+        if engine_cls is None:
+            _ws_handler.error(f"Unknown engine: {_current_config.engine.type}")
+            return
+        engine = engine_cls(_current_config.engine)
+
+        # Assemble matchers
+        matchers = [
+            MATCHER_REGISTRY[m.value](_current_config.matching)  # type: ignore[call-arg]
+            for m in _current_config.matching.chain_order
+            if m.value in MATCHER_REGISTRY
+        ]
+        hybrid = HybridMatcher(matchers, _current_config.matching)
+
+        # Assemble executor
+        humanizer = Humanizer(_current_config.humanizer)
+        waiter = Waiter()
+        comparator = Comparator()
+        screenshot_dir = Path(_current_config.data_dir) / "screenshots"
+        screenshot_dir.mkdir(parents=True, exist_ok=True)
+        executor = StepExecutor(
+            engine,
+            hybrid,
+            humanizer,
+            waiter,
+            comparator,
+            screenshot_dir=screenshot_dir,
+        )
+
+        try:
+            await engine.start()
+            _ws_handler.info("Browser started")
+
+            total_steps = sum(len(sc.steps) for sc in loaded_scenarios)
+            step_counter = 0
+            passed_count = 0
+            failed_count = 0
+
+            for sc in loaded_scenarios:
+                _ws_handler.section(f"Scenario: {sc.id} — {sc.name}")
+
+                for step_config in sc.steps:
+                    step_counter += 1
+                    _ws_handler.step_start(
+                        step_counter,
+                        total_steps,
+                        step_config.description,
+                    )
+                    _ws_handler.progress("Running tests", step_counter, total_steps)
+
+                    step_result = await executor.execute_step(step_config)
+                    passed = step_result.status == StepStatus.PASSED
+                    if passed:
+                        passed_count += 1
+                    else:
+                        failed_count += 1
+
+                    _ws_handler.step_result(
+                        step_counter,
+                        passed,
+                        step_config.description,
+                        error=step_result.error_message,
+                    )
+
+                    # Send live screenshot
+                    try:
+                        screenshot_bytes = await engine.screenshot()
+                        if screenshot_bytes:
+                            await _ws_handler.send_screenshot(screenshot_bytes)
+                    except Exception:  # noqa: BLE001
+                        pass
+
+            # Phase 3: Results
+            _ws_handler.section("Phase 3: Results")
+            _ws_handler.progress("Complete", 3, 3)
+
+            summary = (
+                f"One-click test complete: "
+                f"{passed_count} passed, {failed_count} failed "
+                f"out of {total_steps} steps"
+            )
+            if failed_count == 0:
+                _ws_handler.success(summary)
+            else:
+                _ws_handler.warning(summary)
+
+            await _manager.broadcast(
+                {
+                    "type": "oneclick_complete",
+                    "url": url,
+                    "scenarios_count": len(loaded_scenarios),
+                    "total_steps": total_steps,
+                    "passed": passed_count,
+                    "failed": failed_count,
+                }
+            )
+
+        finally:
+            await engine.stop()
+            _ws_handler.info("Browser closed")
+
+    except asyncio.CancelledError:
+        _ws_handler.warning("One-click test cancelled")
+        await _manager.broadcast({"type": "oneclick_cancelled"})
+    except Exception as exc:  # noqa: BLE001
+        guidance = _get_error_guidance(exc)
+        error_text = str(exc) or f"{type(exc).__name__}: (상세 메시지 없음)"
+        _ws_handler.error(f"One-click test failed: {error_text}")
+        msg_data: dict[str, Any] = {"type": "oneclick_error", "error": error_text}
+        if guidance:
+            msg_data["guidance"] = guidance
+        await _manager.broadcast(msg_data)

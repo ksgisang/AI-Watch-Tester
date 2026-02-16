@@ -237,8 +237,11 @@ class StepExecutor:
                 from aat.core.models import MatchMethod, MatchResult
 
                 result = MatchResult(
-                    found=True, x=pos[0], y=pos[1],
-                    confidence=1.0, method=MatchMethod.OCR,
+                    found=True,
+                    x=pos[0],
+                    y=pos[1],
+                    confidence=1.0,
+                    method=MatchMethod.OCR,
                 )
                 x, y = result.x, result.y
                 if step.action in (
@@ -247,7 +250,9 @@ class StepExecutor:
                     ActionType.FIND_AND_RIGHT_CLICK,
                 ):
                     await self._do_click(
-                        x, y, step.humanize,
+                        x,
+                        y,
+                        step.humanize,
                         double=(step.action == ActionType.FIND_AND_DOUBLE_CLICK),
                         right=(step.action == ActionType.FIND_AND_RIGHT_CLICK),
                     )

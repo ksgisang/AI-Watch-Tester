@@ -51,8 +51,10 @@ def test_learn_add_single_file(tmp_path: Path) -> None:
     assets_dir = tmp_path / "assets"
     data_dir = tmp_path / ".aat"
 
-    with patch("aat.cli.commands.learn_cmd.load_config") as mock_config, \
-         patch("aat.cli.commands.learn_cmd._get_store", return_value=None):
+    with (
+        patch("aat.cli.commands.learn_cmd.load_config") as mock_config,
+        patch("aat.cli.commands.learn_cmd._get_store", return_value=None),
+    ):
         mock_cfg = MagicMock()
         mock_cfg.assets_dir = str(assets_dir)
         mock_cfg.data_dir = str(data_dir)
@@ -74,8 +76,10 @@ def test_learn_add_directory_with_images(tmp_path: Path) -> None:
     assets_dir = tmp_path / "assets"
     data_dir = tmp_path / ".aat"
 
-    with patch("aat.cli.commands.learn_cmd.load_config") as mock_config, \
-         patch("aat.cli.commands.learn_cmd._get_store", return_value=None):
+    with (
+        patch("aat.cli.commands.learn_cmd.load_config") as mock_config,
+        patch("aat.cli.commands.learn_cmd._get_store", return_value=None),
+    ):
         mock_cfg = MagicMock()
         mock_cfg.assets_dir = str(assets_dir)
         mock_cfg.data_dir = str(data_dir)
@@ -95,16 +99,16 @@ def test_learn_add_with_name_option(tmp_path: Path) -> None:
     assets_dir = tmp_path / "assets"
     data_dir = tmp_path / ".aat"
 
-    with patch("aat.cli.commands.learn_cmd.load_config") as mock_config, \
-         patch("aat.cli.commands.learn_cmd._get_store", return_value=None):
+    with (
+        patch("aat.cli.commands.learn_cmd.load_config") as mock_config,
+        patch("aat.cli.commands.learn_cmd._get_store", return_value=None),
+    ):
         mock_cfg = MagicMock()
         mock_cfg.assets_dir = str(assets_dir)
         mock_cfg.data_dir = str(data_dir)
         mock_config.return_value = mock_cfg
 
-        result = runner.invoke(
-            app, ["learn", "add", str(img_file), "--name", "login_button"]
-        )
+        result = runner.invoke(app, ["learn", "add", str(img_file), "--name", "login_button"])
         assert result.exit_code == 0
         assert "Registered" in result.output
         assert "login_button" in result.output
@@ -121,8 +125,10 @@ def test_learn_add_copies_to_assets(tmp_path: Path) -> None:
     assets_dir = tmp_path / "assets"
     data_dir = tmp_path / ".aat"
 
-    with patch("aat.cli.commands.learn_cmd.load_config") as mock_config, \
-         patch("aat.cli.commands.learn_cmd._get_store", return_value=None):
+    with (
+        patch("aat.cli.commands.learn_cmd.load_config") as mock_config,
+        patch("aat.cli.commands.learn_cmd._get_store", return_value=None),
+    ):
         mock_cfg = MagicMock()
         mock_cfg.assets_dir = str(assets_dir)
         mock_cfg.data_dir = str(data_dir)
@@ -147,9 +153,11 @@ def test_learn_add_with_store(tmp_path: Path) -> None:
 
     mock_store = MagicMock()
 
-    with patch("aat.cli.commands.learn_cmd.load_config") as mock_config, \
-         patch("aat.cli.commands.learn_cmd._get_store", return_value=mock_store), \
-         patch("aat.cli.commands.learn_cmd._save_to_store") as mock_save:
+    with (
+        patch("aat.cli.commands.learn_cmd.load_config") as mock_config,
+        patch("aat.cli.commands.learn_cmd._get_store", return_value=mock_store),
+        patch("aat.cli.commands.learn_cmd._save_to_store") as mock_save,
+    ):
         mock_cfg = MagicMock()
         mock_cfg.assets_dir = str(assets_dir)
         mock_cfg.data_dir = str(data_dir)

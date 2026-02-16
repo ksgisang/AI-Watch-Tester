@@ -41,8 +41,9 @@ def _on_cancel(signum: int, frame: Any) -> None:
     global _cancelled  # noqa: PLW0603
     _cancelled = True
     typer.echo(
-        typer.style("\n\n  Test cancelled by user. Saving partial results...",
-                    fg=typer.colors.YELLOW),
+        typer.style(
+            "\n\n  Test cancelled by user. Saving partial results...", fg=typer.colors.YELLOW
+        ),
     )
 
 
@@ -50,9 +51,7 @@ def _on_cancel(signum: int, frame: Any) -> None:
 
 
 def start_command(
-    config_path: str | None = typer.Option(
-        None, "--config", "-c", help="Config file path."
-    ),
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Config file path."),
 ) -> None:
     """Interactive guided mode: setup -> analyze -> test -> loop -> report."""
     try:
@@ -62,7 +61,8 @@ def start_command(
         raise typer.Exit(code=130) from None
     except AATError as e:
         typer.echo(
-            typer.style(f"\nError: {e}", fg=typer.colors.RED), err=True,
+            typer.style(f"\nError: {e}", fg=typer.colors.RED),
+            err=True,
         )
         raise typer.Exit(code=1) from None
 
@@ -80,10 +80,14 @@ async def _start_guided(config_path: str | None) -> None:
     # ----------------------------------------------------------------
     ev.section("Step 1/5: AI Provider Setup")
 
-    provider = ev.prompt(
-        "Select AI provider",
-        options=["claude", "openai", "ollama"],
-    ).strip().lower()
+    provider = (
+        ev.prompt(
+            "Select AI provider",
+            options=["claude", "openai", "ollama"],
+        )
+        .strip()
+        .lower()
+    )
 
     if provider not in ("claude", "openai", "ollama"):
         # Try to match by number
@@ -146,9 +150,7 @@ async def _start_guided(config_path: str | None) -> None:
     # ----------------------------------------------------------------
     ev.section("Step 2/5: Document Analysis")
 
-    doc_path_str = ev.prompt(
-        "Path to spec documents (file or folder, or 'skip' to skip)"
-    ).strip()
+    doc_path_str = ev.prompt("Path to spec documents (file or folder, or 'skip' to skip)").strip()
 
     scenarios_from_docs: list[Any] = []
 
@@ -177,6 +179,7 @@ async def _start_guided(config_path: str | None) -> None:
             adapter = adapter_cls(config.ai)
 
             from aat.parsers.markdown_parser import MarkdownParser
+
             parser = MarkdownParser()
 
             all_analysis: list[dict[str, Any]] = []
@@ -190,9 +193,7 @@ async def _start_guided(config_path: str | None) -> None:
                     screens = len(result.get("screens", []))
                     elements = len(result.get("elements", []))
                     flows = len(result.get("flows", []))
-                    ev.success(
-                        f"{f.name}: {screens} screens, {elements} elements, {flows} flows"
-                    )
+                    ev.success(f"{f.name}: {screens} screens, {elements} elements, {flows} flows")
                 except Exception as exc:
                     ev.warning(f"{f.name}: analysis failed — {exc}")
 
@@ -212,8 +213,10 @@ async def _start_guided(config_path: str | None) -> None:
                     try:
                         text, images = await parser.parse(f)
                         from aat.core.models import Scenario
+
                         new_scenarios: list[Scenario] = await adapter.generate_scenarios(
-                            text, images,
+                            text,
+                            images,
                         )
                         scenarios_from_docs.extend(new_scenarios)
                     except Exception as exc:
@@ -230,7 +233,8 @@ async def _start_guided(config_path: str | None) -> None:
                         data = sc.model_dump(mode="json")
                         with open(out_path, "w", encoding="utf-8") as fh:
                             yaml.safe_dump(
-                                data, fh,
+                                data,
+                                fh,
                                 default_flow_style=False,
                                 allow_unicode=True,
                                 sort_keys=False,
@@ -245,9 +249,7 @@ async def _start_guided(config_path: str | None) -> None:
     # ----------------------------------------------------------------
     ev.section("Step 3/5: Scenario Selection")
 
-    scenario_path_str = ev.prompt(
-        f"Scenario path (default: {config.scenarios_dir})"
-    ).strip()
+    scenario_path_str = ev.prompt(f"Scenario path (default: {config.scenarios_dir})").strip()
     scenario_path = Path(scenario_path_str) if scenario_path_str else Path(config.scenarios_dir)
 
     if not scenario_path.exists():
@@ -338,7 +340,9 @@ async def _start_guided(config_path: str | None) -> None:
 
                 passed = step_result.status == StepStatus.PASSED
                 ev.step_result(
-                    step_counter, passed, step_config.description,
+                    step_counter,
+                    passed,
+                    step_config.description,
                     error=step_result.error_message,
                 )
 
@@ -348,8 +352,7 @@ async def _start_guided(config_path: str | None) -> None:
         # Build test result
         passed_count = sum(1 for s in all_step_results if s.status == StepStatus.PASSED)
         failed_count = sum(
-            1 for s in all_step_results
-            if s.status in (StepStatus.FAILED, StepStatus.ERROR)
+            1 for s in all_step_results if s.status in (StepStatus.FAILED, StepStatus.ERROR)
         )
 
         test_result = TestResult(
@@ -415,7 +418,8 @@ async def _start_guided(config_path: str | None) -> None:
 
                 # Engine already started — use skip_engine_lifecycle
                 loop_result = await loop.run(
-                    scenarios, skip_engine_lifecycle=True,
+                    scenarios,
+                    skip_engine_lifecycle=True,
                 )
 
                 ev.section("DevQA Loop Results")
@@ -436,5 +440,3 @@ async def _start_guided(config_path: str | None) -> None:
 
     ev.section("Done!")
     ev.info("  Test session complete. Thank you for using AAT!")
-
-

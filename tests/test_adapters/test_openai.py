@@ -151,7 +151,8 @@ async def test_analyze_failure_with_screenshots(adapter: OpenAIAdapter) -> None:
 
     screenshots = [b"\x89PNG_fake_image_data"]
     result = await adapter.analyze_failure(
-        _make_test_result(), screenshots=screenshots,
+        _make_test_result(),
+        screenshots=screenshots,
     )
 
     assert result.severity == Severity.WARNING
@@ -349,7 +350,8 @@ async def test_generate_scenarios_with_images(adapter: OpenAIAdapter) -> None:
     )
 
     result = await adapter.generate_scenarios(
-        "Spec doc", images=[b"fake_image"],
+        "Spec doc",
+        images=[b"fake_image"],
     )
 
     assert len(result) == 1
@@ -408,7 +410,8 @@ async def test_analyze_document_with_images(adapter: OpenAIAdapter) -> None:
     )
 
     result = await adapter.analyze_document(
-        "Spec doc", images=[b"fake_image"],
+        "Spec doc",
+        images=[b"fake_image"],
     )
 
     assert "screens" in result

@@ -56,9 +56,7 @@ def mock_engine() -> MagicMock:
 @pytest.fixture
 def mock_matcher() -> MagicMock:
     matcher = MagicMock()
-    matcher.find = AsyncMock(
-        return_value=MatchResult(found=True, x=100, y=200, confidence=0.95)
-    )
+    matcher.find = AsyncMock(return_value=MatchResult(found=True, x=100, y=200, confidence=0.95))
     return matcher
 
 
@@ -247,12 +245,8 @@ class TestKeyComboAction:
 
 class TestAssertAction:
     @pytest.mark.asyncio
-    async def test_assert(
-        self, executor: StepExecutor, mock_comparator: MagicMock
-    ) -> None:
-        step = make_step(
-            ActionType.ASSERT, value="dashboard", assert_type=AssertType.URL_CONTAINS
-        )
+    async def test_assert(self, executor: StepExecutor, mock_comparator: MagicMock) -> None:
+        step = make_step(ActionType.ASSERT, value="dashboard", assert_type=AssertType.URL_CONTAINS)
         result = await executor.execute_step(step)
         assert result.status == StepStatus.PASSED
         mock_comparator.check_assert.assert_awaited_once()
@@ -295,9 +289,7 @@ class TestRefreshAction:
 
 class TestScreenshotAction:
     @pytest.mark.asyncio
-    async def test_screenshot(
-        self, executor: StepExecutor, mock_engine: MagicMock
-    ) -> None:
+    async def test_screenshot(self, executor: StepExecutor, mock_engine: MagicMock) -> None:
         step = make_step(ActionType.SCREENSHOT)
         result = await executor.execute_step(step)
         assert result.status == StepStatus.PASSED
@@ -434,13 +426,9 @@ class TestFindAndRightClickAction:
 
 class TestFindAndTypeAction:
     @pytest.mark.asyncio
-    async def test_find_and_type(
-        self, executor: StepExecutor, mock_engine: MagicMock
-    ) -> None:
+    async def test_find_and_type(self, executor: StepExecutor, mock_engine: MagicMock) -> None:
         target = TargetSpec(text="Username")
-        step = make_step(
-            ActionType.FIND_AND_TYPE, target=target, value="admin", humanize=False
-        )
+        step = make_step(ActionType.FIND_AND_TYPE, target=target, value="admin", humanize=False)
         result = await executor.execute_step(step)
         assert result.status == StepStatus.PASSED
         mock_engine.click.assert_awaited_once_with(100, 200)
@@ -449,9 +437,7 @@ class TestFindAndTypeAction:
 
 class TestFindAndClearAction:
     @pytest.mark.asyncio
-    async def test_find_and_clear(
-        self, executor: StepExecutor, mock_engine: MagicMock
-    ) -> None:
+    async def test_find_and_clear(self, executor: StepExecutor, mock_engine: MagicMock) -> None:
         target = TargetSpec(text="Field")
         step = make_step(ActionType.FIND_AND_CLEAR, target=target, humanize=False)
         result = await executor.execute_step(step)
@@ -466,9 +452,7 @@ class TestFindAndClearAction:
 
 class TestScreenshotBeforeAfter:
     @pytest.mark.asyncio
-    async def test_screenshot_before(
-        self, executor: StepExecutor, mock_engine: MagicMock
-    ) -> None:
+    async def test_screenshot_before(self, executor: StepExecutor, mock_engine: MagicMock) -> None:
         step = make_step(ActionType.GO_BACK, screenshot_before=True)
         result = await executor.execute_step(step)
         assert result.status == StepStatus.PASSED
@@ -476,9 +460,7 @@ class TestScreenshotBeforeAfter:
         assert "before_" in result.screenshot_before
 
     @pytest.mark.asyncio
-    async def test_screenshot_after(
-        self, executor: StepExecutor, mock_engine: MagicMock
-    ) -> None:
+    async def test_screenshot_after(self, executor: StepExecutor, mock_engine: MagicMock) -> None:
         step = make_step(ActionType.GO_BACK, screenshot_after=True)
         result = await executor.execute_step(step)
         assert result.status == StepStatus.PASSED

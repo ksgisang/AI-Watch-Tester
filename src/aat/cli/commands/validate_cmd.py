@@ -28,9 +28,7 @@ def validate_command(
         files = [scenario_path]
     else:
         files = sorted(
-            f
-            for f in scenario_path.rglob("*")
-            if f.suffix in (".yaml", ".yml") and f.is_file()
+            f for f in scenario_path.rglob("*") if f.suffix in (".yaml", ".yml") and f.is_file()
         )
 
     if not files:

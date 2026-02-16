@@ -25,7 +25,8 @@ async def _init_git_repo(path: Path) -> None:
 
     async def _run(*args: str) -> None:
         proc = await asyncio.create_subprocess_exec(
-            *args, cwd=path,
+            *args,
+            cwd=path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -155,7 +156,8 @@ async def test_commit_changes(tmp_path: Path) -> None:
     # Create a file to commit
     (tmp_path / "new.txt").write_text("new content")
     commit_hash = await ops.commit_changes(
-        [tmp_path / "new.txt"], "add new file",
+        [tmp_path / "new.txt"],
+        "add new file",
     )
     assert len(commit_hash) >= 7
     assert await ops.has_uncommitted_changes() is False

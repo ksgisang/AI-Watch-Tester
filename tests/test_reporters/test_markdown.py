@@ -146,9 +146,7 @@ async def test_generate_test_result(reporter: MarkdownReporter, tmp_path: Path) 
 
 
 @pytest.mark.asyncio
-async def test_generate_failed_test_result(
-    reporter: MarkdownReporter, tmp_path: Path
-) -> None:
+async def test_generate_failed_test_result(reporter: MarkdownReporter, tmp_path: Path) -> None:
     """generate includes error messages for failed steps."""
     result = _make_test_result(passed=False)
     report_path = await reporter.generate(result, tmp_path)
@@ -190,9 +188,7 @@ async def test_generate_loop_result(reporter: MarkdownReporter, tmp_path: Path) 
 
 
 @pytest.mark.asyncio
-async def test_generate_creates_output_dir(
-    reporter: MarkdownReporter, tmp_path: Path
-) -> None:
+async def test_generate_creates_output_dir(reporter: MarkdownReporter, tmp_path: Path) -> None:
     """generate creates output_dir if it doesn't exist."""
     out = tmp_path / "nested" / "dir"
     result = _make_test_result()

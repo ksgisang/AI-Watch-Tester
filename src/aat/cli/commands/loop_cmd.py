@@ -26,14 +26,14 @@ from aat.reporters import REPORTER_REGISTRY
 
 def loop_command(
     scenarios_path: str = typer.Argument(help="Scenario file or directory path."),
-    config_path: str | None = typer.Option(
-        None, "--config", "-c", help="Config file path."
-    ),
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Config file path."),
     max_loops: int | None = typer.Option(
         None, "--max-loops", "-m", help="Maximum loop iterations."
     ),
     approval_mode: str = typer.Option(
-        "manual", "--approval-mode", "-a",
+        "manual",
+        "--approval-mode",
+        "-a",
         help="Approval mode: manual | branch | auto.",
     ),
 ) -> None:

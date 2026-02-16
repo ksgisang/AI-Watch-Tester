@@ -17,12 +17,8 @@ if TYPE_CHECKING:
 
 
 def generate_command(
-    file_path: str | None = typer.Option(
-        None, "--from", "-f", help="Source document file."
-    ),
-    config_path: str | None = typer.Option(
-        None, "--config", "-c", help="Config file path."
-    ),
+    file_path: str | None = typer.Option(None, "--from", "-f", help="Source document file."),
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Config file path."),
     output_dir: str | None = typer.Option(
         None, "--output", "-o", help="Output directory for scenarios."
     ),

@@ -46,9 +46,11 @@ class TestOllamaConnection:
 
     async def test_ollama_model_available(self) -> None:
         """Returns success when model is found in Ollama."""
-        resp = _mock_httpx_response(json_data={
-            "models": [{"name": "codellama:7b"}, {"name": "llama3:8b"}],
-        })
+        resp = _mock_httpx_response(
+            json_data={
+                "models": [{"name": "codellama:7b"}, {"name": "llama3:8b"}],
+            }
+        )
         mock_client = AsyncMock()
         mock_client.get.return_value = resp
 
@@ -64,9 +66,11 @@ class TestOllamaConnection:
 
     async def test_ollama_model_not_found(self) -> None:
         """Returns success with warning when model is not in the list."""
-        resp = _mock_httpx_response(json_data={
-            "models": [{"name": "llama3:8b"}],
-        })
+        resp = _mock_httpx_response(
+            json_data={
+                "models": [{"name": "llama3:8b"}],
+            }
+        )
         mock_client = AsyncMock()
         mock_client.get.return_value = resp
 
@@ -111,9 +115,11 @@ class TestOllamaConnection:
 
     async def test_ollama_custom_base_url(self) -> None:
         """Uses api_key as base URL when it starts with http."""
-        resp = _mock_httpx_response(json_data={
-            "models": [{"name": "codellama:7b"}],
-        })
+        resp = _mock_httpx_response(
+            json_data={
+                "models": [{"name": "codellama:7b"}],
+            }
+        )
         mock_client = AsyncMock()
         mock_client.get.return_value = resp
 
@@ -151,7 +157,8 @@ class TestClaudeConnection:
 
         with patch("anthropic.AsyncAnthropic", return_value=mock_client):
             config = _make_config(
-                provider="claude", api_key="sk-test-key",
+                provider="claude",
+                api_key="sk-test-key",
                 model="claude-sonnet-4-20250514",
             )
             ok, msg = await check_ai_connection(config)

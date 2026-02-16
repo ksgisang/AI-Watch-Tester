@@ -54,6 +54,7 @@ class TestBaseEngine:
             async def stop(self) -> None: ...
             async def screenshot(self) -> bytes:
                 return b""
+
             async def click(self, x: int, y: int) -> None: ...
             async def double_click(self, x: int, y: int) -> None: ...
             async def right_click(self, x: int, y: int) -> None: ...
@@ -67,8 +68,10 @@ class TestBaseEngine:
             async def move_mouse(self, x: int, y: int) -> None: ...
             async def get_url(self) -> str:
                 return ""
+
             async def get_page_text(self) -> str:
                 return ""
+
             async def save_screenshot(self, path: Path) -> Path:
                 return path
 
@@ -94,9 +97,7 @@ class TestBaseMatcher:
             def name(self) -> str:
                 return "dummy"
 
-            async def find(
-                self, target: TargetSpec, screenshot: bytes
-            ) -> MatchResult | None:
+            async def find(self, target: TargetSpec, screenshot: bytes) -> MatchResult | None:
                 return None
 
             def can_handle(self, target: TargetSpec) -> bool:
@@ -166,9 +167,7 @@ class TestBaseReporter:
 
     def test_concrete_impl_works(self) -> None:
         class DummyReporter(BaseReporter):
-            async def generate(
-                self, result: TestResult | LoopResult, output_dir: Path
-            ) -> Path:
+            async def generate(self, result: TestResult | LoopResult, output_dir: Path) -> Path:
                 return output_dir / "report.md"
 
             @property

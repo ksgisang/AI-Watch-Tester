@@ -134,9 +134,7 @@ class MarkdownReporter(BaseReporter):
             lines.append("")
             tr = iteration.test_result
             pass_status = "PASS" if tr.passed else "FAIL"
-            lines.append(
-                f"**Scenario:** {tr.scenario_id} — {tr.scenario_name} ({pass_status})"
-            )
+            lines.append(f"**Scenario:** {tr.scenario_id} — {tr.scenario_name} ({pass_status})")
             lines.append(
                 f"**Steps:** {tr.passed_steps}/{tr.total_steps} passed, "
                 f"duration {tr.duration_ms:.0f}ms"
@@ -180,9 +178,7 @@ class MarkdownReporter(BaseReporter):
                 lines.append("")
 
             if iteration.approved is not None:
-                lines.append(
-                    f"**Approved:** {'Yes' if iteration.approved else 'No'}"
-                )
+                lines.append(f"**Approved:** {'Yes' if iteration.approved else 'No'}")
                 lines.append("")
 
         return "\n".join(lines)

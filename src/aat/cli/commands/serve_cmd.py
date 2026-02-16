@@ -1,4 +1,4 @@
-"""aat dashboard — Web dashboard for real-time test monitoring."""
+"""aat serve — Single-command launcher for dashboard + worker."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 import typer
 
 
-def dashboard_command(
+def serve_command(
     config_path: str | None = typer.Option(
         None,
         "--config",
@@ -23,7 +23,11 @@ def dashboard_command(
         help="Don't open browser automatically.",
     ),
 ) -> None:
-    """Launch the AAT web dashboard."""
+    """Launch AAT dashboard (single process, no terminal needed).
+
+    Alias for 'aat dashboard'. Starts the web UI on http://host:port.
+    All test execution happens inside this process — no separate terminal required.
+    """
     try:
         import uvicorn  # type: ignore[import-not-found]
     except ImportError:
@@ -40,6 +44,7 @@ def dashboard_command(
 
     url = f"http://{host}:{port}"
     typer.echo(f"AAT Dashboard: {url}")
+    typer.echo("All operations run inside this process. Open the URL in your browser.")
 
     if not no_open:
         webbrowser.open(url)

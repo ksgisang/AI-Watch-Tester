@@ -143,8 +143,7 @@ class OpenAIAdapter(AIAdapter):
                         "type": "image_url",
                         "image_url": {
                             "url": (
-                                f"data:image/png;base64,"
-                                f"{base64.b64encode(img_bytes).decode()}"
+                                f"data:image/png;base64,{base64.b64encode(img_bytes).decode()}"
                             ),
                         },
                     }
@@ -224,8 +223,7 @@ class OpenAIAdapter(AIAdapter):
                         "type": "image_url",
                         "image_url": {
                             "url": (
-                                f"data:image/png;base64,"
-                                f"{base64.b64encode(img_bytes).decode()}"
+                                f"data:image/png;base64,{base64.b64encode(img_bytes).decode()}"
                             ),
                         },
                     }
@@ -260,8 +258,7 @@ class OpenAIAdapter(AIAdapter):
                         "type": "image_url",
                         "image_url": {
                             "url": (
-                                f"data:image/png;base64,"
-                                f"{base64.b64encode(img_bytes).decode()}"
+                                f"data:image/png;base64,{base64.b64encode(img_bytes).decode()}"
                             ),
                         },
                     }
@@ -327,8 +324,5 @@ class OpenAIAdapter(AIAdapter):
         try:
             return json.loads(cleaned)
         except json.JSONDecodeError as exc:
-            msg = (
-                f"Failed to parse JSON from OpenAI response: {exc}\n"
-                f"Raw: {raw_text[:500]}"
-            )
+            msg = f"Failed to parse JSON from OpenAI response: {exc}\nRaw: {raw_text[:500]}"
             raise AdapterError(msg) from exc

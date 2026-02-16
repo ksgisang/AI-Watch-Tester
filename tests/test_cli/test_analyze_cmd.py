@@ -54,9 +54,11 @@ def test_analyze_success(tmp_path: Path) -> None:
         "flows": [{"name": "Login Flow"}],
     }
 
-    with patch("aat.cli.commands.analyze_cmd._get_parser", return_value=mock_parser), \
-         patch("aat.cli.commands.analyze_cmd._get_adapter", return_value=mock_adapter), \
-         patch("aat.cli.commands.analyze_cmd.load_config") as mock_load:
+    with (
+        patch("aat.cli.commands.analyze_cmd._get_parser", return_value=mock_parser),
+        patch("aat.cli.commands.analyze_cmd._get_adapter", return_value=mock_adapter),
+        patch("aat.cli.commands.analyze_cmd.load_config") as mock_load,
+    ):
         mock_cfg = MagicMock()
         mock_cfg.data_dir = str(tmp_path / ".aat")
         mock_load.return_value = mock_cfg
@@ -75,8 +77,10 @@ def test_analyze_no_parser(tmp_path: Path) -> None:
     doc = tmp_path / "data.csv"
     doc.write_text("col1,col2\n", encoding="utf-8")
 
-    with patch("aat.cli.commands.analyze_cmd._get_parser", return_value=None), \
-         patch("aat.cli.commands.analyze_cmd.load_config") as mock_load:
+    with (
+        patch("aat.cli.commands.analyze_cmd._get_parser", return_value=None),
+        patch("aat.cli.commands.analyze_cmd.load_config") as mock_load,
+    ):
         mock_cfg = MagicMock()
         mock_cfg.data_dir = str(tmp_path / ".aat")
         mock_load.return_value = mock_cfg
@@ -105,9 +109,11 @@ def test_analyze_saves_json_output(tmp_path: Path) -> None:
     mock_adapter = AsyncMock()
     mock_adapter.analyze_document.return_value = analysis_result
 
-    with patch("aat.cli.commands.analyze_cmd._get_parser", return_value=mock_parser), \
-         patch("aat.cli.commands.analyze_cmd._get_adapter", return_value=mock_adapter), \
-         patch("aat.cli.commands.analyze_cmd.load_config") as mock_load:
+    with (
+        patch("aat.cli.commands.analyze_cmd._get_parser", return_value=mock_parser),
+        patch("aat.cli.commands.analyze_cmd._get_adapter", return_value=mock_adapter),
+        patch("aat.cli.commands.analyze_cmd.load_config") as mock_load,
+    ):
         mock_cfg = MagicMock()
         mock_cfg.data_dir = str(data_dir)
         mock_load.return_value = mock_cfg

@@ -113,7 +113,9 @@ class TestHumanizerScreenCoords:
         from unittest.mock import MagicMock
 
         config = HumanizerConfig(
-            enabled=True, mouse_speed_min=0.01, mouse_speed_max=0.02,
+            enabled=True,
+            mouse_speed_min=0.01,
+            mouse_speed_max=0.02,
         )
         humanizer = Humanizer(config)
         engine = MockEngine()

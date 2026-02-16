@@ -72,11 +72,15 @@ class TestDesktopEngineActions:
         mock_page.reload = AsyncMock()
         mock_page.inner_text = AsyncMock(return_value="Page text")
         mock_page.url = "https://example.com/page"
-        mock_page.evaluate = AsyncMock(return_value={
-            "screenX": 0, "screenY": 0,
-            "chromeWidth": 0, "chromeHeight": 0,
-            "devicePixelRatio": 1.0,
-        })
+        mock_page.evaluate = AsyncMock(
+            return_value={
+                "screenX": 0,
+                "screenY": 0,
+                "chromeWidth": 0,
+                "chromeHeight": 0,
+                "devicePixelRatio": 1.0,
+            }
+        )
         # Playwright mouse/keyboard mocks
         mock_page.mouse = MagicMock()
         mock_page.mouse.click = AsyncMock()
@@ -100,19 +104,25 @@ class TestDesktopEngineActions:
     async def test_right_click(self, engine_with_mocks: DesktopEngine) -> None:
         await engine_with_mocks.right_click(10, 20)
         engine_with_mocks.page.mouse.click.assert_awaited_once_with(
-            10, 20, button="right",
+            10,
+            20,
+            button="right",
         )
 
     # -- Mouse movement (PyAutoGUI) --
 
     async def test_move_mouse(
-        self, engine_with_mocks: DesktopEngine, mock_pag: MagicMock,
+        self,
+        engine_with_mocks: DesktopEngine,
+        mock_pag: MagicMock,
     ) -> None:
         await engine_with_mocks.move_mouse(300, 400)
         mock_pag.moveTo.assert_called_once_with(300, 400)
 
     async def test_scroll(
-        self, engine_with_mocks: DesktopEngine, mock_pag: MagicMock,
+        self,
+        engine_with_mocks: DesktopEngine,
+        mock_pag: MagicMock,
     ) -> None:
         await engine_with_mocks.scroll(100, 200, 300)
         mock_pag.moveTo.assert_called_once_with(100, 200)
@@ -123,7 +133,8 @@ class TestDesktopEngineActions:
     async def test_type_text(self, engine_with_mocks: DesktopEngine) -> None:
         await engine_with_mocks.type_text("hello")
         engine_with_mocks.page.keyboard.type.assert_awaited_once_with(
-            "hello", delay=0,
+            "hello",
+            delay=0,
         )
 
     async def test_press_key(self, engine_with_mocks: DesktopEngine) -> None:
@@ -139,7 +150,9 @@ class TestDesktopEngineActions:
     # -- Screenshot (PyAutoGUI) --
 
     async def test_screenshot(
-        self, engine_with_mocks: DesktopEngine, mock_pag: MagicMock,
+        self,
+        engine_with_mocks: DesktopEngine,
+        mock_pag: MagicMock,
     ) -> None:
         mock_img = MagicMock()
         mock_img.save = MagicMock()
@@ -149,7 +162,10 @@ class TestDesktopEngineActions:
         mock_pag.screenshot.assert_called_once()
 
     async def test_save_screenshot(
-        self, engine_with_mocks: DesktopEngine, mock_pag: MagicMock, tmp_path: Path,
+        self,
+        engine_with_mocks: DesktopEngine,
+        mock_pag: MagicMock,
+        tmp_path: Path,
     ) -> None:
         out = tmp_path / "shots" / "test.png"
         result = await engine_with_mocks.save_screenshot(out)
@@ -162,7 +178,8 @@ class TestDesktopEngineActions:
     async def test_navigate(self, engine_with_mocks: DesktopEngine) -> None:
         await engine_with_mocks.navigate("https://test.com")
         engine_with_mocks.page.goto.assert_awaited_once_with(
-            "https://test.com", wait_until="domcontentloaded",
+            "https://test.com",
+            wait_until="domcontentloaded",
         )
 
     async def test_go_back(self, engine_with_mocks: DesktopEngine) -> None:
@@ -182,7 +199,8 @@ class TestDesktopEngineActions:
         assert text == "Page text"
 
     async def test_navigate_failure_raises_engine_error(
-        self, engine_with_mocks: DesktopEngine,
+        self,
+        engine_with_mocks: DesktopEngine,
     ) -> None:
         engine_with_mocks.page.goto.side_effect = Exception("Network error")
         with pytest.raises(EngineError, match="Navigation.*failed"):
@@ -216,17 +234,19 @@ class TestDesktopEngineCoordinateConversion:
         engine = DesktopEngine()
         engine._pag = mock_pag
         mock_page = MagicMock()
-        mock_page.evaluate = AsyncMock(return_value={
-            "screenX": 1440,
-            "screenY": 50,
-            "chromeX": 10,
-            "chromeY": 72,
-            "devicePixelRatio": 2.0,
-        })
+        mock_page.evaluate = AsyncMock(
+            return_value={
+                "screenX": 1440,
+                "screenY": 50,
+                "chromeX": 10,
+                "chromeY": 72,
+                "devicePixelRatio": 2.0,
+            }
+        )
         engine._page = mock_page
         await engine._update_window_offset()
         assert engine._window_offset_x == 1450  # 1440 + 10
-        assert engine._window_offset_y == 122   # 50 + 72
+        assert engine._window_offset_y == 122  # 50 + 72
         assert engine._device_pixel_ratio == 2.0
 
     @pytest.mark.asyncio
@@ -253,7 +273,8 @@ class TestDesktopEngineScreenOps:
         result = await engine.find_on_screen("button.png", confidence=0.9)
         assert result == (500, 300)
         mock_pag.locateOnScreen.assert_called_once_with(
-            "button.png", confidence=0.9,
+            "button.png",
+            confidence=0.9,
         )
 
     async def test_find_on_screen_not_found(self, mock_pag: MagicMock) -> None:
@@ -306,7 +327,8 @@ class TestDesktopEngineFindTextPosition:
         return engine
 
     def _make_visible_locator(
-        self, box: dict[str, int] | None = None,
+        self,
+        box: dict[str, int] | None = None,
     ) -> MagicMock:
         """Create a mock locator that is visible with a bounding box."""
         loc = MagicMock()

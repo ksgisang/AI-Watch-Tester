@@ -64,7 +64,6 @@ class TestDashboardApp:
         assert response.status_code == 200
         data = response.json()
         assert "running" in data
-        assert "subprocess" in data
         assert "ws_clients" in data
         assert "server_running" in data
 
@@ -252,7 +251,9 @@ class TestScenarioManagement:
 
     def test_upload_scenario_yml(self, client: TestClient) -> None:
         """Upload a .yml scenario file succeeds."""
-        yaml_content = b"id: SC-002\nname: Test2\nsteps:\n  - action: navigate\n    url: http://x\n"
+        yaml_content = (
+            b"id: SC-002\nname: Test2\nsteps:\n  - action: navigate\n    url: http://x\n"
+        )
         response = client.post(
             "/api/scenarios/upload",
             files=[("file", ("test.yml", yaml_content, "application/yaml"))],
@@ -423,3 +424,133 @@ class TestScenarioGuidance:
 
         result = _get_scenario_guidance("some unknown error")
         assert "형식" in result
+
+
+class TestOneClick:
+    """One-click test endpoint tests."""
+
+    def test_oneclick_no_url(self, client: TestClient) -> None:
+        """POST /api/oneclick with empty URL returns error."""
+        response = client.post("/api/oneclick", json={"url": ""})
+        assert response.status_code == 400
+        assert "URL is required" in response.json()["error"]
+
+    def test_oneclick_no_body(self, client: TestClient) -> None:
+        """POST /api/oneclick with no body returns error."""
+        response = client.post(
+            "/api/oneclick",
+            content=b"",
+            headers={"content-type": "application/json"},
+        )
+        assert response.status_code == 400
+
+    def test_oneclick_starts_successfully(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """POST /api/oneclick with valid URL starts execution."""
+        import aat.dashboard.app as app_mod
+
+        async def _noop_oneclick(*_args: object, **_kwargs: object) -> None:
+            pass
+
+        monkeypatch.setattr(app_mod, "_execute_oneclick", _noop_oneclick)
+
+        response = client.post(
+            "/api/oneclick",
+            json={"url": "https://example.com"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "started"
+        assert data["url"] == "https://example.com"
+        # Clean up
+        client.post("/api/stop")
+
+    def test_oneclick_conflict_when_running(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """POST /api/oneclick returns 409 if test already running."""
+        import aat.dashboard.app as app_mod
+
+        # Simulate a running task with a mock that reports not done
+        fake_task = MagicMock()
+        fake_task.done.return_value = False
+        monkeypatch.setattr(app_mod, "_run_task", fake_task)
+
+        response = client.post("/api/oneclick", json={"url": "https://other.com"})
+        assert response.status_code == 409
+
+
+class TestAutoDetectAI:
+    """AI provider auto-detection tests."""
+
+    def test_auto_detect_anthropic_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Auto-detects ANTHROPIC_API_KEY from env."""
+        from aat.core.models import Config
+        from aat.dashboard.app import _auto_detect_ai
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test123")
+        config = Config()
+        result = _auto_detect_ai(config)
+        assert result.ai.provider == "claude"
+        assert result.ai.api_key == "sk-ant-test123"
+
+    def test_auto_detect_openai_key(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Auto-detects OPENAI_API_KEY from env."""
+        from aat.core.models import Config
+        from aat.dashboard.app import _auto_detect_ai
+
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test123")
+        config = Config()
+        result = _auto_detect_ai(config)
+        assert result.ai.provider == "openai"
+        assert result.ai.api_key == "sk-openai-test123"
+
+    def test_auto_detect_skips_when_key_set(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Does not override if API key already set."""
+        from aat.core.models import Config
+        from aat.dashboard.app import _auto_detect_ai
+
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test123")
+        config = Config()
+        config.ai.api_key = "existing-key"
+        config.ai.provider = "claude"
+        result = _auto_detect_ai(config)
+        assert result.ai.provider == "claude"
+        assert result.ai.api_key == "existing-key"
+
+    def test_auto_detect_ollama(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Auto-detects OLLAMA_HOST from env."""
+        from aat.core.models import Config
+        from aat.dashboard.app import _auto_detect_ai
+
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.setenv("OLLAMA_HOST", "http://localhost:11434")
+        config = Config()
+        result = _auto_detect_ai(config)
+        assert result.ai.provider == "ollama"
+        assert result.ai.model == "codellama:7b"
+
+
+class TestBuildVariables:
+    """Test _build_variables helper with url_override."""
+
+    def test_url_override(self, client: TestClient) -> None:
+        """url_override takes precedence over config URL."""
+        from aat.dashboard.app import _build_variables
+
+        variables = _build_variables(url_override="https://override.com")
+        assert variables["url"] == "https://override.com"
+
+    def test_url_from_config(self, client: TestClient) -> None:
+        """Falls back to config URL when no override."""
+        from aat.dashboard.app import _build_variables
+
+        variables = _build_variables()
+        assert "project_name" in variables

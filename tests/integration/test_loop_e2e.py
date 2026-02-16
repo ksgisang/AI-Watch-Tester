@@ -263,13 +263,9 @@ class TestStepExecutorE2E:
         humanizer = Humanizer()
         waiter = Waiter()
         comparator = Comparator()
-        return StepExecutor(
-            mock_engine, mock_matcher, humanizer, waiter, comparator, tmp_path
-        )
+        return StepExecutor(mock_engine, mock_matcher, humanizer, waiter, comparator, tmp_path)
 
-    async def test_navigate_step(
-        self, executor: StepExecutor, mock_engine: AsyncMock
-    ) -> None:
+    async def test_navigate_step(self, executor: StepExecutor, mock_engine: AsyncMock) -> None:
         step = StepConfig(
             step=1,
             action=ActionType.NAVIGATE,
@@ -711,8 +707,7 @@ class TestMarkdownParserE2E:
 
         md_path = tmp_path / "spec.md"
         md_path.write_text(
-            "# Test Spec\n\nClick the login button.\n\n"
-            "![screenshot](screenshot.png)\n\nDone.\n",
+            "# Test Spec\n\nClick the login button.\n\n![screenshot](screenshot.png)\n\nDone.\n",
             encoding="utf-8",
         )
 
