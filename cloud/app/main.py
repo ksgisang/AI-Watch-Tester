@@ -7,6 +7,8 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import engine
@@ -81,6 +83,26 @@ app = FastAPI(
     version="0.2.0",
     lifespan=lifespan,
 )
+
+# -- CORS (frontend dev server) --
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# -- Static: screenshots --
+import os
+from pathlib import Path
+
+_ss_dir = Path(settings.screenshot_dir)
+if _ss_dir.exists():
+    app.mount("/screenshots", StaticFiles(directory=str(_ss_dir)), name="screenshots")
 
 # -- Routers --
 app.include_router(tests.router)

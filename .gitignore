@@ -42,6 +42,11 @@ venv/
 awt_cloud.db
 cloud/screenshots/
 
+# Frontend
+cloud/frontend/node_modules/
+cloud/frontend/.next/
+cloud/frontend/.env.local
+
 # AAT data
 .aat/config.yaml
 .aat/learned.db
