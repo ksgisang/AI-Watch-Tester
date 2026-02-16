@@ -37,3 +37,6 @@ Thumbs.db
 .env
 .venv/
 venv/
+
+# Cloud backend local DB
+awt_cloud.db
