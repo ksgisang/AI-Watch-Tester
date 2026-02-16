@@ -121,11 +121,20 @@ async def add_rate_limit_headers(request: Request, call_next) -> Response:  # ty
     return response
 
 
-# -- Health check --
+# -- Health check (simple) --
 @app.get("/health")
-async def health() -> dict[str, str]:
-    """Health check endpoint (no auth required)."""
+async def health_simple() -> dict[str, str]:
+    """Simple health check (load balancer / uptime monitor)."""
     return {"status": "ok"}
+
+
+# -- Health check (detailed) --
+@app.get("/api/health")
+async def health_detailed() -> dict[str, object]:
+    """Detailed health check — DB, Worker, AI provider status."""
+    from app.health import get_health
+
+    return await get_health()
 
 
 # -- Worker status --

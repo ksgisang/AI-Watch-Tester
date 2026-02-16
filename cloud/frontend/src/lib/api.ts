@@ -160,4 +160,32 @@ export function connectTestWS(
   return ws;
 }
 
+// -- Health API (no auth required) --
+
+export interface HealthCheck {
+  status: string;
+  error?: string;
+  provider?: string;
+  models_available?: number;
+  key_configured?: boolean;
+  active_tests?: number;
+  max_concurrent?: number;
+}
+
+export interface HealthResponse {
+  status: "healthy" | "degraded" | "down";
+  checks: {
+    database: HealthCheck;
+    worker: HealthCheck;
+    ai_provider: HealthCheck;
+  };
+  uptime_seconds: number;
+}
+
+export async function fetchHealth(): Promise<HealthResponse> {
+  const res = await fetch(`${API_URL}/api/health`);
+  if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
+  return res.json();
+}
+
 export { API_URL };

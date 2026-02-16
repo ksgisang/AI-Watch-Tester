@@ -10,6 +10,7 @@
     "brand": "",
     "dashboard": "",
     "history": "",
+    "status": "",
     "signOut": "",
     "login": "",
     "signUp": ""
@@ -163,6 +164,25 @@
     "save": "",
     "starting": "",
     "runTest": ""
+  },
+  "status": {
+    "title": "",
+    "subtitle": "",
+    "checking": "",
+    "unreachable": "",
+    "allOperational": "",
+    "partialOutage": "",
+    "majorOutage": "",
+    "uptime": "",
+    "database": "",
+    "worker": "",
+    "aiProvider": "",
+    "operational": "",
+    "degradedLabel": "",
+    "downLabel": "",
+    "workerSlots": "",
+    "modelsAvailable": "",
+    "autoRefresh": ""
   },
   "fileUpload": {
     "dropHint": "",

@@ -37,6 +37,12 @@ export default function Header() {
               >
                 {t("history")}
               </Link>
+              <Link
+                href="/status"
+                className="text-sm text-gray-600 hover:text-gray-900"
+              >
+                {t("status")}
+              </Link>
               <span className="text-xs text-gray-400">{user.email}</span>
               <button
                 onClick={handleSignOut}

@@ -10,6 +10,7 @@
     "brand": "AWT Cloud",
     "dashboard": "Dashboard",
     "history": "History",
+    "status": "Status",
     "signOut": "Sign Out",
     "login": "Login",
     "signUp": "Sign Up"
@@ -163,6 +164,25 @@
     "save": "Save",
     "starting": "Starting...",
     "runTest": "Run Test"
+  },
+  "status": {
+    "title": "System Status",
+    "subtitle": "Real-time status of AWT Cloud services",
+    "checking": "Checking system status...",
+    "unreachable": "Backend Unreachable",
+    "allOperational": "All Systems Operational",
+    "partialOutage": "Partial Outage",
+    "majorOutage": "Major Outage",
+    "uptime": "Uptime",
+    "database": "Database",
+    "worker": "Background Worker",
+    "aiProvider": "AI Provider",
+    "operational": "Operational",
+    "degradedLabel": "Degraded",
+    "downLabel": "Down",
+    "workerSlots": "{active} / {max} slots active",
+    "modelsAvailable": "{count} model(s)",
+    "autoRefresh": "Auto-refreshes every 30 seconds"
   },
   "fileUpload": {
     "dropHint": "Drop spec documents here or click to browse",
