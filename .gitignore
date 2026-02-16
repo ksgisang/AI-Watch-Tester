@@ -38,5 +38,12 @@ Thumbs.db
 .venv/
 venv/
 
-# Cloud backend local DB
+# Cloud backend local DB + screenshots
 awt_cloud.db
+cloud/screenshots/
+
+# AAT data
+.aat/config.yaml
+.aat/learned.db
+.aat/screenshots/
+reports/

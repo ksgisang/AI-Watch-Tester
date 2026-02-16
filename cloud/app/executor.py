@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -27,6 +28,64 @@ _DEFAULT_MODELS: dict[str, str] = {
     "ollama": "codellama:7b",
 }
 
+# ---------------------------------------------------------------------------
+# AI scenario generation prompt
+# ---------------------------------------------------------------------------
+
+_SCENARIO_PROMPT = """\
+You are an E2E test scenario generator.
+
+Analyze the following web page and generate user-perspective E2E test scenarios in YAML format.
+
+## Target
+- URL: {url}
+
+## Page Content (truncated)
+{page_text}
+
+## Instructions
+1. Identify key user flows (login, navigation, form submission, etc.)
+2. Generate 1-3 test scenarios covering the most important flows
+3. Each scenario should have clear steps: navigate, click, type, assert
+4. Use text-based targets (not image) for reliability
+5. Keep steps concise and actionable
+
+Return ONLY valid YAML scenario definitions.\
+"""
+
+
+# ---------------------------------------------------------------------------
+# Screenshot helper
+# ---------------------------------------------------------------------------
+
+
+def _screenshot_dir_for_test(test_id: int) -> Path:
+    """Return and create the screenshot directory for a test."""
+    base = Path(settings.screenshot_dir)
+    d = base / str(test_id)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+async def _save_screenshot(
+    engine: Any, test_id: int, label: str
+) -> str | None:
+    """Save engine screenshot to file. Returns relative path or None."""
+    try:
+        png_bytes = await engine.screenshot()
+        d = _screenshot_dir_for_test(test_id)
+        path = d / f"{label}.png"
+        path.write_bytes(png_bytes)
+        return str(path)
+    except Exception as exc:
+        logger.debug("Screenshot save failed (%s): %s", label, exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Main executor
+# ---------------------------------------------------------------------------
+
 
 async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, Any]:
     """Execute a single test end-to-end.
@@ -34,7 +93,7 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
     1. Navigate to target URL with headless Playwright
     2. Capture page content + screenshot
     3. Generate test scenarios via AI adapter
-    4. Execute each scenario step by step
+    4. Execute each scenario step by step (with per-step screenshots)
     5. Return aggregated results
 
     Returns dict: {passed, scenarios, duration_ms, error?}
@@ -79,6 +138,9 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
         page_text = await engine.get_page_text()
         screenshot = await engine.screenshot()
 
+        # Save initial screenshot
+        init_ss = await _save_screenshot(engine, test_id, "initial")
+
         # -- Generate scenarios via AI --
         ai_config = AIConfig(
             provider=settings.ai_provider,
@@ -96,11 +158,11 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
 
         adapter = adapter_cls(ai_config)
 
-        document = (
-            f"Target URL: {target_url}\n\n"
-            f"Page content (first 8000 chars):\n{page_text[:8000]}"
+        prompt = _SCENARIO_PROMPT.format(
+            url=target_url,
+            page_text=page_text[:8000],
         )
-        scenarios = await adapter.generate_scenarios(document, images=[screenshot])
+        scenarios = await adapter.generate_scenarios(prompt, images=[screenshot])
 
         if not scenarios:
             return {
@@ -140,12 +202,16 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
 
         hybrid = HybridMatcher(matchers, matching_config) if matchers else None
 
+        # screenshot_dir for StepExecutor (per-test isolation)
+        ss_dir = _screenshot_dir_for_test(test_id)
+
         step_executor = StepExecutor(
             engine=engine,
             matcher=hybrid or matchers[0] if matchers else _NoopMatcher(),
             humanizer=Humanizer(HumanizerConfig(enabled=False)),
             waiter=Waiter(),
             comparator=Comparator(),
+            screenshot_dir=ss_dir,
         )
 
         # -- Execute scenarios --
@@ -171,15 +237,27 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
                         "description": step.description or str(step.action),
                     })
 
+                # Before-screenshot
+                ss_before = await _save_screenshot(
+                    engine, test_id, f"step_{step_num}_before"
+                )
+
                 try:
                     result = await step_executor.execute_step(step)
                     status = result.status.value
+
+                    # After-screenshot
+                    ss_after = await _save_screenshot(
+                        engine, test_id, f"step_{step_num}_after"
+                    )
 
                     step_results.append({
                         "step": i + 1,
                         "action": result.action if hasattr(result, "action") else str(step.action),
                         "status": status,
                         "elapsed_ms": getattr(result, "elapsed_ms", 0),
+                        "screenshot_before": ss_before,
+                        "screenshot_after": ss_after,
                     })
 
                     if status == "failed":
@@ -196,10 +274,18 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
 
                 except Exception as exc:
                     logger.warning("Step %d failed: %s", step_num, exc)
+
+                    # Error-screenshot
+                    ss_error = await _save_screenshot(
+                        engine, test_id, f"step_{step_num}_error"
+                    )
+
                     step_results.append({
                         "step": i + 1,
                         "status": "error",
                         "error": str(exc),
+                        "screenshot_before": ss_before,
+                        "screenshot_error": ss_error,
                     })
                     scenario_passed = False
                     overall_passed = False
@@ -229,6 +315,8 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
         return {
             "passed": overall_passed,
             "scenarios": all_results,
+            "screenshots_dir": str(_screenshot_dir_for_test(test_id)),
+            "initial_screenshot": init_ss,
             "duration_ms": _elapsed(start),
         }
 

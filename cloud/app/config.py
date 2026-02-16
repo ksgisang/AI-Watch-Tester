@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # Playwright (cloud worker)
     playwright_headless: bool = True
 
+    # Screenshots (file-based, not base64 in DB)
+    screenshot_dir: str = "cloud/screenshots"
+
     model_config = {"env_prefix": "AWT_", "env_file": ".env", "extra": "ignore"}
 
 

@@ -90,14 +90,27 @@ class Worker:
                 await db.commit()
 
     async def _claim_next(self) -> int | None:
-        """Atomically claim the next queued test (mark as RUNNING)."""
+        """Atomically claim the next queued test (mark as RUNNING).
+
+        Uses SELECT ... FOR UPDATE on PostgreSQL to prevent race conditions
+        when multiple workers poll simultaneously. SQLite ignores FOR UPDATE
+        (single-writer), so this is safe for both backends.
+        # NOTE: 멀티 워커 확장 시 FOR UPDATE 필수 — 없으면 동일 테스트 중복 실행 가능
+        """
+        _is_sqlite = settings.database_url.startswith("sqlite")
+
         async with async_session() as db:
-            result = await db.execute(
+            stmt = (
                 select(Test)
                 .where(Test.status == TestStatus.QUEUED)
                 .order_by(Test.created_at.asc())
                 .limit(1)
             )
+            # FOR UPDATE: PostgreSQL에서 행 잠금. SQLite는 미지원이므로 skip.
+            if not _is_sqlite:
+                stmt = stmt.with_for_update(skip_locked=True)
+
+            result = await db.execute(stmt)
             test = result.scalar_one_or_none()
             if test is None:
                 return None
