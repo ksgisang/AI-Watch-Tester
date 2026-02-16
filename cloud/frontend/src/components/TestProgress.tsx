@@ -24,7 +24,7 @@ export default function TestProgress({ testId, onComplete }: Props) {
   const [events, setEvents] = useState<WSEvent[]>([]);
   const [currentStep, setCurrentStep] = useState(0);
   const [totalSteps, setTotalSteps] = useState(0);
-  const [status, setStatus] = useState<"connecting" | "running" | "done">(
+  const [status, setStatus] = useState<"connecting" | "running" | "passed" | "failed">(
     "connecting"
   );
   const wsRef = useRef<WebSocket | null>(null);
@@ -51,17 +51,17 @@ export default function TestProgress({ testId, onComplete }: Props) {
           case "step_fail":
             break;
           case "test_complete":
-            setStatus("done");
+            setStatus(evt.passed ? "passed" : "failed");
             onComplete?.(!!evt.passed);
             break;
           case "test_fail":
-            setStatus("done");
+            setStatus("failed");
             onComplete?.(false);
             break;
         }
       },
       () => {
-        if (status !== "done") setStatus("done");
+        if (status === "connecting" || status === "running") setStatus("failed");
       }
     );
 
@@ -82,22 +82,32 @@ export default function TestProgress({ testId, onComplete }: Props) {
               ? "bg-yellow-100 text-yellow-700"
               : status === "running"
               ? "bg-blue-100 text-blue-700"
-              : "bg-gray-100 text-gray-700"
+              : status === "passed"
+              ? "bg-green-100 text-green-700"
+              : "bg-red-100 text-red-700"
           }`}
         >
           {status === "connecting"
             ? "Connecting..."
             : status === "running"
             ? "Running"
-            : "Complete"}
+            : status === "passed"
+            ? "Passed"
+            : "Failed"}
         </span>
       </div>
 
       {/* Progress bar */}
       <div className="mb-3 h-2 rounded-full bg-gray-100">
         <div
-          className="h-2 rounded-full bg-blue-500 transition-all duration-300"
-          style={{ width: `${progress}%` }}
+          className={`h-2 rounded-full transition-all duration-300 ${
+            status === "passed"
+              ? "bg-green-500"
+              : status === "failed"
+              ? "bg-red-400"
+              : "bg-blue-500"
+          }`}
+          style={{ width: `${status === "passed" || status === "failed" ? 100 : progress}%` }}
         />
       </div>
       <p className="mb-3 text-xs text-gray-500">
@@ -114,7 +124,7 @@ export default function TestProgress({ testId, onComplete }: Props) {
               ) : evt.type === "step_fail" ? (
                 <span className="text-red-500">&#10007;</span>
               ) : evt.type === "test_complete" ? (
-                <span className="text-green-600">&#9679;</span>
+                <span className={evt.passed ? "text-green-600" : "text-red-600"}>&#9679;</span>
               ) : evt.type === "test_fail" ? (
                 <span className="text-red-600">&#9679;</span>
               ) : (

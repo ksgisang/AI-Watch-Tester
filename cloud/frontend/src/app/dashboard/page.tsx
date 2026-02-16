@@ -50,6 +50,10 @@ export default function DashboardPage() {
   const handleComplete = (passed: boolean) => {
     setTestDone(true);
     setTestPassed(passed);
+    // Update status badge to reflect final state
+    if (activeTest) {
+      setActiveTest({ ...activeTest, status: passed ? "done" : "failed" });
+    }
   };
 
   return (
