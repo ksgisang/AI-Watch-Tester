@@ -7,13 +7,13 @@ name = "aat-devqa"
 version = "0.2.0"
 description = "AI Auto Tester — AI-powered DevQA Loop Orchestrator"
 readme = "README.md"
-license = "AGPL-3.0-only"
+license = "MIT"
 requires-python = ">=3.11"
 authors = [{ name = "AAT Contributors" }]
 keywords = ["testing", "automation", "ai", "devqa"]
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "License :: OSI Approved :: GNU Affero General Public License v3",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Testing",

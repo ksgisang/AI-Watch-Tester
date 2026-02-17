@@ -1,356 +1,156 @@
-# AAT (AI Auto Tester)
-
-**AI-Powered DevQA Loop Orchestrator**
-
-> Automates UI testing with image matching. When tests fail, AI analyzes the failure, fixes the code, and re-runs — in a continuous loop.
-
-[한국어 README](README.ko.md)
-
-| | |
-|---|---|
-| Package | `aat-devqa` |
-| Version | `0.2.0` |
-| Python | `>= 3.11` |
-| License | AGPL-3.0-only |
-| Status | Ultra-MVP |
+<p align="center">
+  <br/>
+  <strong>AWT — AI Watch Tester</strong>
+  <br/>
+  <em>AI-powered E2E testing — just enter a URL, AI does the rest.</em>
+  <br/><br/>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white" alt="Python 3.11+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
+  <a href="https://github.com/ksgisang/AI-Watch-Tester/actions"><img src="https://img.shields.io/github/actions/workflow/status/ksgisang/AI-Watch-Tester/ci.yml?label=tests" alt="Tests"></a>
+  <a href="https://github.com/ksgisang/AI-Watch-Tester/stargazers"><img src="https://img.shields.io/github/stars/ksgisang/AI-Watch-Tester?style=flat" alt="GitHub Stars"></a>
+</p>
 
 ---
 
-## Key Features
+## Demo
 
-- **Image Matching Pipeline** — Combines Template, OCR, Feature, and Hybrid matchers to locate UI elements.
-- **DevQA Loop** — When a test fails, AI (Claude) analyzes the root cause, patches the code, and re-tests automatically.
-- **YAML Scenarios** — Write test scenarios declaratively in YAML.
-- **Dual Engine** — `WebEngine` (Playwright) for headless/headed browser testing; `DesktopEngine` (PyAutoGUI + Playwright) for OS-level mouse/keyboard with real screen capture.
-- **Plugin Architecture** — Engine, Matcher, Adapter, Parser, and Reporter are all swappable plugins.
-- **Humanized Actions** — Bezier curve mouse movements and variable-speed typing to avoid bot detection.
-- **Learning DB** — Stores successful match history in SQLite for faster re-matching.
+<p align="center">
+  <img src="https://via.placeholder.com/800x400?text=Demo+Coming+Soon" alt="AWT Demo" width="800">
+  <br/>
+  <em>Watch AI generate test scenarios, execute them, and report results — all from a single URL.</em>
+</p>
 
 ---
 
-## Architecture
+## Features
 
-```
-CLI (Typer)
- |
- v
-+------------------+     +------------------+
-|  ScenarioLoader  |---->|   StepExecutor   |
-|  (YAML parsing)  |     |  (step runner)   |
-+------------------+     +--------+---------+
-                                  |
-                    +-------------+-------------+
-                    |             |              |
-               +----+----+  +----+----+  +------+------+
-               | Engine  |  | Matcher |  | Comparator  |
-               | Web|Desk|  | (Hybrid)|  | (assertion) |
-               +---------+  +---------+  +-------------+
-                    |
-                    v
-            +-------+--------+
-            |   DevQA Loop   |
-            | (fail -> AI    |
-            |  fix -> rerun) |
-            +-------+--------+
-                    |
-          +---------+---------+
-          |                   |
-     +----+----+       +-----+-----+
-     |   AI    |       | Reporter  |
-     | Adapter |       | (Markdown)|
-     +---------+       +-----------+
-     Claude|OpenAI|Ollama
-```
-
----
-
-## Installation
-
-### pip
-
-```bash
-pip install aat-devqa
-```
-
-### Development Setup
-
-```bash
-git clone https://github.com/ksgisang/AI-Watch-Tester.git
-cd AI-Watch-Tester
-make dev
-```
-
-`make dev` will:
-
-1. Install the package in editable mode (`pip install -e ".[dev]"`)
-2. Install Playwright Chromium browser
-3. Set up pre-commit hooks
-
-### System Dependencies
-
-Tesseract OCR engine is required by pytesseract:
-
-```bash
-# macOS
-brew install tesseract
-
-# Ubuntu/Debian
-sudo apt-get install tesseract-ocr
-```
+- **AI-Powered Scenario Generation** — OpenAI, Claude, or Ollama analyze your app and generate E2E test scenarios automatically
+- **Real Browser Testing** — Playwright drives a real Chromium browser with humanized mouse movements and typing
+- **Self-Healing DevQA Loop** — When tests fail, AI analyzes the failure, fixes the code, and re-runs
+- **Cloud or Local** — Cloud mode (no install, browser-based) or Local mode (full visibility, real browser)
+- **CI/CD API** — One-line integration with GitHub Actions, GitLab CI, or any pipeline
+- **Document-Based Generation** — Upload PDF/DOCX/MD specs and AI generates test scenarios from them
+- **i18n Ready** — Multi-language support for the web dashboard
 
 ---
 
 ## Quick Start
 
-### 1. Initialize Project
+### Cloud (No Install)
+
+```
+1. Visit https://awt.dev (coming soon)
+2. Sign up → Enter URL → Watch AI test your site
+```
+
+### Local
 
 ```bash
-aat init
+pip install aat-devqa
+aat serve
+# Open http://localhost:9500
 ```
 
-Creates `.aat/` directory with a default `config.yaml`.
-
-### 2. Check Configuration
+### CI/CD
 
 ```bash
-aat config show
-```
-
-### 3. Set API Key
-
-```bash
-export AAT_AI_API_KEY="sk-ant-..."
-# or
-aat config set ai.api_key "sk-ant-..."
-```
-
-### 4. Write a Scenario
-
-Create a YAML file in `scenarios/`:
-
-```yaml
-id: "SC-001"
-name: "User login flow"
-description: "Test login with valid credentials"
-tags: ["login", "smoke"]
-
-steps:
-  - step: 1
-    action: navigate
-    value: "{{url}}/login"
-    description: "Navigate to login page"
-
-  - step: 2
-    action: find_and_click
-    target:
-      image: "assets/buttons/login_button.png"
-      text: "Login"
-    description: "Click login button"
-    humanize: true
-    screenshot_after: true
-
-  - step: 3
-    action: assert
-    assert_type: url_contains
-    value: "/dashboard"
-    description: "Verify redirect to dashboard"
-    timeout_ms: 10000
-
-expected_result:
-  - type: text_visible
-    value: "Welcome"
-  - type: url_contains
-    value: "/dashboard"
-```
-
-### 5. Validate Scenario
-
-```bash
-aat validate scenarios/SC-001_login.yaml
-```
-
-### 6. Run a Test
-
-```bash
-aat run scenarios/SC-001_login.yaml
-```
-
-### 7. Run DevQA Loop
-
-```bash
-aat loop scenarios/SC-001_login.yaml --max-iterations 5
-```
-
-When a test fails, AI analyzes the failure, fixes the code, and re-runs. Use `--max-iterations` to limit loop count.
-
-### Engine Selection
-
-AAT provides two engine types:
-
-| Engine | Config | Description |
-|--------|--------|-------------|
-| **WebEngine** | `engine.type: web` | Playwright-only. Mouse/keyboard/screenshots inside the browser viewport. Default. |
-| **DesktopEngine** | `engine.type: desktop` | PyAutoGUI for OS-level mouse/keyboard/screenshots + Playwright for browser navigation. Captures the full screen, not just the browser. |
-
-```yaml
-# .aat/config.yaml
-engine:
-  type: desktop   # or "web" (default)
-  browser: chromium
-  headless: false  # DesktopEngine always uses headless=false
+curl -X POST https://awt.dev/api/v1/tests?wait=true \
+  -H "X-API-Key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"target_url": "https://your-staging.com", "mode": "auto"}'
 ```
 
 ---
 
-## CLI Commands
+## How It Works
 
-| Command | Description |
-|---------|-------------|
-| `aat init` | Initialize project (`.aat/` directory, default config) |
-| `aat config show` | Display current configuration |
-| `aat config set <key> <value>` | Update a config value |
-| `aat validate <scenario>` | Validate scenario YAML syntax and structure |
-| `aat run <scenario>` | Run a single test scenario |
-| `aat loop <scenario>` | Run DevQA loop (fail -> AI fix -> retest) |
-| `aat learn add <data>` | Add match data to learning DB |
-| `aat analyze <document>` | Analyze a document with AI |
-| `aat generate <spec>` | Auto-generate scenarios with AI |
+```
+1. Enter your target URL
+       ↓
+2. AI analyzes the page and generates E2E test scenarios
+       ↓
+3. Review and edit scenarios (or skip with Quick Test)
+       ↓
+4. Watch AI execute tests with live screenshots
+       ↓
+5. Get detailed results with pass/fail per step
+```
+
+If a test fails, the **DevQA Loop** kicks in: AI reads the failure, suggests or applies a fix, and re-runs — automatically.
 
 ---
 
-## Configuration
+## Cloud vs Local
 
-After `aat init`, a `.aat/config.yaml` file is created. Settings can also be overridden via environment variables.
+|  | Cloud | Local |
+|---|-------|-------|
+| **Install** | Not required | `pip install aat-devqa` |
+| **Run** | Browser | `aat serve` |
+| **Observe** | Live screenshot streaming | Real browser + mouse movement |
+| **Best for** | CI/CD, teams, quick trial | Debugging, scenario development |
 
-| Config Key | Env Variable | Default | Description |
-|------------|-------------|---------|-------------|
-| `ai.provider` | `AAT_AI_PROVIDER` | `claude` | AI adapter: `claude`, `openai`, or `ollama` |
-| `ai.api_key` | `AAT_AI_API_KEY` | -- | API key (Claude/OpenAI) or Ollama URL |
-| `ai.model` | `AAT_AI_MODEL` | `claude-sonnet-4-20250514` | Model to use (e.g. `gpt-4o`, `codellama:7b`) |
-| `engine.type` | `AAT_ENGINE_TYPE` | `web` | Engine type: `web` (Playwright) or `desktop` (PyAutoGUI + Playwright) |
-| `engine.headless` | `AAT_ENGINE_HEADLESS` | `false` | Headless mode |
-| `matching.confidence_threshold` | `AAT_MATCHING_CONFIDENCE` | `0.85` | Minimum match confidence (0.0-1.0) |
+---
+
+## Supported AI Providers
+
+| Provider | Models | Setup |
+|----------|--------|-------|
+| **Ollama** | codellama, llama3 | `ollama serve` (free, local) |
+| **OpenAI** | gpt-4o, gpt-4o-mini | `OPENAI_API_KEY=sk-...` |
+| **Anthropic** | claude-sonnet | `ANTHROPIC_API_KEY=sk-ant-...` |
+
+---
+
+## Development
+
+### Prerequisites
+
+- Python 3.11+
+- [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) (`brew install tesseract` / `apt install tesseract-ocr`)
+- Git
+
+### Setup
 
 ```bash
-# Set API key via environment variable
-export AAT_AI_API_KEY="sk-ant-..."
+git clone https://github.com/ksgisang/AI-Watch-Tester.git
+cd AI-Watch-Tester
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+playwright install chromium
+pytest
+```
 
-# Update config via CLI
-aat config set matching.confidence_threshold 0.85
+Or use the Makefile shortcut:
+
+```bash
+make dev    # install + playwright + pre-commit
+make test   # run all tests
+make lint   # ruff check
 ```
 
 ---
 
-## Project Structure
+## Contributing
 
-```
-AI-Watch-Tester/
-├── pyproject.toml
-├── Makefile
-├── README.md                        # English
-├── README.ko.md                     # Korean
-├── CONTRIBUTING.md
-├── .pre-commit-config.yaml
-├── .gitignore
-│
-├── src/aat/
-│   ├── __init__.py                  # __version__
-│   ├── cli/                         # CLI (Typer)
-│   │   ├── main.py                  # Entry point
-│   │   └── commands/                # Command modules
-│   │
-│   ├── core/                        # Core logic
-│   │   ├── models.py                # Pydantic models, Enums
-│   │   ├── config.py                # pydantic-settings config
-│   │   ├── exceptions.py            # Exception hierarchy
-│   │   ├── loop.py                  # DevQA Loop orchestrator
-│   │   └── scenario_loader.py       # YAML -> Scenario
-│   │
-│   ├── engine/                      # Test engine (plugin)
-│   │   ├── base.py                  # BaseEngine ABC
-│   │   ├── web.py                   # WebEngine (Playwright)
-│   │   ├── desktop.py               # DesktopEngine (PyAutoGUI + Playwright)
-│   │   ├── executor.py              # StepExecutor
-│   │   ├── humanizer.py             # Humanized actions
-│   │   ├── waiter.py                # Polling + stability detection
-│   │   └── comparator.py            # Expected result evaluation
-│   │
-│   ├── matchers/                    # Image matching (plugin)
-│   │   ├── base.py                  # BaseMatcher ABC
-│   │   ├── template.py              # TemplateMatcher (cv2)
-│   │   ├── ocr.py                   # OCRMatcher (pytesseract)
-│   │   ├── feature.py               # FeatureMatcher (ORB/SIFT)
-│   │   └── hybrid.py                # HybridMatcher (chain)
-│   │
-│   ├── adapters/                    # AI Adapter (plugin)
-│   │   ├── base.py                  # AIAdapter ABC
-│   │   ├── claude.py                # ClaudeAdapter
-│   │   ├── openai_adapter.py        # OpenAIAdapter
-│   │   └── ollama.py                # OllamaAdapter
-│   │
-│   ├── parsers/                     # Document parser (plugin)
-│   │   ├── base.py                  # BaseParser ABC
-│   │   └── markdown_parser.py       # MarkdownParser
-│   │
-│   ├── reporters/                   # Report generator (plugin)
-│   │   ├── base.py                  # BaseReporter ABC
-│   │   └── markdown.py              # MarkdownReporter
-│   │
-│   └── learning/                    # Learning DB
-│       ├── store.py                 # LearnedStore (SQLite)
-│       └── matcher.py               # LearnedMatcher
-│
-├── tests/
-│   ├── conftest.py                  # Shared fixtures
-│   ├── test_engine/
-│   ├── test_matchers/
-│   ├── test_adapters/
-│   ├── test_learning/
-│   └── integration/
-│
-└── scenarios/
-    └── examples/
-        └── SC-001_login.yaml
-```
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on:
 
----
-
-## Dependencies
-
-### Runtime
-
-| Package | Purpose |
-|---------|---------|
-| `typer[all] >=0.9` | CLI framework |
-| `pydantic >=2.5` / `pydantic-settings >=2.1` | Data models, config management |
-| `pyyaml >=6.0` | YAML scenario parsing |
-| `playwright >=1.40` | Web browser automation engine |
-| `pyautogui >=0.9.54` | OS-level mouse/keyboard control (DesktopEngine) |
-| `opencv-python-headless >=4.8` | Template matching, feature matching |
-| `numpy >=1.24` | Image array operations |
-| `pillow >=10.0` | Image loading/conversion |
-| `pytesseract >=0.3.10` | OCR (text recognition) |
-| `anthropic >=0.40` | Claude API client |
-| `openai >=1.0` | OpenAI GPT API client |
-| `httpx >=0.27` | HTTP client (Ollama) |
-| `jinja2 >=3.1` | Report template rendering |
-| `rich >=13.0` | Terminal output formatting |
-
-### Development
-
-| Package | Purpose |
-|---------|---------|
-| `ruff >=0.4` | Linter + formatter |
-| `mypy >=1.8` | Static type checking (strict mode) |
-| `pytest >=8.0` | Test framework |
-| `pytest-asyncio >=0.23` | Async test support |
-| `pytest-cov >=4.0` | Coverage measurement |
-| `pytest-mock >=3.12` | Mock utilities |
-| `pre-commit >=3.6` | Git hook automation |
-| `types-PyYAML >=6.0` | PyYAML type stubs |
+- Setting up the dev environment
+- Code style (ruff, mypy strict)
+- Writing tests
+- Submitting pull requests
 
 ---
 
 ## License
 
-This project is licensed under [AGPL-3.0-only](https://www.gnu.org/licenses/agpl-3.0.html).
+This project is licensed under the [MIT License](LICENSE).
+
+---
+
+## Links
+
+- [CI/CD Integration Guide](cloud/docs/CI_CD_GUIDE.md)
+- [Backup & Recovery](cloud/BACKUP_RECOVERY.md)
+- [Cloud Backend Docs](cloud/README.md)
+- Documentation (coming soon)
+- Cloud Version — [awt.dev](https://awt.dev) (coming soon)
