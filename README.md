@@ -152,6 +152,7 @@ This project is licensed under the [MIT License](LICENSE).
 - [Quick Start Guide](docs/QUICK_START.md) — Install, configure, and run your first test
 - [API Reference](docs/API_REFERENCE.md) — Full REST API and WebSocket documentation
 - [FAQ](docs/FAQ.md) — Common questions and answers
+- [Comparison](docs/COMPARISON.md) — AWT vs Playwright, Cypress, Testim, Katalon, Mabl
 - [CI/CD Integration Guide](cloud/docs/CI_CD_GUIDE.md) — Pipeline setup with GitHub Actions
 - [Backup & Recovery](cloud/BACKUP_RECOVERY.md) — Database and file backup
 - [Cloud Backend](cloud/README.md) — Self-hosting the cloud backend
