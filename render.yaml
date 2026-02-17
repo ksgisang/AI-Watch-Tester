@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: awt-api
+    runtime: docker
+    dockerfilePath: cloud/Dockerfile
+    dockerContext: .
+    envVars:
+      - key: AWT_DATABASE_URL
+        sync: false
+      - key: AWT_SUPABASE_URL
+        sync: false
+      - key: AWT_SUPABASE_ANON_KEY
+        sync: false
+      - key: AWT_SUPABASE_JWT_SECRET
+        sync: false
+      - key: AWT_AI_PROVIDER
+        value: openai
+      - key: AWT_AI_API_KEY
+        sync: false
+      - key: AWT_CORS_ORIGINS
+        sync: false
+      - key: AWT_PLAYWRIGHT_HEADLESS
+        value: "true"
+      - key: AWT_MAX_CONCURRENT
+        value: "1"
+      - key: AWT_SCREENSHOT_DIR
+        value: screenshots
+      - key: AWT_UPLOAD_DIR
+        value: uploads
+    healthCheckPath: /health

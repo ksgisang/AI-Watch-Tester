@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     # Daily limit (Pro tier, -1 = unlimited)
     daily_limit_pro: int = 20
 
+    # CORS — comma-separated origins, or "*" for all (dev default)
+    cors_origins: str = "*"
+
     # Sentry (optional — set DSN to enable)
     sentry_dsn: str = ""
 
