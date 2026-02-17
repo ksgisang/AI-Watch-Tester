@@ -1,11 +1,30 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "AWT - AI Watch Tester",
+  description:
+    "AI-powered E2E testing tool. Just enter a URL — AI generates test scenarios, executes them with Playwright, and reports results.",
+  applicationCategory: "DeveloperApplication",
+  operatingSystem: "Web, macOS, Linux, Windows",
+  offers: {
+    "@type": "Offer",
+    price: "0",
+    priceCurrency: "USD",
+  },
+};
+
 export default async function LandingPage() {
   const t = await getTranslations("landing");
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-16">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       {/* Hero */}
       <section className="mb-16 text-center">
         <h1 className="mb-4 text-4xl font-bold tracking-tight text-gray-900">

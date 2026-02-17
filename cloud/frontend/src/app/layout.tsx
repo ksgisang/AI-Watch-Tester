@@ -17,8 +17,42 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AWT Cloud — AI Web Tester",
-  description: "Just enter a URL and AI tests it for you",
+  title: {
+    default: "AWT — AI-Powered E2E Testing",
+    template: "%s | AWT",
+  },
+  description:
+    "Just enter a URL. AI generates test scenarios, executes them with Playwright, and reports results. No code required.",
+  keywords: [
+    "AI testing",
+    "E2E testing",
+    "automated testing",
+    "web testing",
+    "Playwright",
+    "DevQA",
+    "test automation",
+    "AI QA",
+  ],
+  metadataBase: new URL("https://awt.dev"),
+  openGraph: {
+    type: "website",
+    siteName: "AWT",
+    title: "AWT — AI-Powered E2E Testing",
+    description:
+      "Just enter a URL. AI generates test scenarios, executes them with Playwright, and reports results.",
+    images: [{ url: "/og-image.png", width: 1200, height: 630 }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "AWT — AI-Powered E2E Testing",
+    description:
+      "Just enter a URL. AI generates test scenarios, executes them with Playwright, and reports results.",
+    images: ["/og-image.png"],
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
 };
 
 export default async function RootLayout({

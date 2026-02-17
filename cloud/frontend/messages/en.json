@@ -3,8 +3,14 @@
     "loading": "Loading..."
   },
   "metadata": {
-    "title": "AWT Cloud — AI Web Tester",
-    "description": "Just enter a URL and AI tests it for you"
+    "title": "AWT — AI-Powered E2E Testing",
+    "description": "Just enter a URL. AI generates test scenarios, executes them with Playwright, and reports results. No code required.",
+    "loginTitle": "Sign In",
+    "signupTitle": "Sign Up",
+    "dashboardTitle": "Dashboard",
+    "testsTitle": "Test Results",
+    "statusTitle": "System Status",
+    "settingsTitle": "Settings"
   },
   "header": {
     "brand": "AWT Cloud",

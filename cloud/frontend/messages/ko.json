@@ -4,7 +4,13 @@
   },
   "metadata": {
     "title": "",
-    "description": ""
+    "description": "",
+    "loginTitle": "",
+    "signupTitle": "",
+    "dashboardTitle": "",
+    "testsTitle": "",
+    "statusTitle": "",
+    "settingsTitle": ""
   },
   "header": {
     "brand": "",

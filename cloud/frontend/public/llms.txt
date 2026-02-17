@@ -1,0 +1,25 @@
+# AWT — AI Watch Tester
+
+> AI-powered E2E testing tool. Just enter a URL — AI generates test scenarios, executes them with Playwright, and reports results. No code required.
+
+## Key Features
+- AI auto-generates E2E test scenarios from any URL
+- Real browser testing with live screenshot streaming
+- Self-healing DevQA Loop — AI fixes broken tests automatically
+- Cloud mode (no install) + Local mode (full browser visibility)
+- CI/CD integration with one-line curl command
+- Document upload for spec-based scenario generation
+
+## Links
+- GitHub: https://github.com/ksgisang/AI-Watch-Tester
+- Documentation: https://github.com/ksgisang/AI-Watch-Tester/tree/main/docs
+- Quick Start: https://github.com/ksgisang/AI-Watch-Tester/blob/main/docs/QUICK_START.md
+- API Reference: https://github.com/ksgisang/AI-Watch-Tester/blob/main/docs/API_REFERENCE.md
+- Comparison vs Playwright/Cypress: https://github.com/ksgisang/AI-Watch-Tester/blob/main/docs/COMPARISON.md
+
+## Pricing
+- Free: $0/month, 10 tests/month (cloud), unlimited (local)
+- Pro: $29/month, 100 tests/month
+
+## Tech Stack
+- Python, FastAPI, Playwright, Next.js, Supabase, Ollama/OpenAI/Claude
