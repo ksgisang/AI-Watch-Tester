@@ -147,10 +147,11 @@ This project is licensed under the [MIT License](LICENSE).
 
 ---
 
-## Links
+## Documentation
 
-- [CI/CD Integration Guide](cloud/docs/CI_CD_GUIDE.md)
-- [Backup & Recovery](cloud/BACKUP_RECOVERY.md)
-- [Cloud Backend Docs](cloud/README.md)
-- Documentation (coming soon)
-- Cloud Version — [awt.dev](https://awt.dev) (coming soon)
+- [Quick Start Guide](docs/QUICK_START.md) — Install, configure, and run your first test
+- [API Reference](docs/API_REFERENCE.md) — Full REST API and WebSocket documentation
+- [FAQ](docs/FAQ.md) — Common questions and answers
+- [CI/CD Integration Guide](cloud/docs/CI_CD_GUIDE.md) — Pipeline setup with GitHub Actions
+- [Backup & Recovery](cloud/BACKUP_RECOVERY.md) — Database and file backup
+- [Cloud Backend](cloud/README.md) — Self-hosting the cloud backend
