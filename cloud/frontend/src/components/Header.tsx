@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useAuth } from "./AuthProvider";
+import LanguageToggle from "./LanguageToggle";
 
 export default function Header() {
   const { user, signOut } = useAuth();
@@ -73,6 +74,7 @@ export default function Header() {
               </Link>
             </>
           )}
+          <LanguageToggle />
         </nav>
       </div>
     </header>
