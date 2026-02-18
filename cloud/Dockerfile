@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir playwright && \
 
 # Install AAT core from project root
 COPY pyproject.toml ./pyproject.toml
+COPY README.md ./README.md
 COPY src/ ./src/
 RUN pip install --no-cache-dir -e .
 
