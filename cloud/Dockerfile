@@ -21,6 +21,7 @@ COPY pyproject.toml ./pyproject.toml
 COPY README.md ./README.md
 COPY src/ ./src/
 RUN pip install --no-cache-dir -e .
+RUN playwright install chromium
 
 # Copy cloud application
 COPY cloud/app/ ./app/
