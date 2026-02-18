@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -9,6 +10,7 @@ class Settings(BaseSettings):
     """Cloud backend settings.
 
     All values can be overridden via environment variables (prefix: AWT_).
+    AI fields also accept AWT_SERVICE_AI_* aliases for Render compatibility.
     """
 
     # App
@@ -34,9 +36,19 @@ class Settings(BaseSettings):
     worker_poll_interval: float = 2.0  # seconds
 
     # AI provider for scenario generation
-    ai_provider: str = "ollama"  # claude, openai, ollama
-    ai_api_key: str = ""
-    ai_model: str = ""  # auto-select based on provider if empty
+    # Accepts AWT_AI_PROVIDER or AWT_SERVICE_AI_PROVIDER (Render compatibility)
+    ai_provider: str = Field(
+        default="ollama",
+        validation_alias=AliasChoices("AWT_AI_PROVIDER", "AWT_SERVICE_AI_PROVIDER"),
+    )
+    ai_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("AWT_AI_API_KEY", "AWT_SERVICE_AI_KEY"),
+    )
+    ai_model: str = Field(
+        default="",
+        validation_alias=AliasChoices("AWT_AI_MODEL", "AWT_SERVICE_AI_MODEL"),
+    )
 
     # Daily limit (Pro tier, -1 = unlimited)
     daily_limit_pro: int = 20
