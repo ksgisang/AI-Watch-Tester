@@ -37,7 +37,7 @@ _DEFAULT_MODELS: dict[str, str] = {
 _SCENARIO_PROMPT = """\
 You are an E2E test scenario generator.
 
-Analyze the following web page and generate user-perspective E2E test scenarios in YAML format.
+Analyze the following web page and generate user-perspective E2E test scenarios.
 
 ## Target
 - URL: {url}
@@ -52,14 +52,14 @@ Analyze the following web page and generate user-perspective E2E test scenarios 
 4. Use text-based targets (not image) for reliability
 5. Keep steps concise and actionable
 
-Return ONLY valid YAML scenario definitions.\
+Return the scenarios as a JSON array following the format specified in the system instructions.\
 """
 
 _SCENARIO_PROMPT_WITH_DOCS = """\
 You are an E2E test scenario generator.
 
 Analyze the following web page AND the uploaded specification documents to generate \
-user-perspective E2E test scenarios in YAML format.
+user-perspective E2E test scenarios.
 
 ## Target
 - URL: {url}
@@ -78,7 +78,7 @@ user-perspective E2E test scenarios in YAML format.
 5. Use text-based targets (not image) for reliability
 6. Keep steps concise and actionable
 
-Return ONLY valid YAML scenario definitions.\
+Return the scenarios as a JSON array following the format specified in the system instructions.\
 """
 
 

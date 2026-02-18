@@ -365,7 +365,7 @@ async def test_generate_scenarios_with_images(adapter: OpenAIAdapter) -> None:
 @pytest.mark.asyncio
 async def test_generate_scenarios_not_array(adapter: OpenAIAdapter) -> None:
     """generate_scenarios raises AdapterError if response is not a JSON array."""
-    mock_data = {"scenarios": []}
+    mock_data = {"result": "not an array"}  # no "scenarios" key to unwrap
     adapter._client.chat.completions.create = AsyncMock(
         return_value=_mock_response(mock_data),
     )

@@ -85,7 +85,9 @@ CRITICAL RULES:
 - Use {{url}} for base URL in navigate actions
 - Do NOT include "variables" with hardcoded URLs
 
-Return ONLY a valid JSON array, no markdown fences."""
+Return a JSON object with a "scenarios" key containing the array.
+Example: {"scenarios": [{"id": "SC-001", ...}, {"id": "SC-002", ...}]}
+Do NOT return a bare array. Do NOT use markdown fences."""
 
 _SYSTEM_ANALYZE_DOCUMENT = """\
 You are an expert QA engineer. Analyze the following document and extract:
@@ -231,6 +233,10 @@ class OpenAIAdapter(AIAdapter):
 
         data = await self._call_api(_SYSTEM_GENERATE_SCENARIOS, user_content)
 
+        # Unwrap {"scenarios": [...]} wrapper (json_object mode returns objects)
+        if isinstance(data, dict) and "scenarios" in data:
+            data = data["scenarios"]
+
         if not isinstance(data, list):
             msg = "Expected JSON array for scenarios"
             raise AdapterError(msg)
@@ -298,6 +304,7 @@ class OpenAIAdapter(AIAdapter):
                 model=self._config.model,
                 max_tokens=self._config.max_tokens,
                 temperature=self._config.temperature,
+                response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},  # type: ignore[list-item, misc]
@@ -323,6 +330,16 @@ class OpenAIAdapter(AIAdapter):
 
         try:
             return json.loads(cleaned)
-        except json.JSONDecodeError as exc:
-            msg = f"Failed to parse JSON from OpenAI response: {exc}\nRaw: {raw_text[:500]}"
-            raise AdapterError(msg) from exc
+        except json.JSONDecodeError as json_err:
+            # Fallback: try YAML parsing (some models return YAML despite JSON instructions)
+            try:
+                import yaml
+
+                result = yaml.safe_load(cleaned)
+                if isinstance(result, (dict, list)):
+                    logger.warning("OpenAI returned YAML instead of JSON, parsed via YAML fallback")
+                    return result
+            except Exception:
+                pass
+            msg = f"Failed to parse JSON from OpenAI response: {json_err}\nRaw: {raw_text[:500]}"
+            raise AdapterError(msg) from json_err

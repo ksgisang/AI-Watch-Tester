@@ -15,7 +15,7 @@ def test_scenario_prompt_contains_instructions() -> None:
     prompt = _SCENARIO_PROMPT.format(url="https://example.com", page_text="Hello")
 
     assert "E2E test scenario" in prompt
-    assert "YAML" in prompt
+    assert "JSON" in prompt
     assert "https://example.com" in prompt
     assert "Hello" in prompt
     # Should mention user-perspective flows
