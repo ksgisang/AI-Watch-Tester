@@ -11,17 +11,16 @@ WORKDIR /app
 COPY cloud/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright Chromium only (saves ~400MB vs all browsers)
-RUN pip install --no-cache-dir playwright && \
-    playwright install chromium && \
-    playwright install-deps chromium
-
 # Install AAT core from project root
 COPY pyproject.toml ./pyproject.toml
 COPY README.md ./README.md
 COPY src/ ./src/
 RUN pip install --no-cache-dir -e .
-RUN playwright install chromium
+
+# Install Playwright Chromium in shared path (accessible by appuser)
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN playwright install --with-deps chromium
+RUN chmod -R 777 /ms-playwright
 
 # Copy cloud application
 COPY cloud/app/ ./app/
