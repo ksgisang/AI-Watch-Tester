@@ -164,13 +164,33 @@
     "waitingEvents": "Waiting for events..."
   },
   "scenarioEditor": {
-    "title": "Scenario YAML",
+    "title": "Test Scenarios",
     "review": "Review",
+    "editYaml": "Edit YAML",
+    "visualView": "Visual View",
     "saving": "Saving...",
     "saved": "Saved",
     "save": "Save",
     "starting": "Starting...",
     "runTest": "Run Test"
+  },
+  "scenarioViewer": {
+    "summary": "AI generated {count} test scenario(s)",
+    "stepsCount": "{count} steps",
+    "expectedResults": "Expected Results",
+    "showCode": "View Code",
+    "hideCode": "Hide Code",
+    "actionNavigate": "Navigate to {url}",
+    "actionClick": "Click ''{target}''",
+    "actionType": "Type ''{value}'' in ''{target}''",
+    "actionTypeText": "Type ''{value}''",
+    "actionPressKey": "Press {key}",
+    "actionAssertVisible": "Verify ''{text}'' is visible on screen",
+    "actionAssertUrl": "Verify URL contains ''{text}''",
+    "actionAssert": "Verify: {description}",
+    "actionWait": "Wait {seconds}s",
+    "actionScreenshot": "Capture screenshot",
+    "actionDefault": "{description}"
   },
   "status": {
     "title": "System Status",

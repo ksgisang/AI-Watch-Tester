@@ -164,13 +164,33 @@
     "waitingEvents": ""
   },
   "scenarioEditor": {
-    "title": "",
-    "review": "",
-    "saving": "",
-    "saved": "",
-    "save": "",
-    "starting": "",
-    "runTest": ""
+    "title": "\ud14c\uc2a4\ud2b8 \uc2dc\ub098\ub9ac\uc624",
+    "review": "\uac80\ud1a0",
+    "editYaml": "YAML \ud3b8\uc9d1",
+    "visualView": "\uc2dc\uac01\uc801 \ubcf4\uae30",
+    "saving": "\uc800\uc7a5 \uc911...",
+    "saved": "\uc800\uc7a5\ub428",
+    "save": "\uc800\uc7a5",
+    "starting": "\uc2dc\uc791 \uc911...",
+    "runTest": "\ud14c\uc2a4\ud2b8 \uc2e4\ud589"
+  },
+  "scenarioViewer": {
+    "summary": "AI\uac00 {count}\uac1c\uc758 \ud14c\uc2a4\ud2b8 \uc2dc\ub098\ub9ac\uc624\ub97c \uc0dd\uc131\ud588\uc2b5\ub2c8\ub2e4",
+    "stepsCount": "{count}\uac1c \uc2a4\ud15d",
+    "expectedResults": "\uc608\uc0c1 \uacb0\uacfc",
+    "showCode": "\ucf54\ub4dc \ubcf4\uae30",
+    "hideCode": "\ucf54\ub4dc \ub2eb\uae30",
+    "actionNavigate": "{url} \ud398\uc774\uc9c0\ub85c \uc774\ub3d9",
+    "actionClick": "''{target}'' \ud074\ub9ad",
+    "actionType": "''{target}''\uc5d0 ''{value}'' \uc785\ub825",
+    "actionTypeText": "''{value}'' \uc785\ub825",
+    "actionPressKey": "{key} \ud0a4 \ub204\ub974\uae30",
+    "actionAssertVisible": "''{text}''\uac00 \ud654\uba74\uc5d0 \ubcf4\uc774\ub294\uc9c0 \ud655\uc778",
+    "actionAssertUrl": "URL\uc5d0 ''{text}''\uac00 \ud3ec\ud568\ub418\uc5b4 \uc788\ub294\uc9c0 \ud655\uc778",
+    "actionAssert": "\ud655\uc778: {description}",
+    "actionWait": "{seconds}\ucd08 \ub300\uae30",
+    "actionScreenshot": "\uc2a4\ud06c\ub9b0\uc0f7 \uce90\ucc98",
+    "actionDefault": "{description}"
   },
   "status": {
     "title": "",
