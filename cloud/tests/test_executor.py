@@ -59,7 +59,7 @@ def test_screenshot_dir_idempotent(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
 
 def test_screenshot_dir_config_default() -> None:
-    """Default screenshot_dir is cloud/screenshots."""
+    """Default screenshot_dir is screenshots."""
     from app.config import settings
 
-    assert settings.screenshot_dir == "cloud/screenshots"
+    assert settings.screenshot_dir == "screenshots"

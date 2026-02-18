@@ -19,8 +19,8 @@ TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 BACKUP_DIR="${BACKUP_ROOT}/${TIMESTAMP}"
 
 DB_FILE="${CLOUD_DIR}/awt_cloud.db"
-SCREENSHOT_DIR="${CLOUD_DIR}/cloud/screenshots"
-UPLOAD_DIR="${CLOUD_DIR}/cloud/uploads"
+SCREENSHOT_DIR="${CLOUD_DIR}/screenshots"
+UPLOAD_DIR="${CLOUD_DIR}/uploads"
 
 echo "=== AWT Cloud Backup ==="
 echo "Timestamp: ${TIMESTAMP}"

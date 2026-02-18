@@ -99,12 +99,11 @@ app.add_middleware(
 )
 
 # -- Static: screenshots --
-import os
 from pathlib import Path
 
 _ss_dir = Path(settings.screenshot_dir)
-if _ss_dir.exists():
-    app.mount("/screenshots", StaticFiles(directory=str(_ss_dir)), name="screenshots")
+_ss_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/screenshots", StaticFiles(directory=str(_ss_dir)), name="screenshots")
 
 # -- Routers --
 app.include_router(tests.router)

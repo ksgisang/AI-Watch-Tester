@@ -7,8 +7,8 @@ AWT Cloud stores data in three locations:
 | Data | Location | Description |
 |------|----------|-------------|
 | Database | `awt_cloud.db` | Test records, user data, scenarios |
-| Screenshots | `cloud/screenshots/` | Before/after screenshots per test |
-| Uploads | `cloud/uploads/` | Uploaded spec documents |
+| Screenshots | `screenshots/` | Before/after screenshots per test |
+| Uploads | `uploads/` | Uploaded spec documents |
 
 ## Quick Start
 

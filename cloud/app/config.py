@@ -66,10 +66,10 @@ class Settings(BaseSettings):
     playwright_headless: bool = True
 
     # Screenshots (file-based, not base64 in DB)
-    screenshot_dir: str = "cloud/screenshots"
+    screenshot_dir: str = "screenshots"
 
     # Uploads (document files for AI context)
-    upload_dir: str = "cloud/uploads"
+    upload_dir: str = "uploads"
     upload_max_bytes: int = 10 * 1024 * 1024  # 10MB
 
     model_config = {"env_prefix": "AWT_", "env_file": ".env", "extra": "ignore"}

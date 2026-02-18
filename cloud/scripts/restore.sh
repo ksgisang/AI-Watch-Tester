@@ -34,8 +34,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CLOUD_DIR="$(dirname "$SCRIPT_DIR")"
 
 DB_FILE="${CLOUD_DIR}/awt_cloud.db"
-SCREENSHOT_DIR="${CLOUD_DIR}/cloud/screenshots"
-UPLOAD_DIR="${CLOUD_DIR}/cloud/uploads"
+SCREENSHOT_DIR="${CLOUD_DIR}/screenshots"
+UPLOAD_DIR="${CLOUD_DIR}/uploads"
 
 if [ ! -d "${BACKUP_DIR}" ]; then
     echo "Error: Backup directory not found: ${BACKUP_DIR}"

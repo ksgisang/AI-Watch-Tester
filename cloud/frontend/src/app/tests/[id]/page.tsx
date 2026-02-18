@@ -44,7 +44,8 @@ const STATUS_BADGE: Record<string, string> = {
 
 function screenshotUrl(path: string | undefined | null): string | null {
   if (!path) return null;
-  const relative = path.replace(/^cloud\/screenshots\//, "");
+  // Handle both "cloud/screenshots/..." and "screenshots/..." formats
+  const relative = path.replace(/^(cloud\/)?screenshots\//, "");
   return `${API_URL}/screenshots/${relative}`;
 }
 

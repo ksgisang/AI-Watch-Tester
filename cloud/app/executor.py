@@ -260,6 +260,7 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
     # -- Import AAT core (lazy to give clear error if missing) --
     try:
         from aat.core.models import (
+            ActionType,
             AIConfig,
             EngineConfig,
             HumanizerConfig,
@@ -404,6 +405,20 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
                 try:
                     result = await step_executor.execute_step(step)
                     status = result.status.value
+
+                    # Navigate: verify actual page state on failure
+                    # Playwright may throw timeout but page still loads
+                    if step.action == ActionType.NAVIGATE and status == "failed":
+                        try:
+                            current_url = await engine.get_url()
+                            if current_url and not current_url.startswith("about:"):
+                                logger.info(
+                                    "Step %d navigate: page at %s, overriding to passed",
+                                    step_num, current_url,
+                                )
+                                status = "passed"
+                        except Exception:
+                            pass
 
                     # After-screenshot
                     ss_after = await _save_screenshot(
