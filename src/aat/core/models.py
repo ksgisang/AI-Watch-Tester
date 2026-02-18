@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ============================================================
@@ -277,6 +277,32 @@ class Scenario(BaseModel):
     steps: list[StepConfig] = Field(..., min_length=1)
     expected_result: list[ExpectedResult] = Field(default_factory=list)
     variables: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("expected_result", mode="before")
+    @classmethod
+    def coerce_expected_result(cls, v: object) -> list[dict[str, object]]:
+        """Convert string items to ExpectedResult dicts.
+
+        AI sometimes returns plain strings like "User sees welcome message"
+        instead of proper ExpectedResult objects.
+        """
+        if v is None:
+            return []
+        if not isinstance(v, list):
+            return []
+        result: list[dict[str, object]] = []
+        for item in v:
+            if isinstance(item, str):
+                result.append({
+                    "type": "text_visible",
+                    "value": item,
+                    "tolerance": 0.0,
+                })
+            elif isinstance(item, dict):
+                result.append(item)
+            else:
+                result.append(item)
+        return result
 
 
 # ============================================================

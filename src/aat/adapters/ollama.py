@@ -54,6 +54,11 @@ Each scenario must follow this EXACT format:
 {"id": "SC-001", "name": "Short name", "description": "What this tests", \
 "tags": ["tag1"], "steps": [...], "expected_result": []}
 
+"expected_result" must be an array of objects (NOT strings), each with:
+  {"type": "text_visible", "value": "expected text"}
+Valid types: "text_visible", "text_equals", "url_contains".
+Leave as empty array [] if no specific assertion is needed.
+
 Each step MUST have "step" (integer from 1) and "description" (non-empty).
 
 VALID ACTIONS (use ONLY these):
