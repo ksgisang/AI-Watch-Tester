@@ -302,7 +302,7 @@ export default async function LandingPage() {
               { role: "useCase1Role", quote: "useCase1Quote", icon: "\ud83d\ude80" },
               { role: "useCase2Role", quote: "useCase2Quote", icon: "\ud83d\udcbb" },
               { role: "useCase3Role", quote: "useCase3Quote", icon: "\ud83d\udccb" },
-              { role: "useCase4Role", quote: "useCase4Quote", icon: "\ud83c\udfe2" },
+              { role: "useCase4Role", quote: "useCase4Quote", icon: "\ud83d\udd0d" },
             ] as const).map((uc) => (
               <div
                 key={uc.role}

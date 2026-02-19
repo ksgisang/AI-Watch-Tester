@@ -29,7 +29,6 @@
     "heroDesc": "AI QA starting with just a URL — connect GitHub for automatic code fixes",
     "heroCta1": "Get Started Free",
     "heroCta2": "Full Automation with GitHub",
-
     "cloudTitle": "Cloud Mode — Start instantly, no installation",
     "urlOnlyTitle": "URL Only",
     "urlOnlySubtitle": "Just enter a URL",
@@ -40,7 +39,6 @@
     "urlOnlyFeat4": "Basic security checks",
     "urlOnlyFeat5": "Console error collection",
     "urlOnlyFeat6": "\"Fix it like this\" guides",
-
     "githubTitle": "URL + GitHub Integration",
     "githubBadge": "Recommended",
     "githubSubtitle": "Connect GitHub and AI fixes your code",
@@ -49,9 +47,8 @@
     "githubFeat2": "Source code static analysis (security, quality)",
     "githubFeat3": "AI auto-fix PRs on test failure",
     "githubFeat4": "Auto-test on every PR (CI/CD)",
-    "githubFeat5": "Debug loop: fix \u2192 retest \u2192 until green",
+    "githubFeat5": "Debug loop: fix → retest → until green",
     "githubFeat6": "SQL injection, XSS code-level analysis",
-
     "localTitle": "Local Mode — AI QA even offline",
     "localTarget": "For security-sensitive companies, offline environments",
     "localFeat1": "All Cloud features locally",
@@ -60,7 +57,6 @@
     "localFeat4": "Faster execution speed",
     "localFeat5": "One CLI command to run",
     "localCommand": "npx ai-watch-tester",
-
     "pricingTitle": "Which plan is right for you?",
     "mostPopular": "Most Popular",
     "feature": "Feature",
@@ -71,7 +67,6 @@
     "proPrice": "$28.99",
     "teamPrice": "$98.99",
     "perMonth": "/mo",
-
     "featAiScenario": "AI scenario generation",
     "featAutoExplore": "Auto menu exploration",
     "featScreenshot": "Screenshot reports",
@@ -84,7 +79,6 @@
     "featOffline": "Offline use",
     "featNoDataTransfer": "No external data transfer",
     "featMonthlyTests": "Monthly tests",
-
     "val3Pages": "3 pages",
     "valUnlimited": "Unlimited",
     "val5Tests": "5",
@@ -95,35 +89,29 @@
     "val10Concurrent": "10",
     "featConcurrent": "Concurrent tests",
     "featApiKeys": "API keys (CI/CD)",
-
     "pricingCta": "Get Started",
     "pricingCtaPro": "Start Pro",
     "pricingCtaTeam": "Start Team",
-
     "useCasesTitle": "Who uses AWT?",
     "useCase1Role": "Startup CTO",
     "useCase1Quote": "Connected GitHub and now every PR gets auto QA. Bugs get caught before production.",
     "useCase2Role": "Freelance Developer",
-    "useCase2Quote": "Developing solo without a QA team \u2014 AI tests and even creates fix PRs for me.",
+    "useCase2Quote": "Developing solo without a QA team — AI tests and even creates fix PRs for me.",
     "useCase3Role": "PM / Planner",
     "useCase3Quote": "Don't know coding but just entering a URL lets me check our service quality.",
-    "useCase4Role": "Academy Owner",
-    "useCase4Quote": "I can check if my academy website is working properly in just 5 minutes.",
-
-    "githubSetupTitle": "GitHub Integration \u2014 3 minute setup",
+    "useCase4Role": "QA Engineer",
+    "useCase4Quote": "AI handles repetitive regression tests, so I can focus on exploratory testing.",
+    "githubSetupTitle": "GitHub Integration — 3 minute setup",
     "githubStep1Title": "Sign Up",
     "githubStep1Desc": "Login with GitHub",
     "githubStep2Title": "Select Repository",
     "githubStep2Desc": "Choose repo and approve permissions",
     "githubStep3Title": "Done!",
     "githubStep3Desc": "AI analyzes code and creates fix PRs from the next test",
-
-    "footerCta": "Start now \u2014 Free, no installation, first test in 5 minutes",
+    "footerCta": "Start now — Free, no installation, first test in 5 minutes",
     "footerBtn1": "Get Started Free",
     "footerBtn2": "Start Pro Plan",
-
     "localCommandLabel": "One command to start",
-
     "animSubtitle": "Enter your website URL to start testing",
     "animGenerate": "Generate Scenarios",
     "animCard1": "Verify homepage loads",
