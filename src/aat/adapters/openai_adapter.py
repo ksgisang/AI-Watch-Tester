@@ -342,7 +342,9 @@ class OpenAIAdapter(AIAdapter):
 
                 result = yaml.safe_load(cleaned)
                 if isinstance(result, (dict, list)):
-                    logger.warning("OpenAI returned YAML instead of JSON, parsed via YAML fallback")
+                    logger.warning(
+                        "OpenAI returned YAML instead of JSON, parsed via YAML fallback"
+                    )
                     return result
             except Exception:
                 pass
