@@ -62,6 +62,7 @@ class WebEngine(BaseEngine):
                     "width": self._config.viewport_width,
                     "height": self._config.viewport_height,
                 },
+                ignore_https_errors=True,
             )
             self._context.set_default_timeout(self._config.timeout_ms)
             self._page = await self._context.new_page()

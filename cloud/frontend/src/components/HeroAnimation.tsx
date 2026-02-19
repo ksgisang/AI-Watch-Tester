@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useTranslations } from "next-intl";
 
 /* ------------------------------------------------------------------ */
 /* Scene durations (ms)                                                */
@@ -13,6 +14,7 @@ const FULL_URL = "https://mysite.com";
 /* ------------------------------------------------------------------ */
 
 export default function HeroAnimation() {
+  const t = useTranslations("landing");
   const [scene, setScene] = useState(0);
   const [typedUrl, setTypedUrl] = useState("");
   const [progress, setProgress] = useState(0);
@@ -69,7 +71,7 @@ export default function HeroAnimation() {
         return (
           <div className="flex flex-col items-center justify-center h-full gap-4">
             <div className="text-lg font-bold text-blue-400">AWT Cloud</div>
-            <p className="text-xs text-gray-400">Enter your website URL to start testing</p>
+            <p className="text-xs text-gray-400">{t("animSubtitle")}</p>
           </div>
         );
 
@@ -81,7 +83,7 @@ export default function HeroAnimation() {
               {FULL_URL}
             </div>
             <button className="rounded-lg bg-blue-500 px-4 py-2 text-xs font-medium text-white animate-hero-pulse shadow-lg shadow-blue-500/30">
-              Generate Scenarios
+              {t("animGenerate")}
             </button>
           </div>
         );
@@ -91,9 +93,9 @@ export default function HeroAnimation() {
         return (
           <div className="flex flex-col gap-2 justify-center h-full px-2">
             {[
-              { icon: "\ud83c\udf10", text: "Verify homepage loads" },
-              { icon: "\ud83d\udc46", text: "Click login button" },
-              { icon: "\u2705", text: "Check dashboard text" },
+              { icon: "\ud83c\udf10", text: t("animCard1") },
+              { icon: "\ud83d\udc46", text: t("animCard2") },
+              { icon: "\u2705", text: t("animCard3") },
             ].map((card, i) => (
               <div
                 key={i}
@@ -115,7 +117,7 @@ export default function HeroAnimation() {
         return (
           <div className="flex flex-col items-center justify-center h-full gap-4">
             <button className="rounded-lg bg-green-500 px-4 py-2 text-xs font-medium text-white">
-              Run Test
+              {t("animRunTest")}
             </button>
             <div className="w-full max-w-xs">
               <div className="h-2 rounded-full bg-gray-700 overflow-hidden">
@@ -125,7 +127,7 @@ export default function HeroAnimation() {
                 />
               </div>
               <p className="mt-1 text-center text-[10px] text-gray-500">
-                Running tests... {progress}%
+                {t("animRunning")} {progress}%
               </p>
             </div>
           </div>
@@ -137,21 +139,21 @@ export default function HeroAnimation() {
           <div className="flex flex-col gap-2 justify-center h-full px-4">
             <div className="flex items-center gap-2 text-xs">
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-green-900/50 text-green-400 text-[10px]">{"\u2713"}</span>
-              <span className="text-green-400">Homepage load</span>
-              <span className="ml-auto text-green-500 font-medium">PASSED</span>
+              <span className="text-green-400">{t("animHomepage")}</span>
+              <span className="ml-auto text-green-500 font-medium">{t("animPassed")}</span>
             </div>
             <div className="flex items-center gap-2 text-xs">
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-green-900/50 text-green-400 text-[10px]">{"\u2713"}</span>
-              <span className="text-green-400">Dashboard text</span>
-              <span className="ml-auto text-green-500 font-medium">PASSED</span>
+              <span className="text-green-400">{t("animDashboard")}</span>
+              <span className="ml-auto text-green-500 font-medium">{t("animPassed")}</span>
             </div>
             <div className="flex items-center gap-2 text-xs">
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-red-900/50 text-red-400 text-[10px]">{"\u2717"}</span>
-              <span className="text-red-400">Login button click</span>
-              <span className="ml-auto text-red-500 font-medium">FAILED</span>
+              <span className="text-red-400">{t("animLogin")}</span>
+              <span className="ml-auto text-red-500 font-medium">{t("animFailed")}</span>
             </div>
             <div className="mt-2 text-center text-xs text-gray-500">
-              2 passed, 1 failed
+              {t("animResult")}
             </div>
           </div>
         );
@@ -162,12 +164,12 @@ export default function HeroAnimation() {
           <div className="flex flex-col items-center justify-center h-full gap-3 px-4">
             <div className="flex items-center gap-2 text-xs text-yellow-400">
               <span className="inline-block h-3 w-3 rounded-full border-2 border-yellow-400 border-t-transparent animate-spin" />
-              AI Analyzing failure...
+              {t("animAnalyzing")}
             </div>
             <div className="w-full rounded-lg border border-gray-700 bg-gray-800 p-3 animate-hero-fadein">
               <div className="flex items-center gap-2 text-xs">
                 <span className="text-purple-400">{"\ud83d\udd00"}</span>
-                <span className="text-gray-300 font-medium">Fix: login button selector updated</span>
+                <span className="text-gray-300 font-medium">{t("animPrTitle")}</span>
               </div>
               <div className="mt-2 flex items-center gap-1 text-[10px] text-gray-500">
                 <span className="rounded bg-purple-900/50 px-1.5 py-0.5 text-purple-400">PR #42</span>
@@ -175,7 +177,7 @@ export default function HeroAnimation() {
               </div>
             </div>
             <div className="flex items-center gap-1 text-xs text-green-400 animate-hero-fadein-delay">
-              <span>{"\u2705"}</span> Auto-fix PR #42 created
+              <span>{"\u2705"}</span> {t("animPrCreated")}
             </div>
           </div>
         );
@@ -186,14 +188,14 @@ export default function HeroAnimation() {
           <div className="flex flex-col items-center justify-center h-full gap-3">
             <div className="text-2xl animate-hero-bounce">{"\ud83c\udf89"}</div>
             <div className="flex flex-col gap-1">
-              {["Homepage load", "Login button click", "Dashboard text"].map((t, i) => (
+              {[t("animHomepage"), t("animLogin"), t("animDashboard")].map((label, i) => (
                 <div key={i} className="flex items-center gap-2 text-xs text-green-400">
-                  <span>{"\u2705"}</span> {t}
+                  <span>{"\u2705"}</span> {label}
                 </div>
               ))}
             </div>
             <div className="rounded-full bg-green-900/50 px-3 py-1 text-xs font-bold text-green-400 animate-hero-pulse">
-              3/3 ALL PASSED
+              {t("animAllPassed")}
             </div>
           </div>
         );
@@ -201,7 +203,7 @@ export default function HeroAnimation() {
       default:
         return null;
     }
-  }, [scene, typedUrl, progress, visibleCards]);
+  }, [scene, typedUrl, progress, visibleCards, t]);
 
   return (
     <div className="relative mx-auto w-full max-w-lg">

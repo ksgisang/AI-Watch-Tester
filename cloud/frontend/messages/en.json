@@ -115,7 +115,27 @@
 
     "footerCta": "Start now \u2014 Free, no installation, first test in 5 minutes",
     "footerBtn1": "Get Started Free",
-    "footerBtn2": "Pro+GitHub 14-day Free Trial"
+    "footerBtn2": "Pro+GitHub 14-day Free Trial",
+
+    "localCommandLabel": "One command to start",
+
+    "animSubtitle": "Enter your website URL to start testing",
+    "animGenerate": "Generate Scenarios",
+    "animCard1": "Verify homepage loads",
+    "animCard2": "Click login button",
+    "animCard3": "Check dashboard text",
+    "animRunTest": "Run Test",
+    "animRunning": "Running tests...",
+    "animHomepage": "Homepage load",
+    "animDashboard": "Dashboard text",
+    "animLogin": "Login button click",
+    "animPassed": "PASSED",
+    "animFailed": "FAILED",
+    "animResult": "2 passed, 1 failed",
+    "animAnalyzing": "AI Analyzing failure...",
+    "animPrTitle": "Fix: login button selector updated",
+    "animPrCreated": "Auto-fix PR #42 created",
+    "animAllPassed": "3/3 ALL PASSED"
   },
   "login": {
     "title": "Login",

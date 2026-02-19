@@ -253,6 +253,28 @@ class StepConfig(BaseModel):
     assert_type: AssertType | None = Field(default=None)
     expected: list[ExpectedResult] = Field(default_factory=list)
 
+    @field_validator("expected", mode="before")
+    @classmethod
+    def coerce_expected(cls, v: object) -> list[dict[str, object]]:
+        """Convert string items to ExpectedResult dicts in step-level expected."""
+        if v is None:
+            return []
+        if not isinstance(v, list):
+            return []
+        result: list[dict[str, object]] = []
+        for item in v:
+            if isinstance(item, str):
+                result.append({
+                    "type": "text_visible",
+                    "value": item,
+                    "tolerance": 0.0,
+                })
+            elif isinstance(item, dict):
+                result.append(item)
+            else:
+                result.append(item)
+        return result
+
     @model_validator(mode="after")
     def validate_action_requirements(self) -> StepConfig:
         if self.action in FIND_ACTIONS and self.target is None:

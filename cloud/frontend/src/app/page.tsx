@@ -185,7 +185,7 @@ export default async function LandingPage() {
                 )}
               </ul>
               <div className="flex flex-col items-center justify-center rounded-xl bg-gray-900 p-6">
-                <p className="mb-2 text-xs text-gray-400">One command to start</p>
+                <p className="mb-2 text-xs text-gray-400">{t("localCommandLabel")}</p>
                 <code className="text-lg font-bold text-green-400">
                   {t("localCommand")}
                 </code>
