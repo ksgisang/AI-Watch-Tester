@@ -7,7 +7,7 @@ import { useAuth } from "@/components/AuthProvider";
 import TestProgress from "@/components/TestProgress";
 import ScenarioEditor from "@/components/ScenarioEditor";
 import FileUpload from "@/components/FileUpload";
-import { createTest, getTest, uploadDocument, fetchBilling, type TestItem, type BillingInfo } from "@/lib/api";
+import { createTest, getTest, uploadDocument, fetchBilling, convertScenario, updateScenarios, approveTest, type TestItem, type BillingInfo } from "@/lib/api";
 
 type Phase = "idle" | "generating" | "review" | "executing" | "done";
 
@@ -26,6 +26,11 @@ export default function DashboardPage() {
   const [showUpload, setShowUpload] = useState(false);
   const stagedFilesRef = useRef<File[]>([]);
   const [billing, setBilling] = useState<BillingInfo | null>(null);
+  const [activeTab, setActiveTab] = useState<"auto" | "custom">("auto");
+  const [customPrompt, setCustomPrompt] = useState("");
+  const [converting, setConverting] = useState(false);
+  const [convertedYaml, setConvertedYaml] = useState("");
+  const [convertedInfo, setConvertedInfo] = useState<{ count: number; steps: number } | null>(null);
 
   // Redirect if not authenticated
   if (!authLoading && !user) {
@@ -92,6 +97,46 @@ export default function DashboardPage() {
       stagedFilesRef.current = [];
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create test");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleConvert = async () => {
+    setError("");
+    setConverting(true);
+    setConvertedYaml("");
+    setConvertedInfo(null);
+
+    try {
+      const result = await convertScenario(url, customPrompt);
+      setConvertedYaml(result.scenario_yaml);
+      setConvertedInfo({ count: result.scenarios_count, steps: result.steps_total });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Conversion failed");
+    } finally {
+      setConverting(false);
+    }
+  };
+
+  const handleRunConverted = async () => {
+    setError("");
+    setSubmitting(true);
+    setActiveTest(null);
+    setPhase("idle");
+    setScenarioYaml("");
+
+    try {
+      const test = await createTest(url, "review");
+      await updateScenarios(test.id, convertedYaml);
+      await approveTest(test.id);
+      setActiveTest({ ...test, status: "queued", scenario_yaml: convertedYaml });
+      setPhase("executing");
+      setConvertedYaml("");
+      setConvertedInfo(null);
+      setCustomPrompt("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start test");
     } finally {
       setSubmitting(false);
     }
@@ -179,8 +224,8 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* URL Input + Attach + Action Buttons */}
-      <form onSubmit={handleGenerate} className="mb-6 space-y-3">
+      {/* URL Input */}
+      <div className="mb-6 space-y-3">
         <div className="flex gap-2">
           <input
             type="url"
@@ -190,31 +235,24 @@ export default function DashboardPage() {
             placeholder={t("urlPlaceholder")}
             className="flex-1 rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none"
           />
-          <button
-            type="button"
-            onClick={() => setShowUpload((v) => !v)}
-            disabled={isBusy}
-            className={`whitespace-nowrap rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${
-              showUpload || stagedFilesRef.current.length > 0
-                ? "border-blue-300 bg-blue-50 text-blue-700"
-                : "border-gray-300 text-gray-500 hover:bg-gray-50"
-            } disabled:opacity-50`}
-            title="Attach specification documents"
-          >
-            {stagedFilesRef.current.length > 0
-              ? t("docsCount", { count: stagedFilesRef.current.length })
-              : t("attach")}
-          </button>
+          {activeTab === "auto" && (
+            <button
+              type="button"
+              onClick={() => setShowUpload((v) => !v)}
+              disabled={isBusy}
+              className={`whitespace-nowrap rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${
+                showUpload || stagedFilesRef.current.length > 0
+                  ? "border-blue-300 bg-blue-50 text-blue-700"
+                  : "border-gray-300 text-gray-500 hover:bg-gray-50"
+              } disabled:opacity-50`}
+              title="Attach specification documents"
+            >
+              {stagedFilesRef.current.length > 0
+                ? t("docsCount", { count: stagedFilesRef.current.length })
+                : t("attach")}
+            </button>
+          )}
         </div>
-
-        {/* File staging area (expandable) */}
-        {showUpload && (
-          <FileUpload
-            onFilesChanged={(files) => {
-              stagedFilesRef.current = files;
-            }}
-          />
-        )}
 
         {/* Localhost warning */}
         {isLocalhost && (
@@ -227,24 +265,107 @@ export default function DashboardPage() {
           </div>
         )}
 
-        <div className="flex gap-2">
+        {/* Tabs */}
+        <div className="flex border-b border-gray-200">
           <button
-            type="submit"
-            disabled={isBusy}
-            className="whitespace-nowrap rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            type="button"
+            onClick={() => setActiveTab("auto")}
+            className={`px-4 py-2 text-sm font-medium transition-colors ${
+              activeTab === "auto"
+                ? "border-b-2 border-blue-600 text-blue-600"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
           >
-            {submitting ? t("creatingBtn") : t("generateBtn")}
+            {t("tabAutoGenerate")}
           </button>
           <button
             type="button"
-            onClick={handleQuickTest}
-            disabled={isBusy || !url}
-            className="whitespace-nowrap rounded-lg border border-gray-300 px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            onClick={() => setActiveTab("custom")}
+            className={`px-4 py-2 text-sm font-medium transition-colors ${
+              activeTab === "custom"
+                ? "border-b-2 border-blue-600 text-blue-600"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
           >
-            {t("quickTestBtn")}
+            {t("tabCustom")}
           </button>
         </div>
-      </form>
+
+        {/* Auto Generate tab */}
+        {activeTab === "auto" && (
+          <>
+            {showUpload && (
+              <FileUpload
+                onFilesChanged={(files) => {
+                  stagedFilesRef.current = files;
+                }}
+              />
+            )}
+            <form onSubmit={handleGenerate} className="flex gap-2">
+              <button
+                type="submit"
+                disabled={isBusy || !url}
+                className="whitespace-nowrap rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {submitting ? t("creatingBtn") : t("generateBtn")}
+              </button>
+              <button
+                type="button"
+                onClick={handleQuickTest}
+                disabled={isBusy || !url}
+                className="whitespace-nowrap rounded-lg border border-gray-300 px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                {t("quickTestBtn")}
+              </button>
+            </form>
+          </>
+        )}
+
+        {/* Custom Scenario tab */}
+        {activeTab === "custom" && (
+          <div className="space-y-3">
+            <textarea
+              value={customPrompt}
+              onChange={(e) => setCustomPrompt(e.target.value)}
+              placeholder={t("customPlaceholder")}
+              rows={4}
+              className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:border-blue-500 focus:outline-none resize-none"
+            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleConvert}
+                disabled={converting || !url || !customPrompt.trim() || isBusy}
+                className="whitespace-nowrap rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {converting ? t("converting") : t("convertBtn")}
+              </button>
+              {convertedInfo && (
+                <span className="text-sm text-gray-500">
+                  {t("convertedPreview", { count: convertedInfo.count, steps: convertedInfo.steps })}
+                </span>
+              )}
+            </div>
+
+            {/* Converted YAML preview */}
+            {convertedYaml && (
+              <div className="space-y-3">
+                <div className="max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <pre className="whitespace-pre-wrap text-xs text-gray-700">{convertedYaml}</pre>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRunConverted}
+                  disabled={submitting || isBusy}
+                  className="whitespace-nowrap rounded-lg bg-green-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                >
+                  {submitting ? t("creatingBtn") : t("runConverted")}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {error && (
         <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-600">

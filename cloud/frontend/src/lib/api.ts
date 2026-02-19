@@ -137,6 +137,34 @@ export async function getTest(id: number): Promise<TestItem> {
   return res.json();
 }
 
+// -- Scenario Conversion --
+
+export interface ConvertScenarioResult {
+  scenario_yaml: string;
+  scenarios_count: number;
+  steps_total: number;
+}
+
+export async function convertScenario(
+  targetUrl: string,
+  userPrompt: string,
+  language: "ko" | "en" = "en"
+): Promise<ConvertScenarioResult> {
+  const res = await authFetch("/api/tests/convert", {
+    method: "POST",
+    body: JSON.stringify({
+      target_url: targetUrl,
+      user_prompt: userPrompt,
+      language,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || `Error ${res.status}`);
+  }
+  return res.json();
+}
+
 // -- WebSocket --
 
 export function connectTestWS(

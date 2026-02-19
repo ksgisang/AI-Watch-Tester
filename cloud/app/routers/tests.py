@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import yaml
@@ -24,6 +25,8 @@ from app.docparse import allowed_extension, extract_text
 from app.middleware import check_rate_limit
 from app.models import Test, TestStatus, User
 from app.schemas import (
+    ConvertScenarioRequest,
+    ConvertScenarioResponse,
     ScenarioUpdate,
     TestCreate,
     TestListResponse,
@@ -243,6 +246,100 @@ async def upload_document(
         "filename": filename,
         "size": len(content),
         "extracted_chars": len(text),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Scenario conversion — natural language → YAML
+# ---------------------------------------------------------------------------
+
+logger = logging.getLogger(__name__)
+
+# Default model per AI provider (mirrors executor.py)
+_DEFAULT_MODELS: dict[str, str] = {
+    "claude": "claude-sonnet-4-20250514",
+    "openai": "gpt-4o",
+    "ollama": "codellama:7b",
+}
+
+_CONVERT_PROMPT = """\
+You are an E2E test scenario generator.
+
+The user wants to test the following on their website.
+
+## Target
+- URL: {url}
+
+## User Request
+{user_prompt}
+
+## Instructions
+1. Convert the user's natural language description into concrete E2E test scenarios
+2. Generate 1-5 test scenarios covering the described flows
+3. Each scenario should have clear steps: navigate, click, type, assert
+4. Use text-based targets (not image) for reliability
+5. Keep steps concise and actionable
+6. Use {{{{url}}}} as the base URL placeholder in navigate actions
+
+Return the scenarios as a JSON array following the format specified in the system instructions.\
+"""
+
+
+@router.post("/convert", response_model=ConvertScenarioResponse)
+async def convert_scenario(
+    body: ConvertScenarioRequest,
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Convert natural language to AWT YAML scenario."""
+    try:
+        from aat.core.models import AIConfig
+        from aat.adapters import ADAPTER_REGISTRY
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"AAT core not installed: {exc}",
+        )
+
+    ai_config = AIConfig(
+        provider=settings.ai_provider,
+        api_key=settings.ai_api_key,
+        model=settings.ai_model or _DEFAULT_MODELS.get(settings.ai_provider, ""),
+    )
+
+    adapter_cls = ADAPTER_REGISTRY.get(ai_config.provider)
+    if adapter_cls is None:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Unknown AI provider: {ai_config.provider}",
+        )
+
+    adapter = adapter_cls(ai_config)
+
+    prompt = _CONVERT_PROMPT.format(
+        url=body.target_url,
+        user_prompt=body.user_prompt,
+    )
+
+    try:
+        scenarios = await adapter.generate_scenarios(prompt)
+    except Exception as exc:
+        logger.exception("Scenario conversion failed")
+        raise HTTPException(status_code=502, detail=f"AI generation failed: {exc}")
+
+    if not scenarios:
+        raise HTTPException(status_code=422, detail="AI generated no scenarios")
+
+    # Serialize to YAML
+    scenario_dicts = [s.model_dump(mode="json", exclude_none=True) for s in scenarios]
+    scenario_yaml = yaml.safe_dump(
+        scenario_dicts, default_flow_style=False, allow_unicode=True
+    )
+    total_steps = sum(len(s.steps) for s in scenarios)
+
+    return {
+        "scenario_yaml": scenario_yaml,
+        "scenarios_count": len(scenarios),
+        "steps_total": total_steps,
     }
 
 

@@ -10,6 +10,25 @@ from pydantic import BaseModel, HttpUrl
 from app.models import TestStatus, UserTier
 
 
+# -- Scenario Conversion --
+
+
+class ConvertScenarioRequest(BaseModel):
+    """POST /api/scenarios/convert request body."""
+
+    target_url: str
+    user_prompt: str
+    language: Literal["ko", "en"] = "en"
+
+
+class ConvertScenarioResponse(BaseModel):
+    """POST /api/scenarios/convert response body."""
+
+    scenario_yaml: str
+    scenarios_count: int
+    steps_total: int
+
+
 # -- Requests --
 
 

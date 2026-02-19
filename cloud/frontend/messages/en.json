@@ -172,7 +172,14 @@
     "historyIntro": "View all your tests in the",
     "historyLink": "Test History",
     "localModeHint": "Want to see the real browser with mouse movements?",
-    "tryLocalMode": "Try local mode"
+    "tryLocalMode": "Try local mode",
+    "tabAutoGenerate": "Auto Generate",
+    "tabCustom": "Custom Scenario",
+    "customPlaceholder": "Describe what you want to test...\ne.g. Login then go to My Page and check if profile editing works",
+    "convertBtn": "Convert to Scenario",
+    "converting": "Converting...",
+    "convertedPreview": "Converted {count} scenario(s), {steps} steps",
+    "runConverted": "Run Test"
   },
   "tests": {
     "title": "Test History",
@@ -228,7 +235,13 @@
     "evtTestPassed": "Test PASSED",
     "evtTestFailed": "Test FAILED",
     "evtTestFailedError": "Test FAILED: {error}",
-    "waitingEvents": "Waiting for events..."
+    "waitingEvents": "Waiting for events...",
+    "stepPending": "Pending",
+    "stepRunning": "Running",
+    "stepPassed": "Passed",
+    "stepFailed": "Failed",
+    "stepTimeout": "Timeout",
+    "stepsOverview": "Step Details"
   },
   "scenarioEditor": {
     "title": "Test Scenarios",
