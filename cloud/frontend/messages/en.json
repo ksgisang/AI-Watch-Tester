@@ -210,7 +210,9 @@
     "stepLabel": "Step {step}",
     "viewScenarios": "View AI Scenarios",
     "scenarioLabel": "Scenario",
-    "expectedResult": "Expected"
+    "expectedResult": "Expected",
+    "failureReason": "Failure Reason",
+    "consoleErrors": "Console Errors"
   },
   "progress": {
     "connecting": "Connecting...",
@@ -243,7 +245,8 @@
     "stepPassed": "Passed",
     "stepFailed": "Failed",
     "stepTimeout": "Timeout",
-    "stepsOverview": "Step Details"
+    "stepsOverview": "Step Details",
+    "failureReason": "Failure Reason"
   },
   "scenarioEditor": {
     "title": "Test Scenarios",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useAuth } from "@/components/AuthProvider";
@@ -24,6 +24,11 @@ interface ScenarioResult {
   steps: StepResult[];
 }
 
+interface ConsoleLogEntry {
+  level: string; // "error" | "warning" | "info"
+  text: string;
+}
+
 interface ResultJSON {
   passed: boolean;
   scenarios?: ScenarioResult[];
@@ -31,6 +36,7 @@ interface ResultJSON {
   duration_ms?: number;
   screenshots_dir?: string;
   initial_screenshot?: string;
+  console_logs?: ConsoleLogEntry[];
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -51,6 +57,82 @@ function screenshotUrl(path: string | undefined | null): string | null {
   return `${API_URL}/screenshots/${relative}`;
 }
 
+/* ------------------------------------------------------------------ */
+/* Screenshot Modal                                                     */
+/* ------------------------------------------------------------------ */
+
+function ScreenshotModal({
+  src,
+  alt,
+  onClose,
+}: {
+  src: string;
+  alt: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="relative max-h-[90vh] max-w-[90vw]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          onClick={onClose}
+          className="absolute -right-3 -top-3 flex h-8 w-8 items-center justify-center rounded-full bg-white text-gray-600 shadow-lg hover:bg-gray-100"
+        >
+          &#10005;
+        </button>
+        <img
+          src={src}
+          alt={alt}
+          className="max-h-[85vh] max-w-[85vw] rounded-lg object-contain shadow-2xl"
+        />
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Console Log Icon                                                     */
+/* ------------------------------------------------------------------ */
+
+function ConsoleIcon({ level }: { level: string }) {
+  if (level === "error") {
+    return (
+      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-red-100 text-[10px] text-red-600">
+        &#10007;
+      </span>
+    );
+  }
+  if (level === "warning") {
+    return (
+      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-orange-100 text-[10px] text-orange-600">
+        &#9888;
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-gray-100 text-[10px] text-gray-500">
+      i
+    </span>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Main Page                                                            */
+/* ------------------------------------------------------------------ */
+
 export default function TestDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -62,6 +144,8 @@ export default function TestDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showScenarios, setShowScenarios] = useState(false);
+  const [modalImage, setModalImage] = useState<{ src: string; alt: string } | null>(null);
+  const [showConsole, setShowConsole] = useState(false);
 
   const testId = Number(params.id);
 
@@ -87,6 +171,14 @@ export default function TestDetailPage() {
     }
   };
 
+  const openModal = useCallback((src: string, alt: string) => {
+    setModalImage({ src, alt });
+  }, []);
+
+  const closeModal = useCallback(() => {
+    setModalImage(null);
+  }, []);
+
   if (authLoading || loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -105,8 +197,17 @@ export default function TestDetailPage() {
 
   if (!test) return null;
 
+  const consoleLogs = result?.console_logs ?? [];
+  const errorCount = consoleLogs.filter((l) => l.level === "error").length;
+  const warnCount = consoleLogs.filter((l) => l.level === "warning").length;
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
+      {/* Screenshot modal */}
+      {modalImage && (
+        <ScreenshotModal src={modalImage.src} alt={modalImage.alt} onClose={closeModal} />
+      )}
+
       {/* Header */}
       <button
         onClick={() => router.push("/tests")}
@@ -138,7 +239,7 @@ export default function TestDetailPage() {
 
       {/* Error message */}
       {test.error_message && (
-        <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {test.error_message}
         </div>
       )}
@@ -241,18 +342,22 @@ export default function TestDetailPage() {
                   </span>
                   {step.elapsed_ms !== undefined && (
                     <span className="text-xs text-gray-400">
-                      {step.elapsed_ms}ms
+                      {(step.elapsed_ms / 1000).toFixed(1)}s
                     </span>
                   )}
                 </div>
 
+                {/* Error detail — red box */}
                 {step.error && (
-                  <p className="mt-1 ml-7 text-xs text-red-600">
-                    {step.error}
-                  </p>
+                  <div className="mt-2 ml-7 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                    <span className="text-[10px] font-semibold text-red-500">{t("failureReason")}</span>
+                    <p className="mt-0.5 text-xs text-red-700 font-mono whitespace-pre-wrap break-all">
+                      {step.error}
+                    </p>
+                  </div>
                 )}
 
-                {/* Screenshots */}
+                {/* Screenshots — click to enlarge */}
                 {(step.screenshot_before ||
                   step.screenshot_after ||
                   step.screenshot_error) && (
@@ -262,8 +367,14 @@ export default function TestDetailPage() {
                         <img
                           src={screenshotUrl(step.screenshot_before) || ""}
                           alt="Before"
-                          className="h-24 rounded border border-gray-200 object-cover"
+                          className="h-24 cursor-pointer rounded border border-gray-200 object-cover transition-transform hover:scale-105"
                           loading="lazy"
+                          onClick={() =>
+                            openModal(
+                              screenshotUrl(step.screenshot_before) || "",
+                              `Step ${step.step} — Before`
+                            )
+                          }
                         />
                         <span className="text-[10px] text-gray-400">
                           {t("before")}
@@ -275,8 +386,14 @@ export default function TestDetailPage() {
                         <img
                           src={screenshotUrl(step.screenshot_after) || ""}
                           alt="After"
-                          className="h-24 rounded border border-gray-200 object-cover"
+                          className="h-24 cursor-pointer rounded border border-gray-200 object-cover transition-transform hover:scale-105"
                           loading="lazy"
+                          onClick={() =>
+                            openModal(
+                              screenshotUrl(step.screenshot_after) || "",
+                              `Step ${step.step} — After`
+                            )
+                          }
                         />
                         <span className="text-[10px] text-gray-400">
                           {t("after")}
@@ -288,8 +405,14 @@ export default function TestDetailPage() {
                         <img
                           src={screenshotUrl(step.screenshot_error) || ""}
                           alt="Error"
-                          className="h-24 rounded border border-red-200 object-cover"
+                          className="h-24 cursor-pointer rounded border border-red-200 object-cover transition-transform hover:scale-105"
                           loading="lazy"
+                          onClick={() =>
+                            openModal(
+                              screenshotUrl(step.screenshot_error) || "",
+                              `Step ${step.step} — Error`
+                            )
+                          }
                         />
                         <span className="text-[10px] text-red-400">{t("error")}</span>
                       </div>
@@ -301,6 +424,67 @@ export default function TestDetailPage() {
           </div>
         </div>
       ))}
+
+      {/* Console Errors */}
+      {consoleLogs.length > 0 && (
+        <div className="mb-6 rounded-lg border border-gray-200">
+          <button
+            onClick={() => setShowConsole(!showConsole)}
+            className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-gray-50"
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-gray-900">{t("consoleErrors")}</span>
+              {errorCount > 0 && (
+                <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-600">
+                  {errorCount}
+                </span>
+              )}
+              {warnCount > 0 && (
+                <span className="rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] font-medium text-orange-600">
+                  {warnCount}
+                </span>
+              )}
+            </div>
+            <svg
+              className={`h-4 w-4 text-gray-500 transition-transform ${showConsole ? "rotate-180" : ""}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {showConsole && (
+            <div className="border-t border-gray-100 max-h-64 overflow-y-auto">
+              {consoleLogs.map((log, i) => (
+                <div
+                  key={i}
+                  className={`flex items-start gap-2 px-4 py-1.5 text-xs ${
+                    log.level === "error"
+                      ? "bg-red-50"
+                      : log.level === "warning"
+                      ? "bg-orange-50"
+                      : "bg-white"
+                  }`}
+                >
+                  <ConsoleIcon level={log.level} />
+                  <span
+                    className={`font-mono break-all ${
+                      log.level === "error"
+                        ? "text-red-700"
+                        : log.level === "warning"
+                        ? "text-orange-700"
+                        : "text-gray-600"
+                    }`}
+                  >
+                    {log.text}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Raw result fallback */}
       {result && !result.scenarios && result.error && (

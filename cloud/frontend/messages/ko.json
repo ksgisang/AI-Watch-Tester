@@ -210,7 +210,9 @@
     "stepLabel": "스텝 {step}",
     "viewScenarios": "AI 시나리오 보기",
     "scenarioLabel": "시나리오",
-    "expectedResult": "기대 결과"
+    "expectedResult": "기대 결과",
+    "failureReason": "실패 원인",
+    "consoleErrors": "콘솔 에러"
   },
   "progress": {
     "connecting": "연결 중...",
@@ -243,7 +245,8 @@
     "stepPassed": "통과",
     "stepFailed": "실패",
     "stepTimeout": "타임아웃",
-    "stepsOverview": "스텝 상세"
+    "stepsOverview": "스텝 상세",
+    "failureReason": "실패 원인"
   },
   "scenarioEditor": {
     "title": "테스트 시나리오",

@@ -318,44 +318,46 @@ export default function TestProgress({ testId, onComplete, onScenariosReady }: P
       {steps.length > 0 && (
         <div className="rounded-lg border border-gray-200 bg-white p-3">
           <h4 className="mb-2 text-xs font-medium text-gray-500">{t("stepsOverview")}</h4>
-          <div className="space-y-1.5 max-h-48 overflow-y-auto">
+          <div className="space-y-0.5 max-h-64 overflow-y-auto">
             {steps.map((step) => (
-              <div
-                key={step.num}
-                className={`flex items-center gap-2 rounded px-2 py-1 text-xs transition-colors ${
-                  step.state === "running" ? "bg-blue-50" : ""
-                }`}
-              >
-                {stepIcon(step.state)}
-                <span className="font-medium text-gray-700 w-8 flex-shrink-0">
-                  {step.num}.
-                </span>
-                <span className="flex-1 text-gray-600 truncate">
-                  {step.description}
-                </span>
-                <span className={`flex-shrink-0 text-[10px] font-medium ${
-                  step.state === "passed" ? "text-green-600"
-                    : step.state === "failed" ? "text-red-600"
-                    : step.state === "timeout" ? "text-orange-600"
-                    : step.state === "running" ? "text-blue-600"
-                    : "text-gray-400"
-                }`}>
-                  {stepStatusText(step.state)}
-                  {step.elapsedMs != null && ` (${(step.elapsedMs / 1000).toFixed(1)}s)`}
-                </span>
+              <div key={step.num}>
+                <div
+                  className={`flex items-center gap-2 rounded px-2 py-1 text-xs transition-colors ${
+                    step.state === "running" ? "bg-blue-50" : ""
+                  }`}
+                >
+                  {stepIcon(step.state)}
+                  <span className="font-medium text-gray-700 w-8 flex-shrink-0">
+                    {step.num}.
+                  </span>
+                  <span className="flex-1 text-gray-600 truncate">
+                    {step.description}
+                  </span>
+                  <span className={`flex-shrink-0 text-[10px] font-medium ${
+                    step.state === "passed" ? "text-green-600"
+                      : step.state === "failed" ? "text-red-600"
+                      : step.state === "timeout" ? "text-orange-600"
+                      : step.state === "running" ? "text-blue-600"
+                      : "text-gray-400"
+                  }`}>
+                    {stepStatusText(step.state)}
+                    {step.elapsedMs != null && ` (${(step.elapsedMs / 1000).toFixed(1)}s)`}
+                  </span>
+                </div>
+                {/* Inline error detail for failed/timeout steps */}
+                {step.error && (
+                  <details open className="ml-9 mr-2 mb-1">
+                    <summary className="cursor-pointer text-[10px] font-medium text-red-500 select-none">
+                      {t("failureReason")}
+                    </summary>
+                    <div className="mt-0.5 rounded bg-red-50 border border-red-100 px-2 py-1.5 text-xs text-red-700 font-mono whitespace-pre-wrap break-all">
+                      {step.error}
+                    </div>
+                  </details>
+                )}
               </div>
             ))}
           </div>
-          {/* Show error details for failed steps */}
-          {steps.some((s) => s.error) && (
-            <div className="mt-2 space-y-1">
-              {steps.filter((s) => s.error).map((s) => (
-                <div key={s.num} className="rounded bg-red-50 px-2 py-1 text-xs text-red-600">
-                  Step {s.num}: {s.error}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       )}
 

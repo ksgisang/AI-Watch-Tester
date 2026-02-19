@@ -293,8 +293,39 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
     engine_config = EngineConfig(type="web", headless=settings.playwright_headless)
     engine = WebEngine(engine_config)
 
+    # Console log collector
+    console_logs: list[dict[str, str]] = []
+
+    def _on_console(msg: Any) -> None:
+        """Collect browser console messages."""
+        level = str(getattr(msg, "type", "log"))  # log, warning, error, info
+        # Only collect warnings and errors (skip verbose logs)
+        if level in ("error", "warning", "warn"):
+            text = str(getattr(msg, "text", ""))
+            if text:
+                console_logs.append({
+                    "level": "warning" if level == "warn" else level,
+                    "text": text[:500],  # truncate long messages
+                })
+
+    def _on_page_error(error: Any) -> None:
+        """Collect uncaught page errors."""
+        console_logs.append({
+            "level": "error",
+            "text": f"Uncaught: {str(error)[:500]}",
+        })
+
     try:
         await engine.start()
+
+        # Attach console/error listeners to Playwright page
+        try:
+            page = engine.page
+            page.on("console", _on_console)
+            page.on("pageerror", _on_page_error)
+        except Exception:
+            logger.debug("Could not attach console listeners")
+
         await engine.navigate(target_url)
 
         # Save initial screenshot + stream to frontend
@@ -438,11 +469,17 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
                         ws=ws, step=step_num, timing="after",
                     )
 
+                    elapsed = getattr(result, "elapsed_ms", 0)
+                    error_msg = getattr(result, "error", None) or (
+                        str(getattr(result, "message", "")) if status == "failed" else None
+                    )
+
                     step_results.append({
                         "step": i + 1,
                         "action": result.action if hasattr(result, "action") else str(step.action),
                         "status": status,
-                        "elapsed_ms": getattr(result, "elapsed_ms", 0),
+                        "elapsed_ms": elapsed,
+                        "error": error_msg if status == "failed" else None,
                         "screenshot_before": ss_before,
                         "screenshot_after": ss_after,
                     })
@@ -452,15 +489,27 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
                         overall_passed = False
 
                     if ws:
-                        evt = "step_done" if status == "passed" else "step_fail"
-                        await ws.broadcast(test_id, {
-                            "type": evt,
-                            "step": step_num,
-                            "status": status,
-                        })
+                        if status == "passed":
+                            await ws.broadcast(test_id, {
+                                "type": "step_done",
+                                "step": step_num,
+                                "status": status,
+                                "elapsed_ms": elapsed,
+                            })
+                        else:
+                            await ws.broadcast(test_id, {
+                                "type": "step_fail",
+                                "step": step_num,
+                                "status": status,
+                                "error": error_msg,
+                                "description": step.description or str(step.action),
+                            })
 
                 except TimeoutError:
-                    err_msg = f"Step timed out after 30s"
+                    err_msg = (
+                        f"Timeout after 30s: "
+                        f"{step.description or str(step.action)}"
+                    )
                     logger.warning("Step %d timed out", step_num)
 
                     ss_error = await _save_screenshot(
@@ -470,6 +519,7 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
 
                     step_results.append({
                         "step": i + 1,
+                        "action": str(step.action),
                         "status": "error",
                         "error": err_msg,
                         "screenshot_before": ss_before,
@@ -483,9 +533,11 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
                             "type": "step_fail",
                             "step": step_num,
                             "error": err_msg,
+                            "description": step.description or str(step.action),
                         })
 
                 except Exception as exc:
+                    err_msg = str(exc)
                     logger.warning("Step %d failed: %s", step_num, exc)
 
                     ss_error = await _save_screenshot(
@@ -495,8 +547,9 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
 
                     step_results.append({
                         "step": i + 1,
+                        "action": str(step.action),
                         "status": "error",
-                        "error": str(exc),
+                        "error": err_msg,
                         "screenshot_before": ss_before,
                         "screenshot_error": ss_error,
                     })
@@ -507,7 +560,8 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
                         await ws.broadcast(test_id, {
                             "type": "step_fail",
                             "step": step_num,
-                            "error": str(exc),
+                            "error": err_msg,
+                            "description": step.description or str(step.action),
                         })
 
                 completed += 1
@@ -531,6 +585,7 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
             "screenshots_dir": str(_screenshot_dir_for_test(test_id)),
             "initial_screenshot": init_ss,
             "duration_ms": _elapsed(start),
+            "console_logs": console_logs[:100],  # cap at 100 entries
         }
 
     except Exception as exc:
