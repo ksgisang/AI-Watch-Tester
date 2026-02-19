@@ -21,62 +21,111 @@ from app.ws import WSManager
 
 logger = logging.getLogger(__name__)
 
-# Feature detection patterns
+# ---------------------------------------------------------------------------
+# Feature detection — confidence-based, requires actual UI elements
+# ---------------------------------------------------------------------------
+#
+# Each detector has:
+#   - strong_selectors: actual UI elements (forms, inputs, buttons) → high confidence
+#   - weak_selectors: links or generic class matches → lower confidence
+#   - confirm_texts: text that must appear nearby to confirm weak matches
+#   - threshold: minimum confidence to report (0.0–1.0)
+#
+# Scoring: strong selector match = 0.9, weak selector + confirm text = 0.6,
+#          weak selector alone = 0.3 (below default threshold → not reported)
+
 FEATURE_DETECTORS: dict[str, dict[str, Any]] = {
     "login_form": {
-        "selectors": ["input[type=password]", "form[action*=login]", "form[action*=signin]"],
-        "texts": ["로그인", "Login", "Sign in", "Sign In"],
+        # Must have actual password input or login form — not just "Login" link text
+        "strong": ["input[type=password]", "form[action*=login]", "form[action*=signin]"],
+        "weak": [],
+        "confirm_texts": [],
+        "threshold": 0.5,
     },
     "search": {
-        "selectors": ["input[type=search]", "form[action*=search]", "[role=search]"],
-        "texts": ["검색", "Search"],
+        "strong": ["input[type=search]", "[role=search]", "form[action*=search]"],
+        "weak": ["input[placeholder*=search]", "input[placeholder*=검색]"],
+        "confirm_texts": [],
+        "threshold": 0.5,
     },
     "cart": {
-        "selectors": ["[class*=cart]", "[class*=basket]", "a[href*=cart]", "a[href*=basket]"],
-        "texts": ["장바구니", "Cart", "Basket", "카트"],
+        # Require cart-specific link with cart path, or dedicated cart element
+        "strong": ["a[href*='/cart']", "a[href*='/basket']", "[data-cart]"],
+        "weak": ["[class*=cart-icon]", "[class*=cart-count]", "[class*=basket]"],
+        "confirm_texts": ["장바구니", "Cart", "Basket"],
+        "threshold": 0.5,
     },
     "product_list": {
-        "selectors": ["[class*=product-list]", "[class*=product-grid]", "[class*=product-card]"],
-        "texts": ["가격", "Price", "₩", "$"],
+        # Require repeated product card patterns — not just a price mention
+        "strong": ["[class*=product-list]", "[class*=product-grid]", "[class*=product-card]"],
+        "weak": ["[class*=item-price]", "[class*=product]"],
+        "confirm_texts": [],
+        "threshold": 0.5,
     },
     "review_form": {
-        "selectors": ["[class*=review]", "form[action*=review]", "[class*=rating]"],
-        "texts": ["리뷰", "후기", "Review", "평점", "Rating"],
+        # Require actual review form/textarea or star rating input — not just "review" text
+        "strong": ["form[action*=review]", "textarea[name*=review]", "input[name*=rating]"],
+        "weak": ["[class*=review-form]", "[class*=rating-input]", "[class*=star-rating]"],
+        "confirm_texts": ["리뷰 작성", "Write a review", "후기 작성"],
+        "threshold": 0.5,
     },
     "comment_form": {
-        "selectors": ["[class*=comment]", "form[action*=comment]"],
-        "texts": ["댓글", "Comment", "의견"],
+        # Require actual comment textarea — not just "comment" class
+        "strong": ["textarea[name*=comment]", "form[action*=comment]"],
+        "weak": ["[class*=comment-form]", "[class*=comment-input]"],
+        "confirm_texts": ["댓글 작성", "댓글 등록", "Add comment", "Write comment"],
+        "threshold": 0.5,
     },
     "board_write": {
-        "selectors": ["a[href*=write]", "a[href*=create]", "a[href*=new]"],
-        "texts": ["글쓰기", "작성", "Write", "New Post", "Create"],
+        # Require write/create link with board-like path — not just "Create" text
+        "strong": ["a[href*='/write']", "a[href*='/board/']", "a[href*='/post/new']"],
+        "weak": ["a[href*='/create']", "a[href*='/new']"],
+        "confirm_texts": ["글쓰기", "새 글", "New Post", "게시판"],
+        "threshold": 0.5,
     },
     "file_upload": {
-        "selectors": ["input[type=file]"],
-        "texts": [],
+        "strong": ["input[type=file]"],
+        "weak": [],
+        "confirm_texts": [],
+        "threshold": 0.5,
     },
     "admin_panel": {
-        "selectors": ["a[href*=admin]", "a[href*=dashboard]", "a[href*=manage]"],
-        "texts": ["관리자", "Admin", "Dashboard", "관리"],
+        # Require actual admin path link — not just "admin" or "관리" text anywhere
+        "strong": ["a[href*='/admin']", "a[href*='/admin/']"],
+        "weak": ["a[href*='/manage']"],
+        "confirm_texts": ["관리자 페이지", "Admin Panel", "관리자 로그인"],
+        "threshold": 0.5,
     },
     "newsletter": {
-        "selectors": ["form[action*=subscribe]", "form[action*=newsletter]", "[class*=newsletter]"],
-        "texts": ["구독", "Subscribe", "Newsletter"],
+        # Require actual subscribe form with email input — not just "구독" text
+        "strong": ["form[action*=subscribe]", "form[action*=newsletter]"],
+        "weak": ["[class*=newsletter]", "input[name*=newsletter]"],
+        "confirm_texts": ["이메일 구독", "Subscribe", "뉴스레터 구독"],
+        "threshold": 0.5,
     },
     "social_login": {
-        "selectors": [
-            "[class*=google]", "[class*=kakao]", "[class*=naver]",
-            "[class*=social]", "[class*=oauth]",
+        # Require actual login button elements — not just brand name text
+        "strong": [
+            "button[class*=google-login]", "button[class*=kakao-login]",
+            "button[class*=naver-login]", "a[href*=oauth]",
+            "[class*=social-login]", "a[href*='accounts.google.com']",
+            "a[href*='kauth.kakao.com']", "a[href*='nid.naver.com']",
         ],
-        "texts": ["Google", "Kakao", "Naver", "카카오", "네이버", "소셜 로그인"],
+        "weak": ["[class*=oauth]", "[class*=social-btn]"],
+        "confirm_texts": ["소셜 로그인", "Sign in with", "카카오로 로그인", "네이버로 로그인"],
+        "threshold": 0.5,
     },
     "pagination": {
-        "selectors": ["[class*=pagination]", "[class*=pager]", "nav[aria-label*=page]"],
-        "texts": [],
+        "strong": ["[class*=pagination]", "nav[aria-label*=page]", "[class*=pager]"],
+        "weak": [],
+        "confirm_texts": [],
+        "threshold": 0.5,
     },
     "filter_sort": {
-        "selectors": ["[class*=filter]", "[class*=sort]", "select[name*=sort]"],
-        "texts": ["필터", "정렬", "Filter", "Sort"],
+        "strong": ["select[name*=sort]", "select[name*=order]", "[class*=filter-panel]"],
+        "weak": ["[class*=filter]", "[class*=sort-btn]"],
+        "confirm_texts": ["필터", "정렬", "Filter", "Sort by"],
+        "threshold": 0.5,
     },
 }
 
@@ -222,33 +271,50 @@ async def _extract_page_data(page: Any, url: str, *, take_screenshot: bool = Tru
     return data
 
 
-async def _detect_features(page: Any, page_text: str) -> list[str]:
-    """Detect site features based on selectors and text patterns."""
-    detected: list[str] = []
+async def _detect_features(page: Any, page_text: str) -> list[dict[str, Any]]:
+    """Detect site features with confidence scoring.
+
+    Returns list of {"feature": str, "confidence": float} dicts.
+    Only features above their threshold are included.
+    """
+    detected: list[dict[str, Any]] = []
+    lower_text = page_text.lower()
 
     for feature, patterns in FEATURE_DETECTORS.items():
-        found = False
+        confidence = 0.0
+        threshold = patterns.get("threshold", 0.5)
 
-        # Check selectors
-        for selector in patterns["selectors"]:
+        # Check strong selectors (high confidence: 0.9)
+        for selector in patterns.get("strong", []):
             try:
                 count = await page.locator(selector).count()
                 if count > 0:
-                    found = True
+                    confidence = max(confidence, 0.9)
                     break
             except Exception:
                 continue
 
-        # Check text patterns
-        if not found and patterns.get("texts"):
-            lower_text = page_text.lower()
-            for text in patterns["texts"]:
-                if text.lower() in lower_text:
-                    found = True
-                    break
+        # Check weak selectors (alone: 0.3, with confirm text: 0.6)
+        if confidence < 0.9:
+            weak_match = False
+            for selector in patterns.get("weak", []):
+                try:
+                    count = await page.locator(selector).count()
+                    if count > 0:
+                        weak_match = True
+                        break
+                except Exception:
+                    continue
 
-        if found:
-            detected.append(feature)
+            if weak_match:
+                # Check if confirm text exists to boost confidence
+                confirm_texts = patterns.get("confirm_texts", [])
+                text_confirmed = any(t.lower() in lower_text for t in confirm_texts)
+                confidence = max(confidence, 0.6 if text_confirmed else 0.3)
+
+        # Only report features above threshold
+        if confidence >= threshold:
+            detected.append({"feature": feature, "confidence": round(confidence, 2)})
 
     return detected
 
@@ -294,7 +360,7 @@ async def crawl_site(
     visited: set[str] = set()
     pages: list[dict] = []
     all_links: set[str] = set()
-    all_features: set[str] = set()
+    all_features: dict[str, float] = {}  # feature → confidence
     broken_links: list[dict] = []
     total_forms = 0
     total_buttons = 0
@@ -370,14 +436,19 @@ async def crawl_site(
                 page_text = await page.inner_text("body")
             except Exception:
                 page_text = ""
-            features = await _detect_features(page, page_text)
-            for f in features:
-                if f not in all_features:
-                    all_features.add(f)
-                    if ws:
+            feature_results = await _detect_features(page, page_text)
+            for fr in feature_results:
+                fname = fr["feature"]
+                fconf = fr["confidence"]
+                # Keep highest confidence per feature
+                if fname not in all_features or fconf > all_features[fname]:
+                    was_new = fname not in all_features
+                    all_features[fname] = fconf
+                    if was_new and ws:
                         await ws.broadcast(scan_id, {
                             "type": "feature_detected",
-                            "feature": f,
+                            "feature": fname,
+                            "confidence": fconf,
                         })
 
             # Collect links for BFS
@@ -403,7 +474,7 @@ async def crawl_site(
                     "links_found": len(all_links),
                     "forms_found": total_forms,
                     "buttons_found": total_buttons,
-                    "features": list(all_features),
+                    "features": list(all_features.keys()),
                 })
 
         # Check for broken external links (sample up to 10)
@@ -429,6 +500,13 @@ async def crawl_site(
         except Exception:
             pass
 
+    # Build features list with confidence
+    features_with_confidence = [
+        {"feature": f, "confidence": c}
+        for f, c in sorted(all_features.items())
+    ]
+    feature_names = sorted(all_features.keys())
+
     summary = {
         "total_pages": len(pages),
         "total_links": len(all_links),
@@ -436,20 +514,19 @@ async def crawl_site(
         "total_buttons": total_buttons,
         "total_nav_menus": total_nav_menus,
         "broken_links": len(broken_links),
-        "detected_features": sorted(all_features),
+        "detected_features": feature_names,
     }
 
-    if ws:
-        await ws.broadcast(scan_id, {
-            "type": "scan_complete",
-            "summary": summary,
-        })
+    # NOTE: scan_complete is NOT broadcast here.
+    # It is broadcast from _run_crawl() in scan.py AFTER the DB status is committed,
+    # to avoid a race condition where the frontend calls /plan before status is COMPLETED.
 
     return {
         "pages": pages,
         "summary": summary,
         "broken_links": broken_links,
-        "detected_features": sorted(all_features),
+        "detected_features": feature_names,
+        "features_with_confidence": features_with_confidence,
     }
 
 

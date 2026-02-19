@@ -109,7 +109,7 @@ async def start_scan(
                 ws=ws_manager,
             )
 
-            # Update DB with results
+            # Update DB with results FIRST, then broadcast
             from app.database import async_session
 
             async with async_session() as session:
@@ -129,6 +129,18 @@ async def start_scan(
                 s.completed_at = datetime.now(timezone.utc)
                 await session.commit()
 
+            # Broadcast scan_complete AFTER DB commit so /plan endpoint sees COMPLETED status
+            if "error" in result:
+                await ws_manager.broadcast(scan_id, {
+                    "type": "scan_error",
+                    "error": result["error"],
+                })
+            else:
+                await ws_manager.broadcast(scan_id, {
+                    "type": "scan_complete",
+                    "summary": result["summary"],
+                })
+
         except Exception as exc:
             logger.exception("Scan %d failed", scan_id)
             from app.database import async_session
@@ -142,11 +154,10 @@ async def start_scan(
                 s.completed_at = datetime.now(timezone.utc)
                 await session.commit()
 
-            if ws_manager:
-                await ws_manager.broadcast(scan_id, {
-                    "type": "scan_error",
-                    "error": str(exc)[:500],
-                })
+            await ws_manager.broadcast(scan_id, {
+                "type": "scan_error",
+                "error": str(exc)[:500],
+            })
 
     asyncio.create_task(_run_crawl())
 

@@ -209,9 +209,13 @@ export default function DashboardPage() {
   };
 
   // -- Smart Scan handlers --
+  // Track whether plan generation was already triggered to avoid double-calls
+  const planTriggeredRef = useRef(false);
+
   const handleStartScan = async () => {
     setError("");
     setScanPhase("scanning");
+    planTriggeredRef.current = false;
     setScanProgress({ pages: 0, max: 5, links: 0, forms: 0, buttons: 0, features: [], currentUrl: "" });
     setPlanCategories([]);
     setSelectedTests(new Set());
@@ -221,6 +225,18 @@ export default function DashboardPage() {
     try {
       const scan = await startScan(url);
       setActiveScan(scan);
+
+      const triggerPlan = (scanId: number) => {
+        if (planTriggeredRef.current) return;
+        planTriggeredRef.current = true;
+        getScan(scanId).then((updated) => {
+          setActiveScan(updated);
+          setScanPhase("plan");
+          handleGeneratePlan(updated.id);
+        }).catch(() => {
+          setScanPhase("plan");
+        });
+      };
 
       // Connect WebSocket for progress
       const ws = connectScanWS(scan.id, (data) => {
@@ -242,15 +258,7 @@ export default function DashboardPage() {
             features: [...new Set([...prev.features, data.feature as string])],
           }));
         } else if (type === "scan_complete") {
-          // Scan done — fetch full result
-          getScan(scan.id).then((updated) => {
-            setActiveScan(updated);
-            setScanPhase("plan");
-            // Auto-generate plan
-            handleGeneratePlan(updated.id);
-          }).catch(() => {
-            setScanPhase("plan");
-          });
+          triggerPlan(scan.id);
         } else if (type === "scan_error") {
           setError(String(data.error || "Scan failed"));
           setScanPhase("idle");
@@ -262,27 +270,19 @@ export default function DashboardPage() {
       const pollInterval = setInterval(async () => {
         try {
           const updated = await getScan(scan.id);
-          if (updated.status === "completed" || updated.status === "failed") {
+          if (updated.status === "completed") {
+            clearInterval(pollInterval);
+            triggerPlan(scan.id);
+          } else if (updated.status === "failed") {
             clearInterval(pollInterval);
             setActiveScan(updated);
-            if (updated.status === "completed" && scanPhase === "scanning") {
-              setScanPhase("plan");
-              handleGeneratePlan(updated.id);
-            } else if (updated.status === "failed") {
-              setError(updated.error_message || "Scan failed");
-              setScanPhase("idle");
-            }
+            setError(updated.error_message || "Scan failed");
+            setScanPhase("idle");
           }
         } catch {
           // ignore
         }
       }, 3000);
-
-      // Cleanup on unmount
-      return () => {
-        clearInterval(pollInterval);
-        ws.close();
-      };
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to start scan";
       setError(translateApiError(msg, te));
