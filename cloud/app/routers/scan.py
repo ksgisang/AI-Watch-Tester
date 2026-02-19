@@ -326,48 +326,40 @@ async def generate_plan(
         broken_count=len(broken),
     )
 
-    # Call AI
+    # Try AI plan generation, fall back to default plan on failure
+    plan = None
+    lang = body.language or "en"
+
     try:
         from aat.core.models import AIConfig
         from aat.adapters import ADAPTER_REGISTRY
-    except ImportError as exc:
-        raise HTTPException(status_code=503, detail=f"AAT core not installed: {exc}")
 
-    ai_config = AIConfig(
-        provider=settings.ai_provider,
-        api_key=settings.ai_api_key,
-        model=settings.ai_model or _DEFAULT_MODELS.get(settings.ai_provider, ""),
-    )
-    adapter_cls = ADAPTER_REGISTRY.get(ai_config.provider)
-    if adapter_cls is None:
-        raise HTTPException(status_code=503, detail=f"Unknown AI provider: {ai_config.provider}")
+        ai_config = AIConfig(
+            provider=settings.ai_provider,
+            api_key=settings.ai_api_key,
+            model=settings.ai_model or _DEFAULT_MODELS.get(settings.ai_provider, ""),
+        )
+        adapter_cls = ADAPTER_REGISTRY.get(ai_config.provider)
+        if adapter_cls is None:
+            raise ValueError(f"Unknown AI provider: {ai_config.provider}")
 
-    adapter = adapter_cls(ai_config)
-
-    try:
-        # Use generate_scenarios but parse the JSON response directly
-        raw_response = await adapter.generate_raw(prompt)
-    except AttributeError:
-        # Fallback: use generate_scenarios and convert
-        try:
-            raw_response = await _ai_raw_call(adapter, prompt)
-        except Exception as exc:
-            logger.exception("AI plan generation failed")
-            raise HTTPException(status_code=502, detail=f"AI generation failed: {exc}")
-    except Exception as exc:
-        logger.exception("AI plan generation failed")
-        raise HTTPException(status_code=502, detail=f"AI generation failed: {exc}")
-
-    # Parse AI response as JSON
-    try:
+        adapter = adapter_cls(ai_config)
+        raw_response = await _ai_raw_call(adapter, prompt)
         plan = _extract_json(raw_response)
-    except ValueError as exc:
-        logger.error("Failed to parse AI plan: %s", exc)
-        raise HTTPException(status_code=502, detail="AI returned invalid plan format")
+
+        categories = plan.get("categories", [])
+        if not categories:
+            logger.warning("AI returned no categories, using default plan")
+            plan = None
+    except Exception as exc:
+        logger.warning("AI plan generation failed (%s), using default plan", exc)
+        plan = None
+
+    # Fallback: generate plan from crawl data without AI
+    if plan is None:
+        plan = _generate_default_plan(scan, pages, broken, features, summary, lang)
 
     categories = plan.get("categories", [])
-    if not categories:
-        raise HTTPException(status_code=502, detail="AI generated no test categories")
 
     # Save plan to DB
     scan.plan_json = json.dumps(plan, ensure_ascii=False)
@@ -378,33 +370,185 @@ async def generate_plan(
 
 
 async def _ai_raw_call(adapter: Any, prompt: str) -> str:
-    """Call AI adapter for raw text response (fallback for adapters without generate_raw)."""
-    # Try the internal client directly
-    if hasattr(adapter, "client"):
-        client = adapter.client
-        if hasattr(client, "chat") and hasattr(client.chat, "completions"):
-            # OpenAI-style
-            response = await client.chat.completions.create(
-                model=adapter.config.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-            )
-            return response.choices[0].message.content or ""
+    """Call AI adapter for raw text response."""
+    client = getattr(adapter, "_client", None)
+    config = getattr(adapter, "_config", None)
+    model = config.model if config else ""
 
-    if hasattr(adapter, "_client"):
-        client = adapter._client
-        # Anthropic-style
-        if hasattr(client, "messages"):
-            response = await client.messages.create(
-                model=adapter.config.model,
-                max_tokens=4096,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            return response.content[0].text if response.content else ""
+    # Anthropic-style (ClaudeAdapter._client = AsyncAnthropic)
+    if client and hasattr(client, "messages") and hasattr(client.messages, "create"):
+        response = await client.messages.create(
+            model=model,
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text if response.content else ""
 
-    # Last resort: use generate_scenarios which returns Scenario objects
-    # and extract what we need
+    # OpenAI-style (OpenAIAdapter._client = AsyncOpenAI)
+    if client and hasattr(client, "chat"):
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+        )
+        return response.choices[0].message.content or ""
+
     raise NotImplementedError("Adapter does not support raw text generation")
+
+
+def _generate_default_plan(
+    scan: Any,
+    pages: list,
+    broken: list,
+    features: list,
+    summary: dict,
+    language: str,
+) -> dict:
+    """Generate a default test plan from crawl data without AI."""
+    ko = language == "ko"
+    categories = []
+
+    # 1. Basic health check (always)
+    basic_tests = []
+    tid = 1
+
+    # Broken links
+    if broken:
+        basic_tests.append({
+            "id": f"t{tid}",
+            "name": "깨진 링크 검사" if ko else "Broken Link Check",
+            "description": (
+                f"{len(broken)}개의 깨진 링크를 확인합니다" if ko
+                else f"Verify {len(broken)} broken link(s) are fixed"
+            ),
+            "priority": "high",
+            "estimated_time": 10 * len(broken),
+            "requires_auth": False,
+            "selected": True,
+            "actual_elements": [b.get("url", "") for b in broken[:5]],
+        })
+        tid += 1
+
+    # Nav menu tests
+    nav_items = []
+    for p in pages:
+        for nav in p.get("nav_menus", []):
+            for item in nav.get("items", []):
+                text = (item.get("text") or "").strip()
+                href = item.get("href", "")
+                if text and href and len(text) < 50:
+                    nav_items.append({"text": text, "href": href})
+    # Deduplicate by href
+    seen_hrefs: set[str] = set()
+    unique_nav: list[dict] = []
+    for item in nav_items:
+        if item["href"] not in seen_hrefs:
+            seen_hrefs.add(item["href"])
+            unique_nav.append(item)
+
+    if unique_nav:
+        basic_tests.append({
+            "id": f"t{tid}",
+            "name": "네비게이션 메뉴 테스트" if ko else "Navigation Menu Test",
+            "description": (
+                f"{len(unique_nav)}개 메뉴 항목을 각각 클릭하여 페이지 로딩 확인"
+                if ko
+                else f"Click each of {len(unique_nav)} menu items and verify page loads"
+            ),
+            "priority": "high",
+            "estimated_time": 10 * len(unique_nav),
+            "requires_auth": False,
+            "selected": True,
+            "actual_elements": [f"{n['text']} ({n['href']})" for n in unique_nav[:10]],
+        })
+        tid += 1
+
+    # Page load test
+    basic_tests.append({
+        "id": f"t{tid}",
+        "name": "페이지 로딩 테스트" if ko else "Page Load Test",
+        "description": (
+            f"스캔된 {len(pages)}개 페이지가 정상적으로 로딩되는지 확인"
+            if ko
+            else f"Verify all {len(pages)} scanned pages load without errors"
+        ),
+        "priority": "medium",
+        "estimated_time": 5 * len(pages),
+        "requires_auth": False,
+        "selected": True,
+        "actual_elements": [p.get("url", "") for p in pages[:5]],
+    })
+    tid += 1
+
+    categories.append({
+        "id": "basic",
+        "name": "기본 상태 점검" if ko else "Basic Health Check",
+        "auto_selected": True,
+        "tests": basic_tests,
+    })
+
+    # 2. Forms (if any)
+    all_forms = []
+    for p in pages:
+        for form in p.get("forms", []):
+            fields = form.get("fields", [])
+            if fields:
+                all_forms.append(form)
+
+    if all_forms:
+        form_tests = []
+        for i, form in enumerate(all_forms[:5]):
+            field_names = [f.get("name") or f.get("placeholder") or "field" for f in form.get("fields", [])]
+            form_tests.append({
+                "id": f"t{tid}",
+                "name": f"폼 입력 테스트 #{i + 1}" if ko else f"Form Input Test #{i + 1}",
+                "description": (
+                    f"필드: {', '.join(field_names[:5])}" if ko
+                    else f"Fields: {', '.join(field_names[:5])}"
+                ),
+                "priority": "medium",
+                "estimated_time": 20,
+                "requires_auth": False,
+                "selected": True,
+                "actual_elements": [form.get("selector") or form.get("action", "")],
+            })
+            tid += 1
+
+        categories.append({
+            "id": "forms",
+            "name": "폼 검증" if ko else "Form Validation",
+            "auto_selected": True,
+            "tests": form_tests,
+        })
+
+    # 3. Feature-based tests
+    feature_tests = []
+    for feat in features:
+        if feat == "login_form":
+            feature_tests.append({
+                "id": f"t{tid}",
+                "name": "로그인 흐름 테스트" if ko else "Login Flow Test",
+                "description": "로그인 페이지 접근 및 폼 동작 확인" if ko else "Access login page and verify form works",
+                "priority": "high",
+                "estimated_time": 30,
+                "requires_auth": True,
+                "selected": False,
+                "auth_fields": [
+                    {"key": "email", "label": "Email", "type": "email", "required": True},
+                    {"key": "password", "label": "Password", "type": "password", "required": True},
+                ],
+            })
+            tid += 1
+
+    if feature_tests:
+        categories.append({
+            "id": "features",
+            "name": "기능 테스트" if ko else "Feature Tests",
+            "auto_selected": False,
+            "tests": feature_tests,
+        })
+
+    return {"categories": categories}
 
 
 def _extract_json(text: str) -> dict:

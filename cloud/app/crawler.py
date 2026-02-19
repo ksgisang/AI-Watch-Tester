@@ -22,89 +22,117 @@ from app.ws import WSManager
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Feature detection — confidence-based, requires actual UI elements
+# Feature detection — hybrid: CSS selectors + link/button text matching
 # ---------------------------------------------------------------------------
 #
 # Each detector has:
-#   - strong_selectors: actual UI elements (forms, inputs, buttons) → high confidence
-#   - weak_selectors: links or generic class matches → lower confidence
-#   - confirm_texts: text that must appear nearby to confirm weak matches
-#   - threshold: minimum confidence to report (0.0–1.0)
+#   - strong: CSS selectors for definitive UI elements → 0.9 confidence
+#   - weak: CSS selectors for less certain matches → 0.3 alone, 0.6 with confirm_texts
+#   - link_texts: text patterns to match in link/button text → 0.7 confidence
+#   - link_hrefs: href patterns to match in links → 0.7 confidence
+#   - threshold: minimum confidence to report (0.0–1.0), default 0.5
 #
-# Scoring: strong selector match = 0.9, weak selector + confirm text = 0.6,
-#          weak selector alone = 0.3 (below default threshold → not reported)
+# Text matching checks actual interactive elements (links, buttons) only,
+# avoiding false positives from footer/copyright text.
 
 FEATURE_DETECTORS: dict[str, dict[str, Any]] = {
     "login_form": {
-        # Must have actual password input or login form — not just "Login" link text
         "strong": ["input[type=password]", "form[action*=login]", "form[action*=signin]"],
         "weak": [],
         "confirm_texts": [],
+        "link_texts": ["login", "log in", "sign in", "로그인"],
+        "link_hrefs": ["/login", "/signin", "/sign-in", "/log-in"],
+        "threshold": 0.5,
+    },
+    "signup": {
+        "strong": ["form[action*=register]", "form[action*=signup]"],
+        "weak": [],
+        "confirm_texts": [],
+        "link_texts": ["sign up", "signup", "register", "join", "회원가입", "가입"],
+        "link_hrefs": ["/register", "/signup", "/sign-up", "/join"],
         "threshold": 0.5,
     },
     "search": {
         "strong": ["input[type=search]", "[role=search]", "form[action*=search]"],
         "weak": ["input[placeholder*=search]", "input[placeholder*=검색]"],
         "confirm_texts": [],
+        "link_texts": [],
+        "link_hrefs": [],
         "threshold": 0.5,
     },
     "cart": {
-        # Require cart-specific link with cart path, or dedicated cart element
         "strong": ["a[href*='/cart']", "a[href*='/basket']", "[data-cart]"],
         "weak": ["[class*=cart-icon]", "[class*=cart-count]", "[class*=basket]"],
         "confirm_texts": ["장바구니", "Cart", "Basket"],
+        "link_texts": ["cart", "basket", "장바구니"],
+        "link_hrefs": ["/cart", "/basket"],
         "threshold": 0.5,
     },
     "product_list": {
-        # Require repeated product card patterns — not just a price mention
         "strong": ["[class*=product-list]", "[class*=product-grid]", "[class*=product-card]"],
         "weak": ["[class*=item-price]", "[class*=product]"],
         "confirm_texts": [],
+        "link_texts": [],
+        "link_hrefs": ["/products", "/shop", "/store"],
         "threshold": 0.5,
     },
     "review_form": {
-        # Require actual review form/textarea or star rating input — not just "review" text
         "strong": ["form[action*=review]", "textarea[name*=review]", "input[name*=rating]"],
         "weak": ["[class*=review-form]", "[class*=rating-input]", "[class*=star-rating]"],
         "confirm_texts": ["리뷰 작성", "Write a review", "후기 작성"],
+        "link_texts": [],
+        "link_hrefs": [],
         "threshold": 0.5,
     },
     "comment_form": {
-        # Require actual comment textarea — not just "comment" class
         "strong": ["textarea[name*=comment]", "form[action*=comment]"],
         "weak": ["[class*=comment-form]", "[class*=comment-input]"],
         "confirm_texts": ["댓글 작성", "댓글 등록", "Add comment", "Write comment"],
+        "link_texts": [],
+        "link_hrefs": [],
         "threshold": 0.5,
     },
     "board_write": {
-        # Require write/create link with board-like path — not just "Create" text
         "strong": ["a[href*='/write']", "a[href*='/board/']", "a[href*='/post/new']"],
         "weak": ["a[href*='/create']", "a[href*='/new']"],
         "confirm_texts": ["글쓰기", "새 글", "New Post", "게시판"],
+        "link_texts": ["게시판", "board", "forum"],
+        "link_hrefs": ["/board", "/forum", "/community", "/write"],
+        "threshold": 0.5,
+    },
+    "blog": {
+        "strong": [],
+        "weak": [],
+        "confirm_texts": [],
+        "link_texts": ["blog", "블로그"],
+        "link_hrefs": ["/blog", "/posts"],
         "threshold": 0.5,
     },
     "file_upload": {
         "strong": ["input[type=file]"],
         "weak": [],
         "confirm_texts": [],
+        "link_texts": [],
+        "link_hrefs": [],
         "threshold": 0.5,
     },
     "admin_panel": {
-        # Require actual admin path link — not just "admin" or "관리" text anywhere
-        "strong": ["a[href*='/admin']", "a[href*='/admin/']"],
+        "strong": ["a[href*='/admin']"],
         "weak": ["a[href*='/manage']"],
         "confirm_texts": ["관리자 페이지", "Admin Panel", "관리자 로그인"],
+        "link_texts": ["admin", "관리자"],
+        "link_hrefs": ["/admin"],
         "threshold": 0.5,
     },
     "newsletter": {
-        # Require actual subscribe form with email input — not just "구독" text
         "strong": ["form[action*=subscribe]", "form[action*=newsletter]"],
         "weak": ["[class*=newsletter]", "input[name*=newsletter]"],
         "confirm_texts": ["이메일 구독", "Subscribe", "뉴스레터 구독"],
+        "link_texts": [],
+        "link_hrefs": [],
         "threshold": 0.5,
     },
     "social_login": {
-        # Require actual login button elements — not just brand name text
         "strong": [
             "button[class*=google-login]", "button[class*=kakao-login]",
             "button[class*=naver-login]", "a[href*=oauth]",
@@ -113,18 +141,32 @@ FEATURE_DETECTORS: dict[str, dict[str, Any]] = {
         ],
         "weak": ["[class*=oauth]", "[class*=social-btn]"],
         "confirm_texts": ["소셜 로그인", "Sign in with", "카카오로 로그인", "네이버로 로그인"],
+        "link_texts": ["google", "kakao", "naver", "카카오", "네이버"],
+        "link_hrefs": ["/oauth", "/auth/google", "/auth/kakao", "/auth/naver"],
+        "threshold": 0.5,
+    },
+    "multilingual": {
+        "strong": [],
+        "weak": ["[class*=lang-switch]", "[class*=language]", "select[name*=lang]"],
+        "confirm_texts": [],
+        "link_texts": ["english", "한국어", "language", "언어"],
+        "link_hrefs": [],
         "threshold": 0.5,
     },
     "pagination": {
         "strong": ["[class*=pagination]", "nav[aria-label*=page]", "[class*=pager]"],
         "weak": [],
         "confirm_texts": [],
+        "link_texts": [],
+        "link_hrefs": [],
         "threshold": 0.5,
     },
     "filter_sort": {
         "strong": ["select[name*=sort]", "select[name*=order]", "[class*=filter-panel]"],
         "weak": ["[class*=filter]", "[class*=sort-btn]"],
         "confirm_texts": ["필터", "정렬", "Filter", "Sort by"],
+        "link_texts": [],
+        "link_hrefs": [],
         "threshold": 0.5,
     },
 }
@@ -271,8 +313,10 @@ async def _extract_page_data(page: Any, url: str, *, take_screenshot: bool = Tru
     return data
 
 
-async def _detect_features(page: Any, page_text: str) -> list[dict[str, Any]]:
-    """Detect site features with confidence scoring.
+async def _detect_features(
+    page: Any, page_text: str, page_data: dict | None = None,
+) -> list[dict[str, Any]]:
+    """Detect site features using CSS selectors + link/button text matching.
 
     Returns list of {"feature": str, "confidence": float} dicts.
     Only features above their threshold are included.
@@ -280,11 +324,36 @@ async def _detect_features(page: Any, page_text: str) -> list[dict[str, Any]]:
     detected: list[dict[str, Any]] = []
     lower_text = page_text.lower()
 
+    # Collect interactive element texts and hrefs for text-based matching
+    link_texts: list[str] = []
+    link_hrefs: list[str] = []
+    button_texts: list[str] = []
+    if page_data:
+        for link in page_data.get("links", []):
+            text = (link.get("text") or "").strip().lower()
+            href = (link.get("href") or "").lower()
+            if text and len(text) < 50:  # skip long paragraph-like texts
+                link_texts.append(text)
+            if href:
+                link_hrefs.append(href)
+        for nav in page_data.get("nav_menus", []):
+            for item in nav.get("items", []):
+                text = (item.get("text") or "").strip().lower()
+                href = (item.get("href") or "").lower()
+                if text and len(text) < 50:
+                    link_texts.append(text)
+                if href:
+                    link_hrefs.append(href)
+        for btn in page_data.get("buttons", []):
+            text = (btn.get("text") or "").strip().lower()
+            if text and len(text) < 50:
+                button_texts.append(text)
+
     for feature, patterns in FEATURE_DETECTORS.items():
         confidence = 0.0
         threshold = patterns.get("threshold", 0.5)
 
-        # Check strong selectors (high confidence: 0.9)
+        # 1. Check strong CSS selectors (high confidence: 0.9)
         for selector in patterns.get("strong", []):
             try:
                 count = await page.locator(selector).count()
@@ -294,8 +363,28 @@ async def _detect_features(page: Any, page_text: str) -> list[dict[str, Any]]:
             except Exception:
                 continue
 
-        # Check weak selectors (alone: 0.3, with confirm text: 0.6)
+        # 2. Check link/button text patterns (medium-high: 0.7)
         if confidence < 0.9:
+            for pat in patterns.get("link_texts", []):
+                pat_lower = pat.lower()
+                # Match in link text or button text (exact word or contains)
+                if any(pat_lower == t or pat_lower in t.split() for t in link_texts):
+                    confidence = max(confidence, 0.7)
+                    break
+                if any(pat_lower == t or pat_lower in t.split() for t in button_texts):
+                    confidence = max(confidence, 0.7)
+                    break
+
+        # 3. Check link href patterns (medium-high: 0.7)
+        if confidence < 0.7:
+            for pat in patterns.get("link_hrefs", []):
+                pat_lower = pat.lower()
+                if any(pat_lower in href for href in link_hrefs):
+                    confidence = max(confidence, 0.7)
+                    break
+
+        # 4. Check weak CSS selectors (alone: 0.3, with confirm text: 0.6)
+        if confidence < 0.6:
             weak_match = False
             for selector in patterns.get("weak", []):
                 try:
@@ -307,7 +396,6 @@ async def _detect_features(page: Any, page_text: str) -> list[dict[str, Any]]:
                     continue
 
             if weak_match:
-                # Check if confirm text exists to boost confidence
                 confirm_texts = patterns.get("confirm_texts", [])
                 text_confirmed = any(t.lower() in lower_text for t in confirm_texts)
                 confidence = max(confidence, 0.6 if text_confirmed else 0.3)
@@ -436,7 +524,7 @@ async def crawl_site(
                 page_text = await page.inner_text("body")
             except Exception:
                 page_text = ""
-            feature_results = await _detect_features(page, page_text)
+            feature_results = await _detect_features(page, page_text, page_data)
             for fr in feature_results:
                 fname = fr["feature"]
                 fconf = fr["confidence"]

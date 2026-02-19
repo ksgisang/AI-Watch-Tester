@@ -440,6 +440,9 @@
     "featureSocial": "소셜 로그인",
     "featurePagination": "페이지네이션",
     "featureFilter": "필터/정렬",
+    "featureBlog": "블로그",
+    "featureSignup": "회원가입",
+    "featureMultilingual": "다국어",
     "viewSiteMap": "사이트 맵 보기",
     "hideSiteMap": "사이트 맵 닫기",
     "scanProgress": "{current} / {max} 페이지"

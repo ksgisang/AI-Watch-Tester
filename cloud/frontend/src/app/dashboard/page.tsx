@@ -393,6 +393,9 @@ export default function DashboardPage() {
     social_login: ts("featureSocial"),
     pagination: ts("featurePagination"),
     filter_sort: ts("featureFilter"),
+    blog: ts("featureBlog"),
+    signup: ts("featureSignup"),
+    multilingual: ts("featureMultilingual"),
   };
 
   const isBusy = submitting || (phase !== "idle" && phase !== "done");

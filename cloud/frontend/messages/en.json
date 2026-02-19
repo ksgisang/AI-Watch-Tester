@@ -440,6 +440,9 @@
     "featureSocial": "Social Login",
     "featurePagination": "Pagination",
     "featureFilter": "Filter/Sort",
+    "featureBlog": "Blog",
+    "featureSignup": "Sign Up",
+    "featureMultilingual": "Multilingual",
     "viewSiteMap": "View site map",
     "hideSiteMap": "Hide site map",
     "scanProgress": "{current} / {max} pages"
