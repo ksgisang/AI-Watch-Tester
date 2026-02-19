@@ -470,9 +470,7 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
                     )
 
                     elapsed = getattr(result, "elapsed_ms", 0)
-                    error_msg = getattr(result, "error", None) or (
-                        str(getattr(result, "message", "")) if status == "failed" else None
-                    )
+                    error_msg = getattr(result, "error_message", None) if status == "failed" else None
 
                     step_results.append({
                         "step": i + 1,
