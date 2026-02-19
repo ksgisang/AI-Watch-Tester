@@ -16,8 +16,8 @@ const jsonLd = {
   operatingSystem: "Web, macOS, Linux, Windows",
   offers: [
     { "@type": "Offer", price: "0", priceCurrency: "USD", name: "Free" },
-    { "@type": "Offer", price: "29", priceCurrency: "USD", name: "Pro" },
-    { "@type": "Offer", price: "49", priceCurrency: "USD", name: "Pro+GitHub" },
+    { "@type": "Offer", price: "28.99", priceCurrency: "USD", name: "Pro" },
+    { "@type": "Offer", price: "98.99", priceCurrency: "USD", name: "Team" },
   ],
 };
 
@@ -31,23 +31,21 @@ interface PricingRow {
   key: string;
   free: CellValue;
   pro: CellValue;
-  proGithub: CellValue;
-  local: CellValue;
+  team: CellValue;
 }
 
 const PRICING_ROWS: PricingRow[] = [
-  { key: "featAiScenario", free: true, pro: true, proGithub: true, local: true },
-  { key: "featAutoExplore", free: "val3Pages", pro: "valUnlimited", proGithub: "valUnlimited", local: "valUnlimited" },
-  { key: "featScreenshot", free: true, pro: true, proGithub: true, local: true },
-  { key: "featSecurity", free: false, pro: true, proGithub: true, local: true },
-  { key: "featFixGuide", free: false, pro: true, proGithub: true, local: true },
-  { key: "featCodeAnalysis", free: false, pro: false, proGithub: true, local: true },
-  { key: "featAutoFix", free: false, pro: false, proGithub: true, local: true },
-  { key: "featDebugLoop", free: false, pro: false, proGithub: true, local: true },
-  { key: "featDbSecurity", free: false, pro: false, proGithub: true, local: true },
-  { key: "featOffline", free: false, pro: false, proGithub: false, local: true },
-  { key: "featNoDataTransfer", free: false, pro: false, proGithub: false, local: true },
-  { key: "featMonthlyTests", free: "val5Tests", pro: "val100Tests", proGithub: "valUnlimited", local: "valUnlimited" },
+  { key: "featAiScenario", free: true, pro: true, team: true },
+  { key: "featAutoExplore", free: "val3Pages", pro: "valUnlimited", team: "valUnlimited" },
+  { key: "featScreenshot", free: true, pro: true, team: true },
+  { key: "featSecurity", free: false, pro: true, team: true },
+  { key: "featFixGuide", free: false, pro: true, team: true },
+  { key: "featCodeAnalysis", free: false, pro: true, team: true },
+  { key: "featAutoFix", free: false, pro: true, team: true },
+  { key: "featDebugLoop", free: false, pro: true, team: true },
+  { key: "featApiKeys", free: false, pro: true, team: true },
+  { key: "featMonthlyTests", free: "val5Tests", pro: "val100Tests", team: "val500Tests" },
+  { key: "featConcurrent", free: "val1Concurrent", pro: "val3Concurrent", team: "val10Concurrent" },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -85,7 +83,7 @@ export default async function LandingPage() {
                 {t("heroCta1")}
               </Link>
               <Link
-                href="/signup"
+                href="/pricing"
                 className="inline-block rounded-lg border border-gray-300 bg-white px-7 py-3 text-base font-semibold text-gray-700 transition hover:border-gray-400 hover:bg-gray-50"
               >
                 {t("heroCta2")}
@@ -205,7 +203,7 @@ export default async function LandingPage() {
           </h2>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-sm">
+            <table className="w-full min-w-[520px] text-sm">
               <thead>
                 <tr className="border-b border-gray-200">
                   <th className="px-4 py-3 text-left font-medium text-gray-500">
@@ -215,27 +213,20 @@ export default async function LandingPage() {
                     <div>{t("freeTier")}</div>
                     <div className="text-lg font-bold text-gray-900">{t("freePrice")}</div>
                   </th>
-                  <th className="px-4 py-3 text-center font-semibold text-gray-700">
-                    <div>{t("proTier")}</div>
-                    <div className="text-lg font-bold text-gray-900">
-                      {t("proPrice")}
-                      <span className="text-xs font-normal text-gray-500">{t("perMonth")}</span>
-                    </div>
-                  </th>
                   <th className="relative rounded-t-xl bg-blue-50 px-4 py-3 text-center font-semibold text-blue-700 ring-2 ring-blue-500">
                     <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-blue-600 px-2.5 py-0.5 text-[10px] font-bold text-white whitespace-nowrap">
                       {t("mostPopular")}
                     </span>
-                    <div>{t("proGithubTier")}</div>
+                    <div>{t("proTier")}</div>
                     <div className="text-lg font-bold text-blue-900">
-                      {t("proGithubPrice")}
+                      {t("proPrice")}
                       <span className="text-xs font-normal text-blue-600">{t("perMonth")}</span>
                     </div>
                   </th>
                   <th className="px-4 py-3 text-center font-semibold text-gray-700">
-                    <div>{t("localTier")}</div>
+                    <div>{t("teamTier")}</div>
                     <div className="text-lg font-bold text-gray-900">
-                      {t("localPrice")}
+                      {t("teamPrice")}
                       <span className="text-xs font-normal text-gray-500">{t("perMonth")}</span>
                     </div>
                   </th>
@@ -245,9 +236,9 @@ export default async function LandingPage() {
                 {PRICING_ROWS.map((row) => (
                   <tr key={row.key} className="hover:bg-gray-50/50">
                     <td className="px-4 py-3 font-medium text-gray-700">{t(row.key)}</td>
-                    {(["free", "pro", "proGithub", "local"] as const).map((tier) => {
+                    {(["free", "pro", "team"] as const).map((tier) => {
                       const val = row[tier];
-                      const isHighlighted = tier === "proGithub";
+                      const isHighlighted = tier === "pro";
                       return (
                         <td
                           key={tier}
@@ -275,31 +266,21 @@ export default async function LandingPage() {
                       {t("pricingCta")}
                     </Link>
                   </td>
-                  <td className="px-4 py-4 text-center">
+                  <td className="bg-blue-50/50 px-4 py-4 text-center ring-2 ring-inset ring-blue-500 rounded-b-xl">
                     <Link
-                      href="/signup"
-                      className="inline-block rounded-lg border border-blue-300 px-4 py-2 text-xs font-medium text-blue-700 transition hover:bg-blue-50"
+                      href="/pricing"
+                      className="inline-block rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white shadow transition hover:bg-blue-700"
                     >
                       {t("pricingCtaPro")}
                     </Link>
                   </td>
-                  <td className="bg-blue-50/50 px-4 py-4 text-center ring-2 ring-inset ring-blue-500 rounded-b-xl">
-                    <Link
-                      href="/signup"
-                      className="inline-block rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white shadow transition hover:bg-blue-700"
-                    >
-                      {t("pricingCtaProGithub")}
-                    </Link>
-                  </td>
                   <td className="px-4 py-4 text-center">
-                    <a
-                      href="https://github.com/ksgisang/AI-Watch-Tester#local-mode"
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <Link
+                      href="/pricing"
                       className="inline-block rounded-lg border border-gray-300 px-4 py-2 text-xs font-medium text-gray-700 transition hover:bg-gray-50"
                     >
-                      {t("pricingCtaLocal")}
-                    </a>
+                      {t("pricingCtaTeam")}
+                    </Link>
                   </td>
                 </tr>
               </tfoot>
@@ -387,7 +368,7 @@ export default async function LandingPage() {
               {t("footerBtn1")}
             </Link>
             <Link
-              href="/signup"
+              href="/pricing"
               className="inline-block rounded-lg border border-white/40 bg-white/10 px-7 py-3 text-base font-semibold text-white backdrop-blur transition hover:bg-white/20"
             >
               {t("footerBtn2")}

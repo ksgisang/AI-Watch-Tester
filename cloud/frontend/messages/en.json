@@ -20,7 +20,9 @@
     "signOut": "Sign Out",
     "login": "Login",
     "signUp": "Sign Up",
-    "settings": "Settings"
+    "settings": "Settings",
+    "pricing": "Pricing",
+    "billing": "Billing"
   },
   "landing": {
     "heroTitle": "AI tests your website, finds issues, and fixes the code",
@@ -64,12 +66,10 @@
     "feature": "Feature",
     "freeTier": "Free",
     "proTier": "Pro",
-    "proGithubTier": "Pro+GitHub",
-    "localTier": "Local",
+    "teamTier": "Team",
     "freePrice": "$0",
-    "proPrice": "$29",
-    "proGithubPrice": "$49",
-    "localPrice": "$49",
+    "proPrice": "$28.99",
+    "teamPrice": "$98.99",
     "perMonth": "/mo",
 
     "featAiScenario": "AI scenario generation",
@@ -89,11 +89,16 @@
     "valUnlimited": "Unlimited",
     "val5Tests": "5",
     "val100Tests": "100",
+    "val500Tests": "500",
+    "val1Concurrent": "1",
+    "val3Concurrent": "3",
+    "val10Concurrent": "10",
+    "featConcurrent": "Concurrent tests",
+    "featApiKeys": "API keys (CI/CD)",
 
     "pricingCta": "Get Started",
     "pricingCtaPro": "Start Pro",
-    "pricingCtaProGithub": "Start Pro+GitHub",
-    "pricingCtaLocal": "Download",
+    "pricingCtaTeam": "Start Team",
 
     "useCasesTitle": "Who uses AWT?",
     "useCase1Role": "Startup CTO",
@@ -115,7 +120,7 @@
 
     "footerCta": "Start now \u2014 Free, no installation, first test in 5 minutes",
     "footerBtn1": "Get Started Free",
-    "footerBtn2": "Pro+GitHub 14-day Free Trial",
+    "footerBtn2": "Start Pro Plan",
 
     "localCommandLabel": "One command to start",
 
@@ -299,12 +304,65 @@
     "lastUsed": "Last used",
     "revoke": "Revoke",
     "revokeConfirm": "Are you sure you want to revoke this API key? This cannot be undone.",
-    "loginRequired": "Please log in to access settings."
+    "loginRequired": "Please log in to access settings.",
+    "apiKeysProOnly": "API keys require a Pro or Team subscription.",
+    "upgradeToPro": "Upgrade to Pro"
   },
   "fileUpload": {
     "dropHint": "Drop spec documents here or click to browse",
     "formats": "PDF, DOCX, MD, TXT (max 10MB)",
     "unsupportedFile": "Unsupported file: {name}. Allowed: .md, .txt, .pdf, .docx",
     "fileTooLarge": "File too large: {name}. Max 10MB."
+  },
+  "pricing": {
+    "title": "Choose Your Plan",
+    "subtitle": "Start free, upgrade as you grow",
+    "free": "Free",
+    "freePrice": "$0",
+    "freeDesc": "Try AI testing with basic features",
+    "freeFeat1": "5 tests / month",
+    "freeFeat2": "1 concurrent test",
+    "freeFeat3": "AI scenario generation",
+    "freeFeat4": "Screenshot reports",
+    "freeCta": "Get Started Free",
+    "pro": "Pro",
+    "proPrice": "$28.99",
+    "proDesc": "For professional developers and small teams",
+    "proFeat1": "100 tests / month",
+    "proFeat2": "3 concurrent tests",
+    "proFeat3": "API keys for CI/CD",
+    "proFeat4": "Source code analysis",
+    "proFeat5": "AI auto-fix PRs",
+    "proCta": "Start Pro",
+    "team": "Team",
+    "teamPrice": "$98.99",
+    "teamDesc": "For teams that need high volume testing",
+    "teamFeat1": "500 tests / month",
+    "teamFeat2": "10 concurrent tests",
+    "teamFeat3": "Everything in Pro",
+    "teamFeat4": "Priority support",
+    "teamCta": "Start Team",
+    "perMonth": "/mo",
+    "mostPopular": "Most Popular",
+    "currentPlan": "Current Plan"
+  },
+  "billing": {
+    "title": "Billing",
+    "subtitle": "Manage your subscription and usage",
+    "currentPlan": "Current Plan",
+    "usage": "Usage",
+    "testsThisMonth": "{used} / {limit} tests this month",
+    "concurrentTests": "{active} / {limit} concurrent tests",
+    "subscription": "Subscription",
+    "expiresAt": "Renews on {date}",
+    "manageSub": "Manage Subscription",
+    "upgrade": "Upgrade Plan",
+    "noSubscription": "You are on the Free plan.",
+    "upgradePrompt": "Upgrade to Pro or Team for more tests and features.",
+    "loginRequired": "Please log in to view billing."
+  },
+  "metadata_extra": {
+    "pricingTitle": "Pricing",
+    "billingTitle": "Billing"
   }
 }

@@ -232,4 +232,50 @@ export async function deleteApiKey(id: number): Promise<void> {
   }
 }
 
+// -- Billing --
+
+export interface BillingUsage {
+  monthly_used: number;
+  monthly_limit: number;
+  active_count: number;
+  concurrent_limit: number;
+}
+
+export interface BillingInfo {
+  tier: "free" | "pro" | "team";
+  lemon_customer_id: string | null;
+  lemon_subscription_id: string | null;
+  plan_expires_at: string | null;
+  usage: BillingUsage;
+}
+
+export async function fetchBilling(): Promise<BillingInfo> {
+  const res = await authFetch("/api/billing/me");
+  if (!res.ok) throw new Error(`Error ${res.status}`);
+  return res.json();
+}
+
+export async function fetchBillingPortal(): Promise<{ url: string }> {
+  const res = await authFetch("/api/billing/portal");
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || `Error ${res.status}`);
+  }
+  return res.json();
+}
+
+// -- Checkout URLs --
+
+const CHECKOUT_URLS: Record<string, string> = {
+  pro: process.env.NEXT_PUBLIC_LEMON_PRO_URL || "",
+  team: process.env.NEXT_PUBLIC_LEMON_TEAM_URL || "",
+};
+
+export function getCheckoutUrl(plan: "pro" | "team", userId: string): string {
+  const base = CHECKOUT_URLS[plan];
+  if (!base) return "/pricing";
+  const sep = base.includes("?") ? "&" : "?";
+  return `${base}${sep}checkout[custom][user_id]=${encodeURIComponent(userId)}`;
+}
+
 export { API_URL };

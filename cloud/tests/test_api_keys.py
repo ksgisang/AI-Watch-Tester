@@ -7,9 +7,17 @@ from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_create_api_key(client: AsyncClient) -> None:
-    """POST /api/keys creates a key with awt_ prefix and 36 chars."""
+async def test_free_user_cannot_create_api_key(client: AsyncClient) -> None:
+    """Free user gets 403 when trying to create an API key."""
     resp = await client.post("/api/keys", json={"name": "CI key"})
+    assert resp.status_code == 403
+    assert "pro" in resp.json()["detail"].lower() or "team" in resp.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_create_api_key(pro_client: AsyncClient) -> None:
+    """POST /api/keys creates a key with awt_ prefix and 36 chars."""
+    resp = await pro_client.post("/api/keys", json={"name": "CI key"})
     assert resp.status_code == 201
     data = resp.json()
     assert data["name"] == "CI key"
@@ -21,12 +29,12 @@ async def test_create_api_key(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_api_keys_no_full_key(client: AsyncClient) -> None:
+async def test_list_api_keys_no_full_key(pro_client: AsyncClient) -> None:
     """GET /api/keys returns prefix but not full key."""
-    await client.post("/api/keys", json={"name": "key1"})
-    await client.post("/api/keys", json={"name": "key2"})
+    await pro_client.post("/api/keys", json={"name": "key1"})
+    await pro_client.post("/api/keys", json={"name": "key2"})
 
-    resp = await client.get("/api/keys")
+    resp = await pro_client.get("/api/keys")
     assert resp.status_code == 200
     keys = resp.json()
     assert len(keys) == 2
@@ -37,21 +45,21 @@ async def test_list_api_keys_no_full_key(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_delete_api_key(client: AsyncClient) -> None:
+async def test_delete_api_key(pro_client: AsyncClient) -> None:
     """DELETE /api/keys/{id} revokes a key."""
-    create_resp = await client.post("/api/keys", json={"name": "to-delete"})
+    create_resp = await pro_client.post("/api/keys", json={"name": "to-delete"})
     key_id = create_resp.json()["id"]
 
-    del_resp = await client.delete(f"/api/keys/{key_id}")
+    del_resp = await pro_client.delete(f"/api/keys/{key_id}")
     assert del_resp.status_code == 204
 
     # Verify it's gone
-    list_resp = await client.get("/api/keys")
+    list_resp = await pro_client.get("/api/keys")
     assert len(list_resp.json()) == 0
 
 
 @pytest.mark.asyncio
-async def test_delete_other_user_key_404(client: AsyncClient, db_session) -> None:
+async def test_delete_other_user_key_404(pro_client: AsyncClient, db_session) -> None:
     """DELETE /api/keys/{id} returns 404 for another user's key."""
     import hashlib
     from app.models import ApiKey
@@ -67,5 +75,5 @@ async def test_delete_other_user_key_404(client: AsyncClient, db_session) -> Non
     await db_session.commit()
     await db_session.refresh(ak)
 
-    resp = await client.delete(f"/api/keys/{ak.id}")
+    resp = await pro_client.delete(f"/api/keys/{ak.id}")
     assert resp.status_code == 404

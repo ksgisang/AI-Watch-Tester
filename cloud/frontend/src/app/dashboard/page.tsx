@@ -1,13 +1,13 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useAuth } from "@/components/AuthProvider";
 import TestProgress from "@/components/TestProgress";
 import ScenarioEditor from "@/components/ScenarioEditor";
 import FileUpload from "@/components/FileUpload";
-import { createTest, getTest, uploadDocument, type TestItem } from "@/lib/api";
+import { createTest, getTest, uploadDocument, fetchBilling, type TestItem, type BillingInfo } from "@/lib/api";
 
 type Phase = "idle" | "generating" | "review" | "executing" | "done";
 
@@ -25,12 +25,20 @@ export default function DashboardPage() {
   const [scenarioYaml, setScenarioYaml] = useState("");
   const [showUpload, setShowUpload] = useState(false);
   const stagedFilesRef = useRef<File[]>([]);
+  const [billing, setBilling] = useState<BillingInfo | null>(null);
 
   // Redirect if not authenticated
   if (!authLoading && !user) {
     router.push("/login");
     return null;
   }
+
+  // Fetch billing info
+  useEffect(() => {
+    if (user) {
+      fetchBilling().then(setBilling).catch(() => {});
+    }
+  }, [user]);
 
   if (authLoading) {
     return (
@@ -121,13 +129,55 @@ export default function DashboardPage() {
       {/* Cloud mode header */}
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">{t("title")}</h1>
-        <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700">
-          {t("cloudMode")}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700">
+            {t("cloudMode")}
+          </span>
+          {billing && (
+            <span className={`rounded-full px-3 py-1 text-xs font-medium ${
+              billing.tier === "team"
+                ? "bg-purple-100 text-purple-700"
+                : billing.tier === "pro"
+                ? "bg-blue-100 text-blue-700"
+                : "bg-gray-100 text-gray-600"
+            }`}>
+              {billing.tier.toUpperCase()}
+            </span>
+          )}
+        </div>
       </div>
-      <p className="mb-6 text-sm text-gray-500">
+      <p className="mb-4 text-sm text-gray-500">
         {t("subtitle")}
       </p>
+      {/* Usage bar */}
+      {billing && (
+        <div className="mb-6 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-gray-600">
+              {billing.usage.monthly_used}/{billing.usage.monthly_limit} tests this month
+            </span>
+            {billing.tier === "free" && (
+              <a href="/pricing" className="text-xs font-medium text-blue-600 hover:underline">
+                Upgrade
+              </a>
+            )}
+          </div>
+          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-gray-200">
+            <div
+              className={`h-full rounded-full transition-all ${
+                billing.usage.monthly_used / billing.usage.monthly_limit >= 0.9
+                  ? "bg-red-500"
+                  : billing.usage.monthly_used / billing.usage.monthly_limit >= 0.7
+                  ? "bg-yellow-500"
+                  : "bg-blue-500"
+              }`}
+              style={{
+                width: `${Math.min(100, Math.round((billing.usage.monthly_used / billing.usage.monthly_limit) * 100))}%`,
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* URL Input + Attach + Action Buttons */}
       <form onSubmit={handleGenerate} className="mb-6 space-y-3">

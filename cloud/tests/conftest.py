@@ -44,6 +44,16 @@ _MOCK_USER = User(id="test-uid-001", email="test@example.com", tier=UserTier.FRE
 _MOCK_PRO_USER = User(id="pro-uid-001", email="pro@example.com", tier=UserTier.PRO)
 
 
+@pytest.fixture(autouse=True)
+def _high_concurrent_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default high concurrent limit for all tests (test concurrent separately)."""
+    from app import config
+
+    monkeypatch.setattr(config.settings, "concurrent_limit_free", 100)
+    monkeypatch.setattr(config.settings, "concurrent_limit_pro", 100)
+    monkeypatch.setattr(config.settings, "concurrent_limit_team", 100)
+
+
 def _make_mock_user_dep(user: User):
     """Create a dependency override that returns a fixed user."""
     async def _override() -> User:

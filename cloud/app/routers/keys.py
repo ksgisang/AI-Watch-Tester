@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import ApiKey, User
+from app.models import ApiKey, User, UserTier
 from app.schemas import ApiKeyCreate, ApiKeyCreated, ApiKeyResponse
 
 router = APIRouter(prefix="/api/keys", tags=["keys"])
@@ -24,6 +24,12 @@ async def create_api_key(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Generate a new API key. Full key is returned once only."""
+    if user.tier == UserTier.FREE:
+        raise HTTPException(
+            status_code=403,
+            detail="API keys require a Pro or Team subscription. Upgrade at /pricing.",
+        )
+
     raw_key = "awt_" + secrets.token_hex(16)
     key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
     prefix = raw_key[:8]  # awt_xxxx

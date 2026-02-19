@@ -39,6 +39,12 @@ export default function Header() {
                 {t("history")}
               </Link>
               <Link
+                href="/billing"
+                className="text-sm text-gray-600 hover:text-gray-900"
+              >
+                {t("billing")}
+              </Link>
+              <Link
                 href="/status"
                 className="text-sm text-gray-600 hover:text-gray-900"
               >
@@ -60,6 +66,12 @@ export default function Header() {
             </>
           ) : (
             <>
+              <Link
+                href="/pricing"
+                className="text-sm text-gray-600 hover:text-gray-900"
+              >
+                {t("pricing")}
+              </Link>
               <Link
                 href="/login"
                 className="text-sm text-gray-600 hover:text-gray-900"

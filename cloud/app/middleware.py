@@ -1,4 +1,4 @@
-"""Rate limiting middleware — monthly POST /api/tests quota."""
+"""Rate limiting middleware — monthly POST /api/tests quota + concurrent limit."""
 
 from __future__ import annotations
 
@@ -11,7 +11,52 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_user
 from app.config import settings
 from app.database import get_db
-from app.models import Test, User, UserTier
+from app.models import Test, TestStatus, User, UserTier
+
+# -- Tier-based limits lookup (read from settings at call time for testability) --
+
+
+def get_monthly_limit(tier: UserTier) -> int:
+    limits = {
+        UserTier.FREE: settings.rate_limit_free,
+        UserTier.PRO: settings.rate_limit_pro,
+        UserTier.TEAM: settings.rate_limit_team,
+    }
+    return limits.get(tier, settings.rate_limit_free)
+
+
+def get_concurrent_limit(tier: UserTier) -> int:
+    limits = {
+        UserTier.FREE: settings.concurrent_limit_free,
+        UserTier.PRO: settings.concurrent_limit_pro,
+        UserTier.TEAM: settings.concurrent_limit_team,
+    }
+    return limits.get(tier, settings.concurrent_limit_free)
+
+
+async def get_monthly_used(user_id: str, db: AsyncSession) -> int:
+    """Count tests created this month by the user."""
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    q = (
+        select(func.count())
+        .select_from(Test)
+        .where(Test.user_id == user_id, Test.created_at >= month_start)
+    )
+    return (await db.execute(q)).scalar() or 0
+
+
+async def get_active_count(user_id: str, db: AsyncSession) -> int:
+    """Count currently active (generating/queued/running) tests for the user."""
+    q = (
+        select(func.count())
+        .select_from(Test)
+        .where(
+            Test.user_id == user_id,
+            Test.status.in_([TestStatus.GENERATING, TestStatus.QUEUED, TestStatus.RUNNING]),
+        )
+    )
+    return (await db.execute(q)).scalar() or 0
 
 
 async def check_rate_limit(
@@ -19,71 +64,45 @@ async def check_rate_limit(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """Check monthly POST /api/tests quota.
+    """Check monthly POST /api/tests quota + concurrent execution limit.
 
-    Only applies to POST requests on the tests endpoint.
-    Returns the user if within limit, raises 429 if exceeded.
-
+    Returns the user if within limits, raises 429 if exceeded.
     Adds X-RateLimit-* headers via request.state for the response middleware.
     """
     now = datetime.now(timezone.utc)
+    limit = get_monthly_limit(user.tier)
 
-    # -- Daily limit for Pro users --
-    if user.tier == UserTier.PRO and settings.daily_limit_pro > 0:
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        daily_q = (
-            select(func.count())
-            .select_from(Test)
-            .where(Test.user_id == user.id, Test.created_at >= today_start)
-        )
-        daily_used = (await db.execute(daily_q)).scalar() or 0
-        if daily_used >= settings.daily_limit_pro:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Daily test limit reached ({settings.daily_limit_pro}). Try again tomorrow.",
-                headers={
-                    "X-RateLimit-Limit": str(settings.daily_limit_pro),
-                    "X-RateLimit-Remaining": "0",
-                    "X-RateLimit-Reset": _next_day_iso(now),
-                },
-            )
+    # -- Monthly limit --
+    used = await get_monthly_used(user.id, db)
 
-    # Determine limit based on tier
-    if user.tier == UserTier.PRO:
-        limit = settings.rate_limit_pro
-    else:
-        limit = settings.rate_limit_free
-
-    # Unlimited (-1)
-    if limit < 0:
-        request.state.rate_limit = -1
-        request.state.rate_remaining = -1
-        return user
-
-    # Count this month's test creations
-    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-
-    count_q = (
-        select(func.count())
-        .select_from(Test)
-        .where(Test.user_id == user.id, Test.created_at >= month_start)
-    )
-    used = (await db.execute(count_q)).scalar() or 0
-
-    # Store for response headers (account for the current request)
     remaining = max(0, limit - used - 1)
     request.state.rate_limit = limit
     request.state.rate_remaining = remaining
 
     if used >= limit:
+        upgrade_hint = (
+            " Upgrade at /pricing for more tests."
+            if user.tier == UserTier.FREE
+            else ""
+        )
         raise HTTPException(
             status_code=429,
-            detail=f"Monthly test limit reached ({limit}). Upgrade to Pro for unlimited tests.",
+            detail=f"Monthly test limit reached ({limit}).{upgrade_hint}",
             headers={
                 "X-RateLimit-Limit": str(limit),
                 "X-RateLimit-Remaining": "0",
                 "X-RateLimit-Reset": _next_month_iso(now),
             },
+        )
+
+    # -- Concurrent limit --
+    concurrent_limit = get_concurrent_limit(user.tier)
+    active = await get_active_count(user.id, db)
+
+    if active >= concurrent_limit:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Concurrent test limit reached ({concurrent_limit}). Wait for running tests to finish.",
         )
 
     return user
@@ -95,12 +114,4 @@ def _next_month_iso(now: datetime) -> str:
         reset = now.replace(year=now.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
     else:
         reset = now.replace(month=now.month + 1, day=1, hour=0, minute=0, second=0, microsecond=0)
-    return reset.isoformat()
-
-
-def _next_day_iso(now: datetime) -> str:
-    """Return ISO timestamp of the start of next day (UTC)."""
-    from datetime import timedelta
-
-    reset = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     return reset.isoformat()

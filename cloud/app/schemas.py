@@ -84,6 +84,25 @@ class ErrorResponse(BaseModel):
 # -- API Keys --
 
 
+class BillingUsage(BaseModel):
+    """Usage stats for billing."""
+
+    monthly_used: int
+    monthly_limit: int
+    active_count: int
+    concurrent_limit: int
+
+
+class BillingResponse(BaseModel):
+    """GET /api/billing/me response."""
+
+    tier: UserTier
+    lemon_customer_id: str | None = None
+    lemon_subscription_id: str | None = None
+    plan_expires_at: datetime | None = None
+    usage: BillingUsage
+
+
 class ApiKeyCreate(BaseModel):
     """POST /api/keys request body."""
 

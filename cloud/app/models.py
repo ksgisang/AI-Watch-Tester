@@ -29,6 +29,7 @@ class UserTier(str, enum.Enum):
 
     FREE = "free"
     PRO = "pro"
+    TEAM = "team"
 
 
 class Test(Base):
@@ -70,6 +71,11 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     tier: Mapped[UserTier] = mapped_column(
         Enum(UserTier), default=UserTier.FREE, nullable=False
+    )
+    lemon_customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    lemon_subscription_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    plan_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

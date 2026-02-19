@@ -3,12 +3,15 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useAuth } from "@/components/AuthProvider";
+import Link from "next/link";
 import {
   createApiKey,
   listApiKeys,
   deleteApiKey,
+  fetchBilling,
   type ApiKeyItem,
   type ApiKeyCreatedItem,
+  type BillingInfo,
 } from "@/lib/api";
 
 export default function SettingsPage() {
@@ -21,6 +24,7 @@ export default function SettingsPage() {
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [billing, setBilling] = useState<BillingInfo | null>(null);
 
   const loadKeys = async () => {
     try {
@@ -32,7 +36,10 @@ export default function SettingsPage() {
   };
 
   useEffect(() => {
-    if (user) loadKeys();
+    if (user) {
+      loadKeys();
+      fetchBilling().then(setBilling).catch(() => {});
+    }
   }, [user]);
 
   const handleCreate = async () => {
@@ -87,6 +94,18 @@ export default function SettingsPage() {
         </h2>
         <p className="mb-4 text-sm text-gray-500">{t("apiKeysDesc")}</p>
 
+        {billing?.tier === "free" ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
+            <p className="mb-3 text-sm text-amber-800">{t("apiKeysProOnly")}</p>
+            <Link
+              href="/pricing"
+              className="inline-block rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              {t("upgradeToPro")}
+            </Link>
+          </div>
+        ) : (
+        <>
         {/* Create new key */}
         <div className="mb-4 flex gap-2">
           <input
@@ -173,6 +192,8 @@ export default function SettingsPage() {
               </div>
             ))}
           </div>
+        )}
+        </>
         )}
       </div>
     </div>

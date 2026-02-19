@@ -29,7 +29,8 @@ class Settings(BaseSettings):
 
     # Rate limits (monthly POST /api/tests)
     rate_limit_free: int = 5
-    rate_limit_pro: int = -1  # -1 = unlimited
+    rate_limit_pro: int = 100
+    rate_limit_team: int = 500
 
     # Worker
     max_concurrent: int = 2
@@ -50,8 +51,14 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("AWT_AI_MODEL", "AWT_SERVICE_AI_MODEL"),
     )
 
-    # Daily limit (Pro tier, -1 = unlimited)
-    daily_limit_pro: int = 20
+    # Concurrent execution limits per tier
+    concurrent_limit_free: int = 1
+    concurrent_limit_pro: int = 3
+    concurrent_limit_team: int = 10
+
+    # Lemon Squeezy
+    lemon_webhook_secret: str = ""
+    lemon_api_key: str = ""
 
     # CORS — comma-separated origins, or "*" for all (dev default)
     cors_origins: str = "*"

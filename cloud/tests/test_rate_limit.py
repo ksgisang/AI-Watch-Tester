@@ -43,8 +43,8 @@ async def test_free_user_exceeds_limit(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_pro_user_no_limit(pro_client: AsyncClient) -> None:
-    """Pro user has unlimited test creation."""
+async def test_pro_user_within_default_limit(pro_client: AsyncClient) -> None:
+    """Pro user can create tests within 100 monthly limit."""
     for i in range(10):
         resp = await pro_client.post(
             "/api/tests",

@@ -20,7 +20,9 @@
     "signOut": "\ub85c\uadf8\uc544\uc6c3",
     "login": "\ub85c\uadf8\uc778",
     "signUp": "\ud68c\uc6d0\uac00\uc785",
-    "settings": "\uc124\uc815"
+    "settings": "\uc124\uc815",
+    "pricing": "\uc694\uae08\uc81c",
+    "billing": "\uacb0\uc81c"
   },
   "landing": {
     "heroTitle": "AI\uac00 \ub2f9\uc2e0\uc758 \uc6f9\uc0ac\uc774\ud2b8\ub97c \ud14c\uc2a4\ud2b8\ud558\uace0, \ubb38\uc81c\ub97c \ucc3e\uace0, \ucf54\ub4dc\uae4c\uc9c0 \uc218\uc815\ud569\ub2c8\ub2e4",
@@ -65,12 +67,10 @@
     "feature": "\uae30\ub2a5",
     "freeTier": "Free",
     "proTier": "Pro",
-    "proGithubTier": "Pro+GitHub",
-    "localTier": "Local",
+    "teamTier": "Team",
     "freePrice": "$0",
-    "proPrice": "$29",
-    "proGithubPrice": "$49",
-    "localPrice": "$49",
+    "proPrice": "$28.99",
+    "teamPrice": "$98.99",
     "perMonth": "/\uc6d4",
 
     "featAiScenario": "AI \uc2dc\ub098\ub9ac\uc624 \uc0dd\uc131",
@@ -90,11 +90,16 @@
     "valUnlimited": "\ubb34\uc81c\ud55c",
     "val5Tests": "5\ud68c",
     "val100Tests": "100\ud68c",
+    "val500Tests": "500\ud68c",
+    "val1Concurrent": "1",
+    "val3Concurrent": "3",
+    "val10Concurrent": "10",
+    "featConcurrent": "\ub3d9\uc2dc \uc2e4\ud589",
+    "featApiKeys": "API \ud0a4 (CI/CD)",
 
     "pricingCta": "\uc2dc\uc791\ud558\uae30",
     "pricingCtaPro": "Pro \uc2dc\uc791",
-    "pricingCtaProGithub": "Pro+GitHub \uc2dc\uc791",
-    "pricingCtaLocal": "\ub2e4\uc6b4\ub85c\ub4dc",
+    "pricingCtaTeam": "Team \uc2dc\uc791",
 
     "useCasesTitle": "\ub204\uac00 AWT\ub97c \uc0ac\uc6a9\ud558\ub098\uc694?",
     "useCase1Role": "\uc2a4\ud0c0\ud2b8\uc5c5 CTO",
@@ -116,7 +121,7 @@
 
     "footerCta": "\uc9c0\uae08 \uc2dc\uc791\ud558\uc138\uc694 \u2014 \ubb34\ub8cc, \uc124\uce58 \uc5c6\uc74c, 5\ubd84\uc774\uba74 \uccab \ud14c\uc2a4\ud2b8",
     "footerBtn1": "\ubb34\ub8cc\ub85c \uc2dc\uc791\ud558\uae30",
-    "footerBtn2": "Pro+GitHub 14\uc77c \ubb34\ub8cc \uccb4\ud5d8",
+    "footerBtn2": "Pro \ud50c\ub79c \uc2dc\uc791",
 
     "animSubtitle": "\ud14c\uc2a4\ud2b8\ud560 \uc6f9\uc0ac\uc774\ud2b8 URL\uc744 \uc785\ub825\ud558\uc138\uc694",
     "animGenerate": "\uc2dc\ub098\ub9ac\uc624 \uc0dd\uc131",
@@ -298,12 +303,65 @@
     "lastUsed": "\ub9c8\uc9c0\ub9c9 \uc0ac\uc6a9",
     "revoke": "\ud3d0\uae30",
     "revokeConfirm": "\uc774 API \ud0a4\ub97c \ud3d0\uae30\ud558\uc2dc\uac20\uc2b5\ub2c8\uae4c? \ucde8\uc18c\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4.",
-    "loginRequired": "\uc124\uc815\uc5d0 \uc811\uadfc\ud558\ub824\uba74 \ub85c\uadf8\uc778\ud574\uc8fc\uc138\uc694."
+    "loginRequired": "\uc124\uc815\uc5d0 \uc811\uadfc\ud558\ub824\uba74 \ub85c\uadf8\uc778\ud574\uc8fc\uc138\uc694.",
+    "apiKeysProOnly": "API \ud0a4\ub294 Pro \ub610\ub294 Team \uad6c\ub3c5\uc774 \ud544\uc694\ud569\ub2c8\ub2e4.",
+    "upgradeToPro": "Pro\ub85c \uc5c5\uadf8\ub808\uc774\ub4dc"
   },
   "fileUpload": {
     "dropHint": "\ubb38\uc11c\ub97c \uc5ec\uae30\uc5d0 \ub4dc\ub86d\ud558\uac70\ub098 \ud074\ub9ad\ud558\uc5ec \ucc3e\uae30",
     "formats": "PDF, DOCX, MD, TXT (\ucd5c\ub300 10MB)",
     "unsupportedFile": "\uc9c0\uc6d0\ub418\uc9c0 \uc54a\ub294 \ud30c\uc77c: {name}. \ud5c8\uc6a9: .md, .txt, .pdf, .docx",
     "fileTooLarge": "\ud30c\uc77c\uc774 \ub108\ubb34 \ud07d\ub2c8\ub2e4: {name}. \ucd5c\ub300 10MB."
+  },
+  "pricing": {
+    "title": "\uc694\uae08\uc81c \uc120\ud0dd",
+    "subtitle": "\ubb34\ub8cc\ub85c \uc2dc\uc791\ud558\uace0, \uc131\uc7a5\uc5d0 \ub9de\ucdb0 \uc5c5\uadf8\ub808\uc774\ub4dc",
+    "free": "Free",
+    "freePrice": "$0",
+    "freeDesc": "\uae30\ubcf8 \uae30\ub2a5\uc73c\ub85c AI \ud14c\uc2a4\ud2b8 \uccb4\ud5d8",
+    "freeFeat1": "\uc6d4 5\ud68c \ud14c\uc2a4\ud2b8",
+    "freeFeat2": "\ub3d9\uc2dc 1\uac1c \uc2e4\ud589",
+    "freeFeat3": "AI \uc2dc\ub098\ub9ac\uc624 \uc0dd\uc131",
+    "freeFeat4": "\uc2a4\ud06c\ub9b0\uc0f7 \ub9ac\ud3ec\ud2b8",
+    "freeCta": "\ubb34\ub8cc\ub85c \uc2dc\uc791",
+    "pro": "Pro",
+    "proPrice": "$28.99",
+    "proDesc": "\uc804\ubb38 \uac1c\ubc1c\uc790\uc640 \uc18c\uaddc\ubaa8 \ud300\uc744 \uc704\ud55c",
+    "proFeat1": "\uc6d4 100\ud68c \ud14c\uc2a4\ud2b8",
+    "proFeat2": "\ub3d9\uc2dc 3\uac1c \uc2e4\ud589",
+    "proFeat3": "CI/CD\uc6a9 API \ud0a4",
+    "proFeat4": "\uc18c\uc2a4\ucf54\ub4dc \ubd84\uc11d",
+    "proFeat5": "AI \uc790\ub3d9 \uc218\uc815 PR",
+    "proCta": "Pro \uc2dc\uc791",
+    "team": "Team",
+    "teamPrice": "$98.99",
+    "teamDesc": "\ub300\ub7c9 \ud14c\uc2a4\ud2b8\uac00 \ud544\uc694\ud55c \ud300\uc744 \uc704\ud55c",
+    "teamFeat1": "\uc6d4 500\ud68c \ud14c\uc2a4\ud2b8",
+    "teamFeat2": "\ub3d9\uc2dc 10\uac1c \uc2e4\ud589",
+    "teamFeat3": "Pro\uc758 \ubaa8\ub4e0 \uae30\ub2a5",
+    "teamFeat4": "\uc6b0\uc120 \uc9c0\uc6d0",
+    "teamCta": "Team \uc2dc\uc791",
+    "perMonth": "/\uc6d4",
+    "mostPopular": "\uac00\uc7a5 \uc778\uae30",
+    "currentPlan": "\ud604\uc7ac \ud50c\ub79c"
+  },
+  "billing": {
+    "title": "\uacb0\uc81c",
+    "subtitle": "\uad6c\ub3c5 \ubc0f \uc0ac\uc6a9\ub7c9 \uad00\ub9ac",
+    "currentPlan": "\ud604\uc7ac \ud50c\ub79c",
+    "usage": "\uc0ac\uc6a9\ub7c9",
+    "testsThisMonth": "\uc774\ubc88 \ub2ec {used} / {limit} \ud14c\uc2a4\ud2b8",
+    "concurrentTests": "\ub3d9\uc2dc \uc2e4\ud589 {active} / {limit}",
+    "subscription": "\uad6c\ub3c5 \uc815\ubcf4",
+    "expiresAt": "{date}\uc5d0 \uac31\uc2e0",
+    "manageSub": "\uad6c\ub3c5 \uad00\ub9ac",
+    "upgrade": "\ud50c\ub79c \uc5c5\uadf8\ub808\uc774\ub4dc",
+    "noSubscription": "\ud604\uc7ac Free \ud50c\ub79c\uc744 \uc0ac\uc6a9 \uc911\uc785\ub2c8\ub2e4.",
+    "upgradePrompt": "\ub354 \ub9ce\uc740 \ud14c\uc2a4\ud2b8\uc640 \uae30\ub2a5\uc744 \uc704\ud574 Pro \ub610\ub294 Team\uc73c\ub85c \uc5c5\uadf8\ub808\uc774\ub4dc\ud558\uc138\uc694.",
+    "loginRequired": "\uacb0\uc81c \uc815\ubcf4\ub97c \ubcf4\ub824\uba74 \ub85c\uadf8\uc778\ud574\uc8fc\uc138\uc694."
+  },
+  "metadata_extra": {
+    "pricingTitle": "\uc694\uae08\uc81c",
+    "billingTitle": "\uacb0\uc81c"
   }
 }

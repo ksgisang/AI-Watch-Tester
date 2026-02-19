@@ -5,7 +5,7 @@ import { NextResponse, type NextRequest } from "next/server";
 const AUTH_ROUTES = ["/login", "/signup"];
 
 // Non-logged-in users are redirected away from these to /login
-const PROTECTED_PREFIXES = ["/dashboard", "/tests", "/settings"];
+const PROTECTED_PREFIXES = ["/dashboard", "/tests", "/settings", "/billing"];
 
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
