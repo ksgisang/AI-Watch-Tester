@@ -63,6 +63,13 @@ except ImportError:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Create DB tables and start background worker on startup."""
+    # Log DB backend for debugging
+    db_url = settings.database_url
+    if db_url.startswith("sqlite"):
+        logger.warning("Using SQLite — data will be lost on Render restart! Set AWT_DATABASE_URL to PostgreSQL.")
+    else:
+        logger.info("Database: %s", db_url.split("@")[-1] if "@" in db_url else "(configured)")
+
     # DB tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
