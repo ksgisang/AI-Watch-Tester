@@ -202,6 +202,138 @@ export function connectTestWS(
   return ws;
 }
 
+// -- Smart Scan API --
+
+export interface ScanSummary {
+  total_pages: number;
+  total_links: number;
+  total_forms: number;
+  total_buttons: number;
+  total_nav_menus: number;
+  broken_links: number;
+  detected_features: string[];
+}
+
+export interface ScanItem {
+  id: number;
+  target_url: string;
+  status: "scanning" | "completed" | "planning" | "planned" | "failed" | "cancelled";
+  summary: ScanSummary | null;
+  pages: Record<string, unknown>[] | null;
+  broken_links: { url: string; status: number; error?: string }[] | null;
+  detected_features: string[];
+  error_message: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export async function startScan(
+  targetUrl: string,
+  maxPages = 5,
+  maxDepth = 3
+): Promise<ScanItem> {
+  const res = await authFetch("/api/scan", {
+    method: "POST",
+    body: JSON.stringify({ target_url: targetUrl, max_pages: maxPages, max_depth: maxDepth }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || `Error ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function getScan(scanId: number): Promise<ScanItem> {
+  const res = await authFetch(`/api/scan/${scanId}`);
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || `Error ${res.status}`);
+  }
+  return res.json();
+}
+
+export interface TestPlanCategory {
+  id: string;
+  name: string;
+  auto_selected?: boolean;
+  tests: TestPlanItem[];
+}
+
+export interface TestPlanItem {
+  id: string;
+  name: string;
+  description: string;
+  priority: "high" | "medium" | "low";
+  estimated_time: number;
+  requires_auth: boolean;
+  selected: boolean;
+  auth_fields?: { key: string; label: string; type: string; required: boolean }[];
+  test_data_fields?: { key: string; label: string; placeholder?: string; required: boolean }[];
+  actual_elements?: string[];
+}
+
+export interface ScanPlanResult {
+  scan_id: number;
+  categories: TestPlanCategory[];
+}
+
+export async function generateScanPlan(
+  scanId: number,
+  language: "ko" | "en" = "en"
+): Promise<ScanPlanResult> {
+  const res = await authFetch(`/api/scan/${scanId}/plan`, {
+    method: "POST",
+    body: JSON.stringify({ language }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || `Error ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function executeScanTests(
+  scanId: number,
+  selectedTests: string[],
+  authData: Record<string, string> = {},
+  testData: Record<string, string> = {}
+): Promise<{ test_id: number; scenario_yaml: string; scenarios_count: number; steps_total: number }> {
+  const res = await authFetch(`/api/scan/${scanId}/execute`, {
+    method: "POST",
+    body: JSON.stringify({
+      selected_tests: selectedTests,
+      auth_data: authData,
+      test_data: testData,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || `Error ${res.status}`);
+  }
+  return res.json();
+}
+
+export function connectScanWS(
+  scanId: number,
+  onMessage: (data: Record<string, unknown>) => void,
+  onClose?: () => void
+): WebSocket {
+  const wsUrl = API_URL.replace(/^http/, "ws");
+  const ws = new WebSocket(`${wsUrl}/api/scan/${scanId}/ws`);
+
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      onMessage(data);
+    } catch {
+      // ignore
+    }
+  };
+
+  ws.onclose = () => onClose?.();
+  return ws;
+}
+
 // -- Health API (no auth required) --
 
 export interface HealthCheck {

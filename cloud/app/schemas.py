@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, HttpUrl
 
-from app.models import TestStatus, UserTier
+from app.models import ScanStatus, TestStatus, UserTier
 
 
 # -- Scenario Conversion --
@@ -121,6 +121,65 @@ class BillingResponse(BaseModel):
     lemon_subscription_id: str | None = None
     plan_expires_at: datetime | None = None
     usage: BillingUsage
+
+
+# -- Smart Scan --
+
+
+class ScanRequest(BaseModel):
+    """POST /api/scan request body."""
+
+    target_url: str
+    max_pages: int = 5
+    max_depth: int = 3
+
+
+class ScanSummary(BaseModel):
+    """Summary statistics for a scan."""
+
+    total_pages: int = 0
+    total_links: int = 0
+    total_forms: int = 0
+    total_buttons: int = 0
+    total_nav_menus: int = 0
+    broken_links: int = 0
+    detected_features: list[str] = []
+
+
+class ScanResponse(BaseModel):
+    """Scan result response."""
+
+    id: int
+    target_url: str
+    status: ScanStatus
+    summary: ScanSummary | None = None
+    pages: list[dict] | None = None
+    broken_links: list[dict] | None = None
+    detected_features: list[str] = []
+    error_message: str | None = None
+    created_at: datetime
+    completed_at: datetime | None = None
+
+
+class ScanPlanRequest(BaseModel):
+    """POST /api/scan/{scan_id}/plan request body."""
+
+    language: Literal["ko", "en"] = "en"
+
+
+class ScanPlanResponse(BaseModel):
+    """AI-generated test plan response."""
+
+    scan_id: int
+    categories: list[dict]
+
+
+class ScanExecuteRequest(BaseModel):
+    """POST /api/scan/{scan_id}/execute request body."""
+
+    selected_tests: list[str]
+    auth_data: dict[str, str] = {}
+    test_data: dict[str, str] = {}
 
 
 class ApiKeyCreate(BaseModel):

@@ -84,6 +84,47 @@ class User(Base):
     )
 
 
+class ScanStatus(str, enum.Enum):
+    """Smart Scan status."""
+
+    SCANNING = "scanning"
+    COMPLETED = "completed"
+    PLANNING = "planning"
+    PLANNED = "planned"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class Scan(Base):
+    """A site scan record for Smart Scan."""
+
+    __tablename__ = "scans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(128), index=True, nullable=False)
+    target_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    status: Mapped[ScanStatus] = mapped_column(
+        Enum(ScanStatus), default=ScanStatus.SCANNING, nullable=False
+    )
+    max_pages: Mapped[int] = mapped_column(Integer, default=5)
+    max_depth: Mapped[int] = mapped_column(Integer, default=2)
+    # JSON text columns (SQLite compatible)
+    summary_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pages_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    broken_links_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    detected_features: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
+    plan_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        default=lambda: datetime.now(timezone.utc),
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 class ApiKey(Base):
     """API key for CI/CD authentication (X-API-Key header)."""
 

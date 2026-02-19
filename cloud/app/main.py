@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import engine
 from app.models import Base
-from app.routers import billing, keys, tests, v1
+from app.routers import billing, keys, scan, tests, v1
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +114,7 @@ app.mount("/screenshots", StaticFiles(directory=str(_ss_dir)), name="screenshots
 
 # -- Routers --
 app.include_router(tests.router)
+app.include_router(scan.router)
 app.include_router(keys.router)
 app.include_router(v1.router)
 app.include_router(billing.router)
