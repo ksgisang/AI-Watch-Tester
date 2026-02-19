@@ -134,6 +134,14 @@ class ScanRequest(BaseModel):
     max_depth: int = 3
 
 
+class SiteType(BaseModel):
+    """Detected site type classification."""
+
+    type: str = "unknown"
+    confidence: float = 0.0
+    indicators: list[str] = []
+
+
 class ScanSummary(BaseModel):
     """Summary statistics for a scan."""
 
@@ -144,6 +152,7 @@ class ScanSummary(BaseModel):
     total_nav_menus: int = 0
     broken_links: int = 0
     detected_features: list[str] = []
+    site_type: SiteType | None = None
 
 
 class ScanResponse(BaseModel):

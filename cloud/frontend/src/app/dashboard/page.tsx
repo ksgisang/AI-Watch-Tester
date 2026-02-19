@@ -678,7 +678,14 @@ export default function DashboardPage() {
                 {activeScan.summary && (
                   <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm font-semibold text-gray-800">{ts("scanComplete")}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-gray-800">{ts("scanComplete")}</span>
+                        {activeScan.summary.site_type && activeScan.summary.site_type.type !== "unknown" && (
+                          <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-medium text-indigo-700">
+                            {ts(`siteType_${activeScan.summary.site_type.type}` as Parameters<typeof ts>[0])}
+                          </span>
+                        )}
+                      </div>
                       {activeScan.summary.broken_links > 0 && (
                         <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
                           {activeScan.summary.broken_links} {ts("brokenLinks")}
@@ -753,82 +760,102 @@ export default function DashboardPage() {
                           </button>
 
                           {/* Category tests */}
-                          {isExpanded && (
-                            <div className="divide-y divide-gray-100">
-                              {catTests.map((test) => {
-                                const isSelected = selectedTests.has(test.id);
-                                return (
-                                  <div key={test.id} className="px-4 py-2.5 space-y-1.5">
-                                    <div className="flex items-start gap-2">
-                                      <input
-                                        type="checkbox"
-                                        checked={isSelected}
-                                        onChange={() => handleToggleTest(test.id)}
-                                        className="mt-0.5 h-3.5 w-3.5 rounded border-gray-300 text-teal-600"
-                                      />
-                                      <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2">
-                                          <span className="text-sm font-medium text-gray-800">{test.name}</span>
-                                          <span className={`rounded px-1 py-0.5 text-[9px] font-medium ${
-                                            test.priority === "high"
-                                              ? "bg-red-50 text-red-600"
-                                              : test.priority === "medium"
-                                              ? "bg-orange-50 text-orange-600"
-                                              : "bg-gray-100 text-gray-500"
-                                          }`}>
-                                            {test.priority === "high" ? ts("priorityHigh") : test.priority === "medium" ? ts("priorityMedium") : ts("priorityLow")}
-                                          </span>
-                                          <span className="text-[10px] text-gray-400">~{test.estimated_time}s</span>
+                          {isExpanded && (() => {
+                            // Collect shared auth fields for this category (deduplicated)
+                            const sharedAuthFields = new Map<string, { key: string; label: string; type: string; required: boolean }>();
+                            const hasAnySelectedAuth = catTests.some((t) => selectedTests.has(t.id) && t.requires_auth && t.auth_fields);
+                            if (hasAnySelectedAuth) {
+                              for (const t of catTests) {
+                                if (t.requires_auth && t.auth_fields) {
+                                  for (const f of t.auth_fields) {
+                                    if (!sharedAuthFields.has(f.key)) {
+                                      sharedAuthFields.set(f.key, f);
+                                    }
+                                  }
+                                }
+                              }
+                            }
+
+                            return (
+                              <div className="divide-y divide-gray-100">
+                                {/* Category-level shared auth fields */}
+                                {sharedAuthFields.size > 0 && (
+                                  <div className="px-4 py-2.5">
+                                    <div className="space-y-1.5 rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+                                      <p className="text-[10px] font-semibold text-amber-700 uppercase">{ts("sharedAuth")}</p>
+                                      {Array.from(sharedAuthFields.values()).map((field) => (
+                                        <div key={field.key} className="flex items-center gap-2">
+                                          <label className="w-20 text-[10px] font-medium text-gray-600">{field.label}</label>
+                                          <input
+                                            type={field.type === "password" ? "password" : "text"}
+                                            value={authData[field.key] || ""}
+                                            onChange={(e) => setAuthData((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                                            className="flex-1 rounded border border-gray-200 px-2 py-1 text-xs focus:border-teal-500 focus:outline-none"
+                                            placeholder={field.required ? "" : ts("optional")}
+                                          />
                                         </div>
-                                        <p className="text-xs text-gray-500 mt-0.5">{test.description}</p>
-                                        {test.requires_auth && (
-                                          <span className="mt-0.5 inline-block rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-600">
-                                            {ts("requiresLogin")}
-                                          </span>
-                                        )}
-                                      </div>
+                                      ))}
                                     </div>
-
-                                    {/* Auth fields — show when selected & requires_auth */}
-                                    {isSelected && test.requires_auth && test.auth_fields && (
-                                      <div className="ml-6 space-y-1.5 rounded-lg border border-amber-100 bg-amber-50/50 p-2">
-                                        {test.auth_fields.map((field) => (
-                                          <div key={field.key} className="flex items-center gap-2">
-                                            <label className="w-20 text-[10px] font-medium text-gray-600">{field.label}</label>
-                                            <input
-                                              type={field.type === "password" ? "password" : "text"}
-                                              value={authData[field.key] || ""}
-                                              onChange={(e) => setAuthData((prev) => ({ ...prev, [field.key]: e.target.value }))}
-                                              className="flex-1 rounded border border-gray-200 px-2 py-1 text-xs focus:border-teal-500 focus:outline-none"
-                                              placeholder={field.required ? "" : ts("optional")}
-                                            />
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
-
-                                    {/* Test data fields */}
-                                    {isSelected && test.test_data_fields && test.test_data_fields.length > 0 && (
-                                      <div className="ml-6 space-y-1.5 rounded-lg border border-gray-100 bg-gray-50 p-2">
-                                        {test.test_data_fields.map((field) => (
-                                          <div key={field.key} className="flex items-center gap-2">
-                                            <label className="w-20 text-[10px] font-medium text-gray-600">{field.label}</label>
-                                            <input
-                                              type="text"
-                                              value={testData[field.key] || ""}
-                                              onChange={(e) => setTestData((prev) => ({ ...prev, [field.key]: e.target.value }))}
-                                              className="flex-1 rounded border border-gray-200 px-2 py-1 text-xs focus:border-teal-500 focus:outline-none"
-                                              placeholder={field.placeholder || ts("optional")}
-                                            />
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
                                   </div>
-                                );
-                              })}
-                            </div>
-                          )}
+                                )}
+
+                                {catTests.map((test) => {
+                                  const isSelected = selectedTests.has(test.id);
+                                  return (
+                                    <div key={test.id} className="px-4 py-2.5 space-y-1.5">
+                                      <div className="flex items-start gap-2">
+                                        <input
+                                          type="checkbox"
+                                          checked={isSelected}
+                                          onChange={() => handleToggleTest(test.id)}
+                                          className="mt-0.5 h-3.5 w-3.5 rounded border-gray-300 text-teal-600"
+                                        />
+                                        <div className="flex-1 min-w-0">
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-sm font-medium text-gray-800">{test.name}</span>
+                                            <span className={`rounded px-1 py-0.5 text-[9px] font-medium ${
+                                              test.priority === "high"
+                                                ? "bg-red-50 text-red-600"
+                                                : test.priority === "medium"
+                                                ? "bg-orange-50 text-orange-600"
+                                                : "bg-gray-100 text-gray-500"
+                                            }`}>
+                                              {test.priority === "high" ? ts("priorityHigh") : test.priority === "medium" ? ts("priorityMedium") : ts("priorityLow")}
+                                            </span>
+                                            <span className="text-[10px] text-gray-400">~{test.estimated_time}s</span>
+                                          </div>
+                                          <p className="text-xs text-gray-500 mt-0.5">{test.description}</p>
+                                          {test.requires_auth && (
+                                            <span className="mt-0.5 inline-block rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-600">
+                                              {ts("requiresLogin")}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      {/* Test data fields */}
+                                      {isSelected && test.test_data_fields && test.test_data_fields.length > 0 && (
+                                        <div className="ml-6 space-y-1.5 rounded-lg border border-gray-100 bg-gray-50 p-2">
+                                          {test.test_data_fields.map((field) => (
+                                            <div key={field.key} className="flex items-center gap-2">
+                                              <label className="w-20 text-[10px] font-medium text-gray-600">{field.label}</label>
+                                              <input
+                                                type="text"
+                                                value={testData[field.key] || ""}
+                                                onChange={(e) => setTestData((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                                                className="flex-1 rounded border border-gray-200 px-2 py-1 text-xs focus:border-teal-500 focus:outline-none"
+                                                placeholder={field.placeholder || ts("optional")}
+                                              />
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })()}
                         </div>
                       );
                     })}

@@ -172,6 +172,113 @@ FEATURE_DETECTORS: dict[str, dict[str, Any]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Site type detection — classify site based on detected features + URL patterns
+# ---------------------------------------------------------------------------
+
+SITE_TYPE_RULES: dict[str, dict[str, Any]] = {
+    "ecommerce": {
+        "required_features": ["cart", "product_list"],
+        "optional_features": ["filter_sort", "review_form", "search", "pagination"],
+        "url_patterns": ["/shop", "/store", "/products", "/product", "/cart", "/checkout"],
+        "min_score": 4,
+    },
+    "blog": {
+        "required_features": ["blog"],
+        "optional_features": ["comment_form", "pagination", "search"],
+        "url_patterns": ["/blog", "/posts", "/article", "/tag", "/category"],
+        "min_score": 2,
+    },
+    "community": {
+        "required_features": ["board_write"],
+        "optional_features": ["comment_form", "pagination", "file_upload", "search"],
+        "url_patterns": ["/board", "/forum", "/community", "/thread", "/topic"],
+        "min_score": 2,
+    },
+    "saas": {
+        "required_features": ["login_form"],
+        "optional_features": ["signup", "search", "admin_panel", "social_login"],
+        "url_patterns": ["/dashboard", "/app", "/settings", "/billing", "/api"],
+        "min_score": 3,
+    },
+    "corporate": {
+        "required_features": [],
+        "optional_features": ["newsletter", "multilingual", "search"],
+        "url_patterns": ["/about", "/contact", "/careers", "/team", "/news", "/press"],
+        "min_score": 3,
+    },
+    "portfolio": {
+        "required_features": [],
+        "optional_features": ["multilingual"],
+        "url_patterns": ["/portfolio", "/projects", "/work", "/gallery"],
+        "min_score": 2,
+    },
+}
+
+
+def _detect_site_type(
+    features: list[str],
+    all_links: set[str],
+    target_url: str,
+) -> dict[str, Any]:
+    """Classify site type based on detected features and URL patterns.
+
+    Scoring: required feature = +3, optional = +1, URL pattern = +2.
+    Returns {"type": str, "confidence": float, "indicators": list[str]}.
+    """
+    feature_set = set(features)
+    all_hrefs_lower = {link.lower() for link in all_links}
+    target_lower = target_url.lower()
+
+    best_type = "unknown"
+    best_score = 0
+    best_max = 1
+    best_indicators: list[str] = []
+
+    for site_type, rules in SITE_TYPE_RULES.items():
+        score = 0
+        indicators: list[str] = []
+        max_possible = 0
+
+        # Required features (+3 each)
+        for feat in rules["required_features"]:
+            max_possible += 3
+            if feat in feature_set:
+                score += 3
+                indicators.append(f"feature:{feat}")
+
+        # Optional features (+1 each)
+        for feat in rules["optional_features"]:
+            max_possible += 1
+            if feat in feature_set:
+                score += 1
+                indicators.append(f"feature:{feat}")
+
+        # URL patterns (+2 each)
+        for pattern in rules["url_patterns"]:
+            max_possible += 2
+            pattern_lower = pattern.lower()
+            if pattern_lower in target_lower or any(
+                pattern_lower in href for href in all_hrefs_lower
+            ):
+                score += 2
+                indicators.append(f"url:{pattern}")
+
+        if score >= rules["min_score"] and score > best_score:
+            best_type = site_type
+            best_score = score
+            best_max = max(max_possible, 1)
+            best_indicators = indicators
+
+    confidence = round(best_score / best_max, 2) if best_max > 0 else 0.0
+
+    return {
+        "type": best_type,
+        "confidence": confidence,
+        "indicators": best_indicators,
+    }
+
+
 def _normalize_url(url: str) -> str:
     """Normalize URL by removing fragments and trailing slashes."""
     parsed = urlparse(url)
@@ -595,6 +702,9 @@ async def crawl_site(
     ]
     feature_names = sorted(all_features.keys())
 
+    # Detect site type
+    site_type = _detect_site_type(feature_names, all_links, target_url)
+
     summary = {
         "total_pages": len(pages),
         "total_links": len(all_links),
@@ -603,6 +713,7 @@ async def crawl_site(
         "total_nav_menus": total_nav_menus,
         "broken_links": len(broken_links),
         "detected_features": feature_names,
+        "site_type": site_type,
     }
 
     # NOTE: scan_complete is NOT broadcast here.

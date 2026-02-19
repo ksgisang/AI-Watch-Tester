@@ -235,6 +235,7 @@ class ExpectedResult(BaseModel):
     type: AssertType
     value: str = Field(..., description="Comparison value")
     tolerance: float = Field(default=0.0, ge=0.0, le=1.0)
+    case_insensitive: bool = Field(default=False)
 
 
 class StepConfig(BaseModel):

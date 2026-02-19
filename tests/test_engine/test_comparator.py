@@ -51,6 +51,37 @@ class TestComparatorTextVisible:
             await comparator.check(expected, engine)
 
 
+class TestComparatorTextVisibleCaseInsensitive:
+    @pytest.mark.asyncio
+    async def test_text_visible_case_insensitive_pass(self) -> None:
+        comparator = Comparator()
+        engine = MockEngine(page_text="Welcome to the Dashboard")
+        expected = ExpectedResult(
+            type=AssertType.TEXT_VISIBLE, value="dashboard", case_insensitive=True,
+        )
+        await comparator.check(expected, engine)  # Should not raise
+
+    @pytest.mark.asyncio
+    async def test_text_visible_case_insensitive_fail(self) -> None:
+        comparator = Comparator()
+        engine = MockEngine(page_text="Welcome to the Dashboard")
+        expected = ExpectedResult(
+            type=AssertType.TEXT_VISIBLE, value="login", case_insensitive=True,
+        )
+        with pytest.raises(StepExecutionError, match="not visible on page"):
+            await comparator.check(expected, engine)
+
+    @pytest.mark.asyncio
+    async def test_text_visible_case_sensitive_fails_on_case_mismatch(self) -> None:
+        comparator = Comparator()
+        engine = MockEngine(page_text="Welcome to the Dashboard")
+        expected = ExpectedResult(
+            type=AssertType.TEXT_VISIBLE, value="dashboard", case_insensitive=False,
+        )
+        with pytest.raises(StepExecutionError, match="not visible on page"):
+            await comparator.check(expected, engine)
+
+
 class TestComparatorTextEquals:
     @pytest.mark.asyncio
     async def test_text_equals_pass(self) -> None:
@@ -68,6 +99,27 @@ class TestComparatorTextEquals:
             await comparator.check(expected, engine)
 
 
+class TestComparatorTextEqualsCaseInsensitive:
+    @pytest.mark.asyncio
+    async def test_text_equals_case_insensitive_pass(self) -> None:
+        comparator = Comparator()
+        engine = MockEngine(page_text="  Hello World  ")
+        expected = ExpectedResult(
+            type=AssertType.TEXT_EQUALS, value="hello world", case_insensitive=True,
+        )
+        await comparator.check(expected, engine)
+
+    @pytest.mark.asyncio
+    async def test_text_equals_case_insensitive_fail(self) -> None:
+        comparator = Comparator()
+        engine = MockEngine(page_text="Hello World")
+        expected = ExpectedResult(
+            type=AssertType.TEXT_EQUALS, value="goodbye", case_insensitive=True,
+        )
+        with pytest.raises(StepExecutionError, match="does not match"):
+            await comparator.check(expected, engine)
+
+
 class TestComparatorUrlContains:
     @pytest.mark.asyncio
     async def test_url_contains_pass(self) -> None:
@@ -81,6 +133,27 @@ class TestComparatorUrlContains:
         comparator = Comparator()
         engine = MockEngine(url="https://example.com/login")
         expected = ExpectedResult(type=AssertType.URL_CONTAINS, value="dashboard")
+        with pytest.raises(StepExecutionError, match="does not contain"):
+            await comparator.check(expected, engine)
+
+
+class TestComparatorUrlContainsCaseInsensitive:
+    @pytest.mark.asyncio
+    async def test_url_contains_case_insensitive_pass(self) -> None:
+        comparator = Comparator()
+        engine = MockEngine(url="https://example.com/Dashboard")
+        expected = ExpectedResult(
+            type=AssertType.URL_CONTAINS, value="dashboard", case_insensitive=True,
+        )
+        await comparator.check(expected, engine)
+
+    @pytest.mark.asyncio
+    async def test_url_contains_case_insensitive_fail(self) -> None:
+        comparator = Comparator()
+        engine = MockEngine(url="https://example.com/login")
+        expected = ExpectedResult(
+            type=AssertType.URL_CONTAINS, value="dashboard", case_insensitive=True,
+        )
         with pytest.raises(StepExecutionError, match="does not contain"):
             await comparator.check(expected, engine)
 

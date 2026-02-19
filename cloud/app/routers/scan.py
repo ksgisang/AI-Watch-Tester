@@ -38,6 +38,181 @@ _DEFAULT_MODELS: dict[str, str] = {
     "ollama": "codellama:7b",
 }
 
+# ---------------------------------------------------------------------------
+# Business test templates — site-type-specific test suggestions
+# ---------------------------------------------------------------------------
+
+BUSINESS_TEMPLATES: dict[str, list[dict[str, Any]]] = {
+    "ecommerce": [
+        {
+            "requires_feature": "product_list",
+            "name_en": "Product Browsing",
+            "name_ko": "상품 탐색",
+            "desc_en": "Browse product listings, verify product details load correctly",
+            "desc_ko": "상품 목록을 탐색하고 상품 상세 페이지가 정상 로드되는지 확인",
+            "priority": "high",
+            "estimated_time": 30,
+            "requires_auth": False,
+        },
+        {
+            "requires_feature": "cart",
+            "name_en": "Add to Cart Flow",
+            "name_ko": "장바구니 추가 흐름",
+            "desc_en": "Add a product to cart, verify cart count updates and cart page shows item",
+            "desc_ko": "상품을 장바구니에 추가하고, 장바구니 수량 업데이트 및 장바구니 페이지에 상품이 표시되는지 확인",
+            "priority": "high",
+            "estimated_time": 40,
+            "requires_auth": False,
+        },
+        {
+            "requires_feature": "filter_sort",
+            "name_en": "Filter and Sort Products",
+            "name_ko": "상품 필터/정렬",
+            "desc_en": "Apply filters and sorting options, verify product list updates accordingly",
+            "desc_ko": "필터와 정렬 옵션을 적용하고 상품 목록이 올바르게 변경되는지 확인",
+            "priority": "medium",
+            "estimated_time": 30,
+            "requires_auth": False,
+        },
+        {
+            "requires_feature": "search",
+            "name_en": "Product Search",
+            "name_ko": "상품 검색",
+            "desc_en": "Search for products and verify search results are relevant",
+            "desc_ko": "상품을 검색하고 검색 결과가 적절한지 확인",
+            "priority": "medium",
+            "estimated_time": 20,
+            "requires_auth": False,
+        },
+        {
+            "requires_feature": "review_form",
+            "name_en": "Write Product Review",
+            "name_ko": "상품 리뷰 작성",
+            "desc_en": "Write a product review with rating, verify it appears in review list",
+            "desc_ko": "상품 리뷰를 작성하고 리뷰 목록에 표시되는지 확인",
+            "priority": "medium",
+            "estimated_time": 40,
+            "requires_auth": True,
+            "auth_fields": [
+                {"key": "email", "label": "Email", "type": "email", "required": True},
+                {"key": "password", "label": "Password", "type": "password", "required": True},
+            ],
+        },
+    ],
+    "blog": [
+        {
+            "requires_feature": "blog",
+            "name_en": "Blog Post Navigation",
+            "name_ko": "블로그 글 탐색",
+            "desc_en": "Browse blog posts, click into articles, verify content loads",
+            "desc_ko": "블로그 글 목록을 탐색하고, 글을 클릭해서 본문이 정상 로드되는지 확인",
+            "priority": "high",
+            "estimated_time": 25,
+            "requires_auth": False,
+        },
+        {
+            "requires_feature": "comment_form",
+            "name_en": "Blog Comment",
+            "name_ko": "블로그 댓글 작성",
+            "desc_en": "Write a comment on a blog post, verify it appears",
+            "desc_ko": "블로그 글에 댓글을 작성하고 댓글이 표시되는지 확인",
+            "priority": "medium",
+            "estimated_time": 30,
+            "requires_auth": True,
+            "auth_fields": [
+                {"key": "email", "label": "Email", "type": "email", "required": True},
+                {"key": "password", "label": "Password", "type": "password", "required": True},
+            ],
+        },
+    ],
+    "community": [
+        {
+            "requires_feature": "board_write",
+            "name_en": "Create Post",
+            "name_ko": "게시글 작성",
+            "desc_en": "Create a new board post with title and content, verify it appears in list",
+            "desc_ko": "게시판에 새 글을 작성하고 목록에 표시되는지 확인",
+            "priority": "high",
+            "estimated_time": 40,
+            "requires_auth": True,
+            "auth_fields": [
+                {"key": "email", "label": "Email", "type": "email", "required": True},
+                {"key": "password", "label": "Password", "type": "password", "required": True},
+            ],
+        },
+        {
+            "requires_feature": "comment_form",
+            "name_en": "Post Comment",
+            "name_ko": "댓글 작성",
+            "desc_en": "Write a comment on a post, verify it appears",
+            "desc_ko": "게시글에 댓글을 작성하고 댓글이 표시되는지 확인",
+            "priority": "medium",
+            "estimated_time": 30,
+            "requires_auth": True,
+            "auth_fields": [
+                {"key": "email", "label": "Email", "type": "email", "required": True},
+                {"key": "password", "label": "Password", "type": "password", "required": True},
+            ],
+        },
+    ],
+    "saas": [
+        {
+            "requires_feature": "login_form",
+            "name_en": "Login and Dashboard Access",
+            "name_ko": "로그인 및 대시보드 접근",
+            "desc_en": "Login with credentials and verify dashboard loads correctly",
+            "desc_ko": "로그인 후 대시보드가 정상적으로 로드되는지 확인",
+            "priority": "high",
+            "estimated_time": 30,
+            "requires_auth": True,
+            "auth_fields": [
+                {"key": "email", "label": "Email", "type": "email", "required": True},
+                {"key": "password", "label": "Password", "type": "password", "required": True},
+            ],
+        },
+        {
+            "requires_feature": "signup",
+            "name_en": "Signup Flow",
+            "name_ko": "회원가입 흐름",
+            "desc_en": "Complete signup form and verify account creation flow",
+            "desc_ko": "회원가입 폼을 작성하고 계정 생성 흐름을 확인",
+            "priority": "high",
+            "estimated_time": 40,
+            "requires_auth": False,
+            "test_data_fields": [
+                {"key": "signup_email", "label": "Test Email", "placeholder": "test@example.com", "required": True},
+                {"key": "signup_password", "label": "Test Password", "placeholder": "TestPass123!", "required": True},
+            ],
+        },
+        {
+            "requires_feature": "search",
+            "name_en": "Search Functionality",
+            "name_ko": "검색 기능",
+            "desc_en": "Use search feature and verify results are displayed",
+            "desc_ko": "검색 기능을 사용하고 결과가 표시되는지 확인",
+            "priority": "medium",
+            "estimated_time": 20,
+            "requires_auth": False,
+        },
+    ],
+    "corporate": [
+        {
+            "requires_feature": "newsletter",
+            "name_en": "Newsletter Subscription",
+            "name_ko": "뉴스레터 구독",
+            "desc_en": "Subscribe to newsletter with email, verify confirmation",
+            "desc_ko": "이메일로 뉴스레터를 구독하고 확인 메시지를 검증",
+            "priority": "medium",
+            "estimated_time": 20,
+            "requires_auth": False,
+            "test_data_fields": [
+                {"key": "newsletter_email", "label": "Test Email", "placeholder": "test@example.com", "required": True},
+            ],
+        },
+    ],
+    "portfolio": [],
+}
+
 
 def _parse_json(text: str | None) -> Any:
     """Safely parse JSON text."""
@@ -193,14 +368,16 @@ You are a senior QA engineer creating a test plan based on actual crawl data.
 CRITICAL RULES:
 1. ONLY reference elements, selectors, URLs, and text that actually exist in the crawl data.
 2. NEVER invent elements that don't exist (no "menu1", no fake selectors).
-3. Use exact selectors and text from the crawl data.
+3. Use EXACT text strings from the crawl data (copy-paste, do not paraphrase).
 4. Group tests by category with clear priority.
-5. Respond in {language}.
+5. For all text assertions, set case_insensitive: true to handle dynamic casing.
+6. Respond in {language}.
 
 ## Site Info
 - URL: {target_url}
 - Pages scanned: {total_pages}
 - Detected features: {detected_features}
+- Site type: {site_type} (confidence: {site_type_confidence})
 
 ## Crawl Data
 
@@ -218,6 +395,9 @@ CRITICAL RULES:
 
 ### Broken Links
 {broken_links_json}
+
+## Business Test Hints (based on site type)
+{business_hints}
 
 ## Generate Test Plan
 
@@ -238,10 +418,7 @@ CATEGORY "auth" - Authentication (only if login_form detected):
 
 CATEGORY "business" - Business Flows (based on detected features):
 - Only for features actually detected in the crawl
-- cart → add to cart flow
-- review_form → review submission
-- board_write → post creation
-- comment_form → comment submission
+- Use the business test hints above as guidance
 
 For each test provide:
 {{
@@ -311,6 +488,22 @@ async def generate_plan(
         s = json.dumps(obj, ensure_ascii=False, indent=2)
         return s[:limit] if len(s) > limit else s
 
+    # Build site type info for prompt
+    site_type_info = summary.get("site_type") or {}
+    site_type_name = site_type_info.get("type", "unknown") if isinstance(site_type_info, dict) else "unknown"
+    site_type_conf = site_type_info.get("confidence", 0.0) if isinstance(site_type_info, dict) else 0.0
+
+    # Build business hints from templates
+    business_hints_lines = []
+    templates = BUSINESS_TEMPLATES.get(site_type_name, [])
+    for tmpl in templates:
+        req_feat = tmpl.get("requires_feature", "")
+        if not req_feat or req_feat in features:
+            name = tmpl.get("name_en", "")
+            desc = tmpl.get("desc_en", "")
+            business_hints_lines.append(f"- {name}: {desc}")
+    business_hints = "\n".join(business_hints_lines) if business_hints_lines else "No specific business tests for this site type."
+
     # Build AI prompt
     lang = "Korean" if body.language == "ko" else "English"
     prompt = _PLAN_PROMPT.format(
@@ -318,12 +511,15 @@ async def generate_plan(
         target_url=scan.target_url,
         total_pages=summary.get("total_pages", len(pages)),
         detected_features=", ".join(features) if features else "none",
+        site_type=site_type_name,
+        site_type_confidence=f"{site_type_conf:.0%}",
         nav_menus_json=_trunc_json(nav_menus),
         forms_json=_trunc_json(forms),
         buttons_json=_trunc_json(buttons),
         links_json=_trunc_json(links_sample),
         broken_links_json=_trunc_json(broken),
         broken_count=len(broken),
+        business_hints=business_hints,
     )
 
     # Try AI plan generation, fall back to default plan on failure
@@ -521,31 +717,57 @@ def _generate_default_plan(
             "tests": form_tests,
         })
 
-    # 3. Feature-based tests
-    feature_tests = []
-    for feat in features:
-        if feat == "login_form":
-            feature_tests.append({
-                "id": f"t{tid}",
-                "name": "로그인 흐름 테스트" if ko else "Login Flow Test",
-                "description": "로그인 페이지 접근 및 폼 동작 확인" if ko else "Access login page and verify form works",
-                "priority": "high",
-                "estimated_time": 30,
-                "requires_auth": True,
-                "selected": False,
-                "auth_fields": [
-                    {"key": "email", "label": "Email", "type": "email", "required": True},
-                    {"key": "password", "label": "Password", "type": "password", "required": True},
-                ],
-            })
-            tid += 1
+    # 3. Business tests from templates (based on site type)
+    site_type_info = summary.get("site_type") or {}
+    site_type_name = site_type_info.get("type", "unknown") if isinstance(site_type_info, dict) else "unknown"
+    feature_set = set(features)
 
-    if feature_tests:
+    templates = BUSINESS_TEMPLATES.get(site_type_name, [])
+    business_tests = []
+    for tmpl in templates:
+        req_feat = tmpl.get("requires_feature", "")
+        if req_feat and req_feat not in feature_set:
+            continue  # skip if required feature not detected
+
+        test_entry: dict[str, Any] = {
+            "id": f"t{tid}",
+            "name": tmpl["name_ko"] if ko else tmpl["name_en"],
+            "description": tmpl["desc_ko"] if ko else tmpl["desc_en"],
+            "priority": tmpl.get("priority", "medium"),
+            "estimated_time": tmpl.get("estimated_time", 30),
+            "requires_auth": tmpl.get("requires_auth", False),
+            "selected": not tmpl.get("requires_auth", False),
+        }
+        if tmpl.get("auth_fields"):
+            test_entry["auth_fields"] = tmpl["auth_fields"]
+        if tmpl.get("test_data_fields"):
+            test_entry["test_data_fields"] = tmpl["test_data_fields"]
+        business_tests.append(test_entry)
+        tid += 1
+
+    # Fallback: if no business templates matched, check for login_form feature
+    if not business_tests and "login_form" in feature_set:
+        business_tests.append({
+            "id": f"t{tid}",
+            "name": "로그인 흐름 테스트" if ko else "Login Flow Test",
+            "description": "로그인 페이지 접근 및 폼 동작 확인" if ko else "Access login page and verify form works",
+            "priority": "high",
+            "estimated_time": 30,
+            "requires_auth": True,
+            "selected": False,
+            "auth_fields": [
+                {"key": "email", "label": "Email", "type": "email", "required": True},
+                {"key": "password", "label": "Password", "type": "password", "required": True},
+            ],
+        })
+        tid += 1
+
+    if business_tests:
         categories.append({
-            "id": "features",
-            "name": "기능 테스트" if ko else "Feature Tests",
+            "id": "business",
+            "name": "비즈니스 흐름" if ko else "Business Flows",
             "auto_selected": False,
-            "tests": feature_tests,
+            "tests": business_tests,
         })
 
     return {"categories": categories}
@@ -585,8 +807,12 @@ def _extract_json(text: str) -> dict:
 _EXECUTE_PROMPT = """\
 Generate AWT test scenario YAML for the selected tests below.
 
-CRITICAL: Use ONLY the actual selectors, URLs, and element text from the crawl data.
-NEVER invent selectors or elements that don't exist in the crawl data.
+CRITICAL RULES:
+1. Use ONLY the actual selectors, URLs, and element text from the crawl data below.
+2. NEVER invent selectors or elements that don't exist in the crawl data.
+3. For click/type targets, prefer using "text" field with the EXACT visible text from crawl data.
+4. For all assert steps, ALWAYS set "case_insensitive": true to handle dynamic casing.
+5. Copy text strings EXACTLY from the crawl data — do not paraphrase or translate.
 
 ## Target URL: {target_url}
 
@@ -611,7 +837,7 @@ Generate scenario YAML as a JSON array of objects, each with:
 
 Step actions: navigate, click, type, assert, wait
 For click/type, use "text" field with exact visible text, or "selector" field with CSS selector.
-For assert, use "text" field with text to verify.
+For assert, use "text" field with text to verify and always include "case_insensitive": true.
 
 Return ONLY valid JSON array.\
 """

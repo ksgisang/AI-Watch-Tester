@@ -204,6 +204,12 @@ export function connectTestWS(
 
 // -- Smart Scan API --
 
+export interface SiteType {
+  type: string;
+  confidence: number;
+  indicators: string[];
+}
+
 export interface ScanSummary {
   total_pages: number;
   total_links: number;
@@ -212,6 +218,7 @@ export interface ScanSummary {
   total_nav_menus: number;
   broken_links: number;
   detected_features: string[];
+  site_type?: SiteType;
 }
 
 export interface ScanItem {

@@ -445,7 +445,16 @@
     "featureMultilingual": "다국어",
     "viewSiteMap": "사이트 맵 보기",
     "hideSiteMap": "사이트 맵 닫기",
-    "scanProgress": "{current} / {max} 페이지"
+    "scanProgress": "{current} / {max} 페이지",
+    "sharedAuth": "공통 로그인 정보",
+    "siteType": "사이트 유형",
+    "siteType_ecommerce": "쇼핑몰",
+    "siteType_blog": "블로그",
+    "siteType_community": "커뮤니티",
+    "siteType_saas": "SaaS",
+    "siteType_corporate": "기업",
+    "siteType_portfolio": "포트폴리오",
+    "siteType_unknown": "알 수 없음"
   },
   "metadata_extra": {
     "pricingTitle": "요금제",

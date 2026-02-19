@@ -445,7 +445,16 @@
     "featureMultilingual": "Multilingual",
     "viewSiteMap": "View site map",
     "hideSiteMap": "Hide site map",
-    "scanProgress": "{current} / {max} pages"
+    "scanProgress": "{current} / {max} pages",
+    "sharedAuth": "Shared Login Info",
+    "siteType": "Site Type",
+    "siteType_ecommerce": "E-commerce",
+    "siteType_blog": "Blog",
+    "siteType_community": "Community",
+    "siteType_saas": "SaaS",
+    "siteType_corporate": "Corporate",
+    "siteType_portfolio": "Portfolio",
+    "siteType_unknown": "Unknown"
   },
   "metadata_extra": {
     "pricingTitle": "Pricing",

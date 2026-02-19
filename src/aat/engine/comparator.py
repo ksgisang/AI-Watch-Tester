@@ -31,7 +31,11 @@ class Comparator:
         """
         if expected.type == AssertType.TEXT_VISIBLE:
             page_text = await engine.get_page_text()
-            if expected.value not in page_text:
+            if expected.case_insensitive:
+                found = expected.value.lower() in page_text.lower()
+            else:
+                found = expected.value in page_text
+            if not found:
                 raise StepExecutionError(
                     f"Text '{expected.value}' not visible on page",
                     step=0,
@@ -40,7 +44,11 @@ class Comparator:
 
         elif expected.type == AssertType.TEXT_EQUALS:
             page_text = await engine.get_page_text()
-            if expected.value != page_text.strip():
+            if expected.case_insensitive:
+                matched = expected.value.lower() == page_text.strip().lower()
+            else:
+                matched = expected.value == page_text.strip()
+            if not matched:
                 raise StepExecutionError(
                     f"Text does not match '{expected.value}'",
                     step=0,
@@ -49,7 +57,11 @@ class Comparator:
 
         elif expected.type == AssertType.URL_CONTAINS:
             current_url = await engine.get_url()
-            if expected.value not in current_url:
+            if expected.case_insensitive:
+                found = expected.value.lower() in current_url.lower()
+            else:
+                found = expected.value in current_url
+            if not found:
                 raise StepExecutionError(
                     f"URL does not contain '{expected.value}'. Current: {current_url}",
                     step=0,
