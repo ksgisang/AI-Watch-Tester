@@ -50,11 +50,14 @@ export interface TestListResponse {
 
 export async function createTest(
   targetUrl: string,
-  mode: "review" | "auto" = "review"
+  mode: "review" | "auto" = "review",
+  scenarioYaml?: string,
 ): Promise<TestItem> {
+  const payload: Record<string, unknown> = { target_url: targetUrl, mode };
+  if (scenarioYaml) payload.scenario_yaml = scenarioYaml;
   const res = await authFetch("/api/tests", {
     method: "POST",
-    body: JSON.stringify({ target_url: targetUrl, mode }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) {
     const err = await res.json();

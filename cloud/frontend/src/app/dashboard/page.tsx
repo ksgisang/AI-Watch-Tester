@@ -7,7 +7,7 @@ import { useAuth } from "@/components/AuthProvider";
 import TestProgress from "@/components/TestProgress";
 import ScenarioEditor from "@/components/ScenarioEditor";
 import FileUpload from "@/components/FileUpload";
-import { createTest, getTest, uploadDocument, fetchBilling, convertScenario, updateScenarios, approveTest, cancelTest, type TestItem, type BillingInfo } from "@/lib/api";
+import { createTest, getTest, uploadDocument, fetchBilling, convertScenario, cancelTest, type TestItem, type BillingInfo } from "@/lib/api";
 import { translateApiError } from "@/lib/errorMessages";
 
 type Phase = "idle" | "generating" | "review" | "executing" | "done";
@@ -132,10 +132,9 @@ export default function DashboardPage() {
     setScenarioYaml("");
 
     try {
-      const test = await createTest(url, "review");
-      await updateScenarios(test.id, convertedYaml);
-      await approveTest(test.id);
-      setActiveTest({ ...test, status: "queued", scenario_yaml: convertedYaml });
+      // Create test with pre-built YAML → goes straight to QUEUED
+      const test = await createTest(url, "auto", convertedYaml);
+      setActiveTest(test);
       setPhase("executing");
       setConvertedYaml("");
       setConvertedInfo(null);

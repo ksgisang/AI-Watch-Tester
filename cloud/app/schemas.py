@@ -37,6 +37,7 @@ class TestCreate(BaseModel):
 
     target_url: HttpUrl
     mode: Literal["review", "auto"] = "review"
+    scenario_yaml: str | None = None
 
 
 class ScenarioUpdate(BaseModel):

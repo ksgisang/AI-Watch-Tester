@@ -48,14 +48,41 @@ async def create_test(
 
     mode=review → GENERATING (AI generates, user reviews before execution)
     mode=auto → QUEUED (generate + execute immediately)
+    scenario_yaml provided → QUEUED with pre-built scenarios (skip generation)
     """
-    initial_status = (
-        TestStatus.GENERATING if body.mode == "review" else TestStatus.QUEUED
-    )
+    # Pre-built scenario: validate and go straight to QUEUED
+    steps_total = 0
+    if body.scenario_yaml:
+        try:
+            parsed = yaml.safe_load(body.scenario_yaml)
+        except yaml.YAMLError as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid YAML: {exc}")
+        if not parsed:
+            raise HTTPException(status_code=422, detail="Empty scenario YAML")
+        try:
+            from aat.core.models import Scenario
+
+            items = parsed if isinstance(parsed, list) else [parsed]
+            scenarios = [Scenario.model_validate(item) for item in items]
+            steps_total = sum(len(s.steps) for s in scenarios)
+        except ImportError:
+            pass
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=f"Scenario validation error: {exc}")
+
+    if body.scenario_yaml:
+        initial_status = TestStatus.QUEUED
+    else:
+        initial_status = (
+            TestStatus.GENERATING if body.mode == "review" else TestStatus.QUEUED
+        )
+
     test = Test(
         user_id=user.id,
         target_url=str(body.target_url),
         status=initial_status,
+        scenario_yaml=body.scenario_yaml,
+        steps_total=steps_total,
     )
     db.add(test)
     await db.commit()
