@@ -162,7 +162,7 @@ class WebEngine(BaseEngine):
         return await self.page.inner_text("body")
 
     async def find_text_position(self, text: str) -> tuple[int, int] | None:
-        """Find element on page, prioritizing input fields over labels.
+        """Find element on page and scroll into view if needed.
 
         Strategy:
         1. get_by_label — input/textarea linked to label (highest priority)
@@ -171,7 +171,8 @@ class WebEngine(BaseEngine):
         4. get_by_role("link") — links
         5. get_by_text — general text fallback
 
-        Returns (x, y) center coordinates in viewport pixels, or None.
+        Automatically scrolls elements into the viewport before returning
+        coordinates. Returns (x, y) center coordinates, or None.
         """
         strategies = [
             lambda: self.page.get_by_label(text, exact=False).first,
@@ -184,13 +185,17 @@ class WebEngine(BaseEngine):
         for strategy in strategies:
             try:
                 locator = strategy()  # type: ignore[no-untyped-call]
-                if await locator.is_visible(timeout=1000):
-                    box = await locator.bounding_box()
-                    if box:
-                        return (
-                            int(box["x"] + box["width"] / 2),
-                            int(box["y"] + box["height"] / 2),
-                        )
+                # Check element exists in DOM (even if off-screen)
+                if await locator.count() == 0:
+                    continue
+                # Scroll into viewport so we can click it
+                await locator.scroll_into_view_if_needed(timeout=3000)
+                box = await locator.bounding_box()
+                if box:
+                    return (
+                        int(box["x"] + box["width"] / 2),
+                        int(box["y"] + box["height"] / 2),
+                    )
             except Exception:
                 continue
 
