@@ -41,11 +41,21 @@ venv/
 # Cloud backend local DB + screenshots
 awt_cloud.db
 cloud/screenshots/
+cloud/cloud/
+cloud/uploads/
+cloud/sample_spec.md
 
 # Frontend
 cloud/frontend/node_modules/
 cloud/frontend/.next/
 cloud/frontend/.env.local
+.next/
+
+# Uploads (runtime)
+uploads/
+
+# Scenarios (local test files)
+scenarios/
 
 # AAT data
 .aat/config.yaml
