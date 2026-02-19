@@ -305,14 +305,14 @@ class OpenAIAdapter(AIAdapter):
             AdapterError: On API or parse failure.
         """
         try:
-            response = await self._client.chat.completions.create(
+            response = await self._client.chat.completions.create(  # type: ignore[call-overload]
                 model=self._config.model,
                 max_tokens=self._config.max_tokens,
                 temperature=self._config.temperature,
                 response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content},  # type: ignore[list-item, misc]
+                    {"role": "user", "content": user_content},
                 ],
             )
         except Exception as exc:
