@@ -181,6 +181,7 @@
     "convertedPreview": "Converted {count} scenario(s), {steps} steps",
     "runConverted": "Run Test",
     "cancelBtn": "Cancel Test",
+    "cancelling": "Cancelling...",
     "cancelled": "Test cancelled"
   },
   "tests": {

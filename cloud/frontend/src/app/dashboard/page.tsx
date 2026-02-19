@@ -33,6 +33,7 @@ export default function DashboardPage() {
   const [converting, setConverting] = useState(false);
   const [convertedYaml, setConvertedYaml] = useState("");
   const [convertedInfo, setConvertedInfo] = useState<{ count: number; steps: number } | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   // Redirect if not authenticated
   if (!authLoading && !user) {
@@ -172,7 +173,8 @@ export default function DashboardPage() {
   };
 
   const handleCancel = async () => {
-    if (!activeTest) return;
+    if (!activeTest || cancelling) return;
+    setCancelling(true);
     try {
       await cancelTest(activeTest.id);
       setActiveTest({ ...activeTest, status: "failed" });
@@ -181,6 +183,8 @@ export default function DashboardPage() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to cancel test";
       setError(translateApiError(msg, te));
+    } finally {
+      setCancelling(false);
     }
   };
 
@@ -429,9 +433,10 @@ export default function DashboardPage() {
               <button
                 type="button"
                 onClick={handleCancel}
-                className="mt-2 rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                disabled={cancelling}
+                className="mt-2 rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
               >
-                {t("cancelBtn")}
+                {cancelling ? t("cancelling") : t("cancelBtn")}
               </button>
             </>
           )}
@@ -455,9 +460,10 @@ export default function DashboardPage() {
               <button
                 type="button"
                 onClick={handleCancel}
-                className="mt-2 rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                disabled={cancelling}
+                className="mt-2 rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
               >
-                {t("cancelBtn")}
+                {cancelling ? t("cancelling") : t("cancelBtn")}
               </button>
             </>
           )}

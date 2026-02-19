@@ -46,12 +46,17 @@ Analyze the following web page and generate user-perspective E2E test scenarios.
 ## Page Content (truncated)
 {page_text}
 
-## Instructions
-1. Identify key user flows (login, navigation, form submission, etc.)
-2. Generate 1-3 test scenarios covering the most important flows
-3. Each scenario should have clear steps: navigate, click, type, assert
-4. Use text-based targets (not image) for reliability
-5. Keep steps concise and actionable
+## CRITICAL Rules
+1. **Use EXACT text from the page content above** for all click targets and assertions.
+   - Extract actual button labels, link text, menu item names from "Page Content"
+   - NEVER use generic placeholders like "menu1", "menu2", "button1", "link1"
+   - If the page has a menu with "Pricing", "Features", "About", use those exact words
+2. Identify key user flows visible in the page (navigation, links, buttons, forms)
+3. Generate 1-3 test scenarios covering the most important flows
+4. Each scenario should have clear steps: navigate, click, type, assert
+5. For click targets, use the `text` field with the exact visible label
+6. For assertions, verify text that actually appears in the page content
+7. Keep steps concise and actionable
 
 Return the scenarios as a JSON array following the format specified in the system instructions.\
 """
@@ -71,13 +76,18 @@ user-perspective E2E test scenarios.
 ## Specification Documents
 {doc_text}
 
-## Instructions
-1. Use the specification documents as the PRIMARY source for identifying test scenarios
-2. Cross-reference with the actual page content to verify available UI elements
-3. Generate 1-5 test scenarios covering the most important flows described in the documents
-4. Each scenario should have clear steps: navigate, click, type, assert
-5. Use text-based targets (not image) for reliability
-6. Keep steps concise and actionable
+## CRITICAL Rules
+1. **Use EXACT text from the page content above** for all click targets and assertions.
+   - Extract actual button labels, link text, menu item names from "Page Content"
+   - NEVER use generic placeholders like "menu1", "menu2", "button1", "link1"
+   - If the page has a menu with "Pricing", "Features", "About", use those exact words
+2. Use the specification documents as the PRIMARY source for identifying test scenarios
+3. Cross-reference with the actual page content to verify available UI elements
+4. Generate 1-5 test scenarios covering the most important flows
+5. Each scenario should have clear steps: navigate, click, type, assert
+6. For click targets, use the `text` field with the exact visible label
+7. For assertions, verify text that actually appears in the page content
+8. Keep steps concise and actionable
 
 Return the scenarios as a JSON array following the format specified in the system instructions.\
 """

@@ -20,8 +20,8 @@ def test_scenario_prompt_contains_instructions() -> None:
     assert "Hello" in prompt
     # Should mention user-perspective flows
     assert "user flow" in prompt.lower() or "login" in prompt.lower()
-    # Should request text-based targets
-    assert "text-based" in prompt.lower()
+    # Should request exact text targets (not generic placeholders)
+    assert "exact text" in prompt.lower()
 
 
 def test_scenario_prompt_format_placeholders() -> None:

@@ -181,6 +181,7 @@
     "convertedPreview": "{count}개 시나리오, {steps}개 스텝 변환됨",
     "runConverted": "테스트 실행",
     "cancelBtn": "테스트 취소",
+    "cancelling": "취소 중...",
     "cancelled": "테스트가 취소되었습니다"
   },
   "tests": {

@@ -337,13 +337,16 @@ The user wants to test the following on their website.
 ## User Request
 {user_prompt}
 
-## Instructions
+## CRITICAL Rules
 1. Convert the user's natural language description into concrete E2E test scenarios
 2. Generate 1-5 test scenarios covering the described flows
 3. Each scenario should have clear steps: navigate, click, type, assert
-4. Use text-based targets (not image) for reliability
-5. Keep steps concise and actionable
-6. Use {{{{url}}}} as the base URL placeholder in navigate actions
+4. **Use EXACT text that would appear on the website** for click targets
+   - Use real button labels, link text, menu names (e.g. "Sign Up", "Pricing", "Contact")
+   - NEVER use generic placeholders like "menu1", "menu2", "button1"
+5. For click targets, use the `text` field with the exact visible label
+6. Keep steps concise and actionable
+7. Use {{{{url}}}} as the base URL placeholder in navigate actions
 
 Return the scenarios as a JSON array following the format specified in the system instructions.\
 """
