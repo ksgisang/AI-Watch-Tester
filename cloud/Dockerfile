@@ -1,8 +1,10 @@
 FROM python:3.12-slim
 
-# System dependencies for Playwright Chromium
+# System dependencies: Playwright, Tesseract OCR, OpenCV
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget gnupg curl \
+    tesseract-ocr \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

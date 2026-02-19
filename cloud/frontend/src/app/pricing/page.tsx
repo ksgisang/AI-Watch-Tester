@@ -9,6 +9,9 @@ export default function PricingPage() {
   const t = useTranslations("pricing");
   const { user } = useAuth();
 
+  const proUrl = user ? getCheckoutUrl("pro", user.id) : "/signup";
+  const teamUrl = user ? getCheckoutUrl("team", user.id) : "/signup";
+
   const plans = [
     {
       key: "free",
@@ -27,7 +30,7 @@ export default function PricingPage() {
       desc: t("proDesc"),
       features: [t("proFeat1"), t("proFeat2"), t("proFeat3"), t("proFeat4"), t("proFeat5")],
       cta: t("proCta"),
-      href: user ? getCheckoutUrl("pro", user.id) : "/signup",
+      href: proUrl,
       highlighted: true,
     },
     {
@@ -37,7 +40,7 @@ export default function PricingPage() {
       desc: t("teamDesc"),
       features: [t("teamFeat1"), t("teamFeat2"), t("teamFeat3"), t("teamFeat4")],
       cta: t("teamCta"),
-      href: user ? getCheckoutUrl("team", user.id) : "/signup",
+      href: teamUrl,
       highlighted: false,
     },
   ];

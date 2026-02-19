@@ -56,7 +56,7 @@ export default async function LandingPage() {
   const t = await getTranslations("landing");
 
   return (
-    <div className="overflow-hidden">
+    <div className="overflow-x-hidden">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
@@ -202,7 +202,7 @@ export default async function LandingPage() {
             {t("pricingTitle")}
           </h2>
 
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto pt-4">
             <table className="w-full min-w-[520px] text-sm">
               <thead>
                 <tr className="border-b border-gray-200">
