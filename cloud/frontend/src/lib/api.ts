@@ -89,6 +89,17 @@ export async function approveTest(testId: number): Promise<TestItem> {
   return res.json();
 }
 
+export async function cancelTest(testId: number): Promise<TestItem> {
+  const res = await authFetch(`/api/tests/${testId}/cancel`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || `Error ${res.status}`);
+  }
+  return res.json();
+}
+
 export interface UploadResult {
   filename: string;
   size: number;

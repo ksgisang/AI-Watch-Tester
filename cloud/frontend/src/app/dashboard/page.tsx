@@ -7,7 +7,8 @@ import { useAuth } from "@/components/AuthProvider";
 import TestProgress from "@/components/TestProgress";
 import ScenarioEditor from "@/components/ScenarioEditor";
 import FileUpload from "@/components/FileUpload";
-import { createTest, getTest, uploadDocument, fetchBilling, convertScenario, updateScenarios, approveTest, type TestItem, type BillingInfo } from "@/lib/api";
+import { createTest, getTest, uploadDocument, fetchBilling, convertScenario, updateScenarios, approveTest, cancelTest, type TestItem, type BillingInfo } from "@/lib/api";
+import { translateApiError } from "@/lib/errorMessages";
 
 type Phase = "idle" | "generating" | "review" | "executing" | "done";
 
@@ -16,6 +17,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const t = useTranslations("dashboard");
   const tc = useTranslations("common");
+  const te = useTranslations("errors");
   const [url, setUrl] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -76,7 +78,8 @@ export default function DashboardPage() {
       setShowUpload(false);
       stagedFilesRef.current = [];
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create test");
+      const msg = err instanceof Error ? err.message : "Failed to create test";
+      setError(translateApiError(msg, te));
     } finally {
       setSubmitting(false);
     }
@@ -96,7 +99,8 @@ export default function DashboardPage() {
       setShowUpload(false);
       stagedFilesRef.current = [];
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create test");
+      const msg = err instanceof Error ? err.message : "Failed to create test";
+      setError(translateApiError(msg, te));
     } finally {
       setSubmitting(false);
     }
@@ -113,7 +117,8 @@ export default function DashboardPage() {
       setConvertedYaml(result.scenario_yaml);
       setConvertedInfo({ count: result.scenarios_count, steps: result.steps_total });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Conversion failed");
+      const msg = err instanceof Error ? err.message : "Conversion failed";
+      setError(translateApiError(msg, te));
     } finally {
       setConverting(false);
     }
@@ -136,7 +141,8 @@ export default function DashboardPage() {
       setConvertedInfo(null);
       setCustomPrompt("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to start test");
+      const msg = err instanceof Error ? err.message : "Failed to start test";
+      setError(translateApiError(msg, te));
     } finally {
       setSubmitting(false);
     }
@@ -149,7 +155,8 @@ export default function DashboardPage() {
       setScenarioYaml(test.scenario_yaml || "");
       setPhase("review");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load scenarios");
+      const msg = err instanceof Error ? err.message : "Failed to load scenarios";
+      setError(translateApiError(msg, te));
     }
   };
 
@@ -162,6 +169,19 @@ export default function DashboardPage() {
     setTestPassed(passed);
     if (activeTest) {
       setActiveTest({ ...activeTest, status: passed ? "done" : "failed" });
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!activeTest) return;
+    try {
+      await cancelTest(activeTest.id);
+      setActiveTest({ ...activeTest, status: "failed" });
+      setPhase("done");
+      setTestPassed(false);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to cancel test";
+      setError(translateApiError(msg, te));
     }
   };
 
@@ -401,11 +421,20 @@ export default function DashboardPage() {
 
           {/* Phase: generating */}
           {phase === "generating" && (
-            <TestProgress
-              testId={activeTest.id}
-              onComplete={handleComplete}
-              onScenariosReady={handleScenariosReady}
-            />
+            <>
+              <TestProgress
+                testId={activeTest.id}
+                onComplete={handleComplete}
+                onScenariosReady={handleScenariosReady}
+              />
+              <button
+                type="button"
+                onClick={handleCancel}
+                className="mt-2 rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+              >
+                {t("cancelBtn")}
+              </button>
+            </>
           )}
 
           {/* Phase: review */}
@@ -419,10 +448,19 @@ export default function DashboardPage() {
 
           {/* Phase: executing */}
           {phase === "executing" && (
-            <TestProgress
-              testId={activeTest.id}
-              onComplete={handleComplete}
-            />
+            <>
+              <TestProgress
+                testId={activeTest.id}
+                onComplete={handleComplete}
+              />
+              <button
+                type="button"
+                onClick={handleCancel}
+                className="mt-2 rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+              >
+                {t("cancelBtn")}
+              </button>
+            </>
           )}
 
           {/* Phase: done */}

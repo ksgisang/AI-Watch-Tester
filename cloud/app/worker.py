@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
@@ -62,8 +62,17 @@ class Worker:
         """Main loop: recover stuck tests, then poll for queued tests."""
         await self._recover_stuck()
 
+        poll_count = 0
+        # Check stuck tests every ~30 seconds (poll_interval * checks_per_cycle)
+        stuck_check_interval = max(1, int(30 / settings.worker_poll_interval))
+
         while self._running:
             try:
+                # Periodically clean up stuck tests
+                poll_count += 1
+                if poll_count % stuck_check_interval == 0:
+                    await self._fail_stuck_tests()
+
                 # Only claim a test if we have a free slot
                 if self._active < settings.max_concurrent:
                     claimed = await self._claim_next()
@@ -78,21 +87,52 @@ class Worker:
             await asyncio.sleep(settings.worker_poll_interval)
 
     async def _recover_stuck(self) -> None:
-        """Reset any RUNNING tests back to appropriate state (from previous crash)."""
+        """On startup: fail tests stuck in RUNNING from previous crash."""
         async with async_session() as db:
             result = await db.execute(
                 select(Test).where(Test.status == TestStatus.RUNNING)
             )
             stuck = list(result.scalars().all())
             for test in stuck:
-                # If scenario_yaml exists, it was mid-execution → QUEUED
-                # If not, it was mid-generation → GENERATING
-                if test.scenario_yaml:
-                    test.status = TestStatus.QUEUED
-                    logger.warning("Recovered stuck test %d → QUEUED", test.id)
-                else:
-                    test.status = TestStatus.GENERATING
-                    logger.warning("Recovered stuck test %d → GENERATING", test.id)
+                test.status = TestStatus.FAILED
+                test.error_message = "Test was interrupted by server restart"
+                test.updated_at = datetime.now(timezone.utc)
+                logger.warning("Startup: marked stuck test %d as FAILED", test.id)
+            if stuck:
+                await db.commit()
+
+    async def _fail_stuck_tests(self) -> None:
+        """Periodically fail tests stuck in RUNNING beyond the timeout."""
+        cutoff = datetime.now(timezone.utc) - timedelta(
+            minutes=settings.stuck_timeout_minutes
+        )
+        async with async_session() as db:
+            result = await db.execute(
+                select(Test).where(
+                    Test.status == TestStatus.RUNNING,
+                    Test.updated_at < cutoff,
+                )
+            )
+            stuck = list(result.scalars().all())
+            for test in stuck:
+                test.status = TestStatus.FAILED
+                test.error_message = (
+                    f"Test timed out after {settings.stuck_timeout_minutes} minutes"
+                )
+                test.updated_at = datetime.now(timezone.utc)
+                logger.warning(
+                    "Auto-failed stuck test %d (running > %d min)",
+                    test.id,
+                    settings.stuck_timeout_minutes,
+                )
+                await ws_manager.broadcast(
+                    test.id,
+                    {
+                        "type": "test_fail",
+                        "test_id": test.id,
+                        "error": test.error_message,
+                    },
+                )
             if stuck:
                 await db.commit()
 

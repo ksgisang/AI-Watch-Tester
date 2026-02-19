@@ -179,7 +179,9 @@
     "convertBtn": "Convert to Scenario",
     "converting": "Converting...",
     "convertedPreview": "Converted {count} scenario(s), {steps} steps",
-    "runConverted": "Run Test"
+    "runConverted": "Run Test",
+    "cancelBtn": "Cancel Test",
+    "cancelled": "Test cancelled"
   },
   "tests": {
     "title": "Test History",
@@ -364,6 +366,32 @@
     "noSubscription": "You are on the Free plan.",
     "upgradePrompt": "Upgrade to Pro or Team for more tests and features.",
     "loginRequired": "Please log in to view billing."
+  },
+  "errors": {
+    "concurrentLimit": "Concurrent test limit reached ({limit}). Wait for running tests to finish.",
+    "monthlyLimit": "Monthly test limit reached ({limit}). Upgrade your plan for more tests.",
+    "monthlyLimitFree": "Monthly test limit reached ({limit}). Upgrade at /pricing for more tests.",
+    "testNotFound": "Test not found.",
+    "notAuthenticated": "Not authenticated. Please log in.",
+    "tokenExpired": "Session expired. Please log in again.",
+    "cannotEditStatus": "Cannot edit scenarios in current status.",
+    "cannotApproveStatus": "Cannot approve test in current status.",
+    "cannotCancelStatus": "Cannot cancel test in current status.",
+    "cannotUploadStatus": "Cannot upload documents in current status.",
+    "noScenarios": "No scenarios to approve.",
+    "invalidYaml": "Invalid YAML format.",
+    "emptyYaml": "Empty scenario YAML.",
+    "unsupportedFile": "Unsupported file type. Allowed: .md, .txt, .pdf, .docx",
+    "fileTooLarge": "File too large. Maximum 10MB.",
+    "aiNotInstalled": "AI service is not available. Please try again later.",
+    "aiProviderUnknown": "Unknown AI provider.",
+    "aiGenerationFailed": "AI scenario generation failed. Please try again.",
+    "aiNoScenarios": "AI generated no scenarios. Please try a different prompt.",
+    "apiKeyProOnly": "API keys require a Pro or Team subscription.",
+    "cancelledByUser": "Cancelled by user.",
+    "stuckTimeout": "Test timed out. Please try again.",
+    "serverRestart": "Test was interrupted by server restart.",
+    "unknownError": "An unexpected error occurred. Please try again."
   },
   "metadata_extra": {
     "pricingTitle": "Pricing",

@@ -183,6 +183,43 @@ async def approve_test(
     return test
 
 
+@router.post("/{test_id}/cancel", response_model=TestResponse)
+async def cancel_test(
+    test_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Test:
+    """Cancel a test that is generating, queued, or running."""
+    query = select(Test).where(Test.id == test_id, Test.user_id == user.id)
+    test = (await db.execute(query)).scalar_one_or_none()
+    if test is None:
+        raise HTTPException(status_code=404, detail="Test not found")
+
+    cancellable = {TestStatus.GENERATING, TestStatus.REVIEW, TestStatus.QUEUED, TestStatus.RUNNING}
+    if test.status not in cancellable:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot cancel test in '{test.status.value}' status",
+        )
+
+    test.status = TestStatus.FAILED
+    test.error_message = "Cancelled by user"
+    from datetime import datetime, timezone
+    test.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(test)
+
+    # Notify WebSocket clients
+    from app.ws import ws_manager
+    await ws_manager.broadcast(test_id, {
+        "type": "test_fail",
+        "test_id": test_id,
+        "error": "Cancelled by user",
+    })
+
+    return test
+
+
 @router.post("/{test_id}/upload", response_model=UploadResponse)
 async def upload_document(
     test_id: int,
