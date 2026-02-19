@@ -54,12 +54,8 @@ export default function DashboardPage() {
   const [planLoading, setPlanLoading] = useState(false);
   const [scanExecuting, setScanExecuting] = useState(false);
   const scanWsRef = useRef<WebSocket | null>(null);
-
-  // Redirect if not authenticated
-  if (!authLoading && !user) {
-    router.push("/login");
-    return null;
-  }
+  // Track whether plan generation was already triggered to avoid double-calls
+  const planTriggeredRef = useRef(false);
 
   // Fetch billing info
   useEffect(() => {
@@ -67,6 +63,12 @@ export default function DashboardPage() {
       fetchBilling().then(setBilling).catch(() => {});
     }
   }, [user]);
+
+  // Redirect if not authenticated
+  if (!authLoading && !user) {
+    router.push("/login");
+    return null;
+  }
 
   if (authLoading) {
     return (
@@ -209,9 +211,6 @@ export default function DashboardPage() {
   };
 
   // -- Smart Scan handlers --
-  // Track whether plan generation was already triggered to avoid double-calls
-  const planTriggeredRef = useRef(false);
-
   const handleStartScan = async () => {
     setError("");
     setScanPhase("scanning");
