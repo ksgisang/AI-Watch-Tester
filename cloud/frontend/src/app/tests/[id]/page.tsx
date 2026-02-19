@@ -44,7 +44,9 @@ const STATUS_BADGE: Record<string, string> = {
 
 function screenshotUrl(path: string | undefined | null): string | null {
   if (!path) return null;
-  // Handle both "cloud/screenshots/..." and "screenshots/..." formats
+  // Base64 data URLs are used directly (Render ephemeral FS)
+  if (path.startsWith("data:image/")) return path;
+  // Legacy: file path format → static file URL
   const relative = path.replace(/^(cloud\/)?screenshots\//, "");
   return `${API_URL}/screenshots/${relative}`;
 }

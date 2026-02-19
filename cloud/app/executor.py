@@ -6,6 +6,7 @@ Reuses AAT core modules (aat package must be installed).
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -104,27 +105,35 @@ async def _save_screenshot(
     step: int = 0,
     timing: str = "",
 ) -> str | None:
-    """Save engine screenshot to file and optionally stream via WebSocket.
+    """Capture screenshot as base64 data URL and optionally stream via WS.
 
-    Returns relative path or None.
+    Returns base64 data URL string or None.
+    Ephemeral filesystems (Render) lose files on restart, so we store
+    screenshots as base64 in result_json instead of on disk.
     """
     try:
         png_bytes = await engine.screenshot()
-        d = _screenshot_dir_for_test(test_id)
-        path = d / f"{label}.png"
-        path.write_bytes(png_bytes)
+        b64 = base64.b64encode(png_bytes).decode("ascii")
+        data_url = f"data:image/png;base64,{b64}"
+
+        # Also save to disk as fallback (local dev)
+        try:
+            d = _screenshot_dir_for_test(test_id)
+            path = d / f"{label}.png"
+            path.write_bytes(png_bytes)
+        except Exception:
+            pass
 
         # Stream to frontend via WebSocket
         if ws and timing:
-            b64 = base64.b64encode(png_bytes).decode("ascii")
             await ws.broadcast(test_id, {
                 "type": "screenshot",
                 "step": step,
                 "timing": timing,
-                "image": f"data:image/png;base64,{b64}",
+                "image": data_url,
             })
 
-        return str(path)
+        return data_url
     except Exception as exc:
         logger.debug("Screenshot save failed (%s): %s", label, exc)
         return None
@@ -403,7 +412,10 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
                 )
 
                 try:
-                    result = await step_executor.execute_step(step)
+                    result = await asyncio.wait_for(
+                        step_executor.execute_step(step),
+                        timeout=30.0,
+                    )
                     status = result.status.value
 
                     # Navigate: verify actual page state on failure
@@ -447,10 +459,35 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
                             "status": status,
                         })
 
+                except TimeoutError:
+                    err_msg = f"Step timed out after 30s"
+                    logger.warning("Step %d timed out", step_num)
+
+                    ss_error = await _save_screenshot(
+                        engine, test_id, f"step_{step_num}_error",
+                        ws=ws, step=step_num, timing="error",
+                    )
+
+                    step_results.append({
+                        "step": i + 1,
+                        "status": "error",
+                        "error": err_msg,
+                        "screenshot_before": ss_before,
+                        "screenshot_error": ss_error,
+                    })
+                    scenario_passed = False
+                    overall_passed = False
+
+                    if ws:
+                        await ws.broadcast(test_id, {
+                            "type": "step_fail",
+                            "step": step_num,
+                            "error": err_msg,
+                        })
+
                 except Exception as exc:
                     logger.warning("Step %d failed: %s", step_num, exc)
 
-                    # Error-screenshot
                     ss_error = await _save_screenshot(
                         engine, test_id, f"step_{step_num}_error",
                         ws=ws, step=step_num, timing="error",

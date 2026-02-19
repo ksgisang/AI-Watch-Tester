@@ -22,6 +22,7 @@ export default function TestsPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>("all");
 
   useEffect(() => {
@@ -34,12 +35,18 @@ export default function TestsPage() {
 
   const fetchTests = async () => {
     setLoading(true);
+    setError(null);
     try {
       const data = await listTests(page, 20);
       setTests(data.tests);
       setTotal(data.total);
-    } catch {
-      // Ignore errors silently
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to load tests";
+      if (msg.includes("401") || msg.includes("Not authenticated")) {
+        router.push("/login");
+        return;
+      }
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -93,7 +100,17 @@ export default function TestsPage() {
       </div>
 
       {/* List */}
-      {loading ? (
+      {error ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-center">
+          <p className="text-sm text-red-700">{error}</p>
+          <button
+            onClick={fetchTests}
+            className="mt-2 text-sm text-red-600 hover:underline"
+          >
+            {tc("retry") ?? "Retry"}
+          </button>
+        </div>
+      ) : loading ? (
         <p className="py-8 text-center text-gray-500">{tc("loading")}</p>
       ) : filtered.length === 0 ? (
         <p className="py-8 text-center text-gray-500">
