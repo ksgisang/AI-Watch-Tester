@@ -198,7 +198,10 @@
     "before": "before",
     "after": "after",
     "error": "error",
-    "stepLabel": "Step {step}"
+    "stepLabel": "Step {step}",
+    "viewScenarios": "View AI Scenarios",
+    "scenarioLabel": "Scenario",
+    "expectedResult": "Expected"
   },
   "progress": {
     "connecting": "Connecting...",

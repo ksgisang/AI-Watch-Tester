@@ -61,6 +61,7 @@ export default function TestDetailPage() {
   const [result, setResult] = useState<ResultJSON | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [showScenarios, setShowScenarios] = useState(false);
 
   const testId = Number(params.id);
 
@@ -165,6 +166,31 @@ export default function TestDetailPage() {
               }}
             />
           </div>
+        </div>
+      )}
+
+      {/* Scenario YAML viewer (collapsible) */}
+      {test.scenario_yaml && (
+        <div className="mb-6 rounded-lg border border-gray-200">
+          <button
+            onClick={() => setShowScenarios(!showScenarios)}
+            className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-gray-50"
+          >
+            <span className="text-sm font-medium text-gray-900">
+              {t("viewScenarios")}
+            </span>
+            <svg
+              className={`h-4 w-4 text-gray-500 transition-transform ${showScenarios ? "rotate-180" : ""}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {showScenarios && (
+            <ScenarioViewer yaml={test.scenario_yaml} t={t} />
+          )}
         </div>
       )}
 
@@ -284,4 +310,238 @@ export default function TestDetailPage() {
       )}
     </div>
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* Scenario YAML Viewer                                                */
+/* ------------------------------------------------------------------ */
+
+interface ParsedStep {
+  step?: number;
+  action?: string;
+  description?: string;
+  target?: { text?: string };
+  value?: string;
+  assert_type?: string;
+  expected?: Array<{ type?: string; value?: string }>;
+  humanize?: boolean;
+}
+
+interface ParsedScenario {
+  id?: string;
+  name?: string;
+  description?: string;
+  tags?: string[];
+  steps?: ParsedStep[];
+  expected_result?: Array<{ type?: string; value?: string }>;
+}
+
+const ACTION_COLORS: Record<string, string> = {
+  navigate: "bg-blue-100 text-blue-700",
+  find_and_click: "bg-purple-100 text-purple-700",
+  find_and_type: "bg-amber-100 text-amber-700",
+  type_text: "bg-amber-100 text-amber-700",
+  press_key: "bg-gray-100 text-gray-700",
+  assert: "bg-green-100 text-green-700",
+  wait: "bg-gray-100 text-gray-500",
+  screenshot: "bg-cyan-100 text-cyan-700",
+};
+
+function ScenarioViewer({
+  yaml: yamlStr,
+  t,
+}: {
+  yaml: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  t: any;
+}) {
+  let scenarios: ParsedScenario[] = [];
+  try {
+    // scenario_yaml can be a list or {scenarios: [...]}
+    const parsed = JSON.parse(
+      JSON.stringify(
+        // simple YAML-like parse: split documents
+        yamlStr
+      )
+    );
+    // Actually we need to parse YAML — but we don't have js-yaml in frontend.
+    // scenario_yaml is stored as YAML string. Let's parse it manually for common patterns.
+    // Better approach: parse in a simple way since the YAML is machine-generated.
+    scenarios = parseSimpleYaml(yamlStr);
+  } catch {
+    // fallback: show raw
+  }
+
+  if (scenarios.length === 0) {
+    return (
+      <div className="border-t border-gray-100 px-4 py-3">
+        <pre className="max-h-80 overflow-auto rounded bg-gray-50 p-3 text-xs text-gray-700 whitespace-pre-wrap">
+          {yamlStr}
+        </pre>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-t border-gray-100 divide-y divide-gray-50">
+      {scenarios.map((sc, si) => (
+        <div key={si} className="px-4 py-3">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-mono text-gray-600">
+              {sc.id || `SC-${si + 1}`}
+            </span>
+            <span className="text-sm font-medium text-gray-900">
+              {sc.name || t("scenarioLabel")}
+            </span>
+          </div>
+          {sc.description && (
+            <p className="mb-2 text-xs text-gray-500">{sc.description}</p>
+          )}
+          {sc.tags && sc.tags.length > 0 && (
+            <div className="mb-2 flex gap-1">
+              {sc.tags.map((tag, ti) => (
+                <span key={ti} className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] text-blue-600">
+                  {tag}
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="space-y-1">
+            {sc.steps?.map((step, i) => (
+              <div key={i} className="flex items-start gap-2 text-xs">
+                <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-gray-100 text-[10px] text-gray-500">
+                  {step.step ?? i + 1}
+                </span>
+                <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${ACTION_COLORS[step.action || ""] || "bg-gray-100 text-gray-600"}`}>
+                  {step.action || "?"}
+                </span>
+                <span className="text-gray-700">
+                  {step.description || ""}
+                </span>
+                {step.target?.text && (
+                  <span className="shrink-0 rounded bg-gray-50 px-1 text-[10px] text-gray-500 font-mono">
+                    target: &quot;{step.target.text}&quot;
+                  </span>
+                )}
+                {step.value && step.action !== "navigate" && (
+                  <span className="shrink-0 rounded bg-gray-50 px-1 text-[10px] text-gray-500 font-mono">
+                    value: &quot;{step.value}&quot;
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+          {sc.expected_result && sc.expected_result.length > 0 && (
+            <div className="mt-2 rounded bg-green-50 px-2 py-1">
+              <span className="text-[10px] font-medium text-green-700">{t("expectedResult")}:</span>
+              {sc.expected_result.map((er, ei) => (
+                <span key={ei} className="ml-1 text-[10px] text-green-600">
+                  {er.type}: &quot;{er.value}&quot;
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Simple YAML parser for machine-generated scenario YAML.
+ * Handles the specific format used by AAT scenario generation.
+ */
+function parseSimpleYaml(yamlStr: string): ParsedScenario[] {
+  try {
+    // The YAML is a list of scenario objects. Try JSON first (some formats).
+    const asJson = JSON.parse(yamlStr);
+    if (Array.isArray(asJson)) return asJson;
+    if (asJson?.scenarios) return asJson.scenarios;
+  } catch {
+    // Not JSON, parse as YAML manually using line-by-line
+  }
+
+  // Simple line-based YAML parser for known structure
+  const scenarios: ParsedScenario[] = [];
+  let current: ParsedScenario | null = null;
+  let currentStep: ParsedStep | null = null;
+  let inSteps = false;
+  let inExpected = false;
+  let inTags = false;
+
+  for (const raw of yamlStr.split("\n")) {
+    const line = raw.trimEnd();
+    const trimmed = line.trimStart();
+    const indent = line.length - trimmed.length;
+
+    // New scenario (top-level list item)
+    if (trimmed.startsWith("- id:")) {
+      if (current) scenarios.push(current);
+      current = { id: trimmed.replace("- id:", "").trim().replace(/['"]/g, ""), steps: [] };
+      inSteps = false;
+      inExpected = false;
+      inTags = false;
+      currentStep = null;
+      continue;
+    }
+
+    if (!current) continue;
+
+    // Scenario-level fields
+    if (indent <= 2 && trimmed.startsWith("name:")) {
+      current.name = trimmed.replace("name:", "").trim().replace(/['"]/g, "");
+      inSteps = false; inExpected = false; inTags = false;
+    } else if (indent <= 2 && trimmed.startsWith("description:")) {
+      current.description = trimmed.replace("description:", "").trim().replace(/['"]/g, "");
+      inSteps = false; inExpected = false; inTags = false;
+    } else if (indent <= 2 && trimmed.startsWith("tags:")) {
+      inTags = true; inSteps = false; inExpected = false;
+      current.tags = [];
+    } else if (indent <= 2 && trimmed.startsWith("steps:")) {
+      inSteps = true; inTags = false; inExpected = false;
+    } else if (indent <= 2 && trimmed.startsWith("expected_result:")) {
+      inExpected = true; inSteps = false; inTags = false;
+      current.expected_result = [];
+    } else if (inTags && trimmed.startsWith("- ")) {
+      current.tags = current.tags || [];
+      current.tags.push(trimmed.replace("- ", "").replace(/['"]/g, ""));
+    } else if (inExpected && trimmed.startsWith("- type:")) {
+      // inline expected_result item
+      current.expected_result = current.expected_result || [];
+      const obj: { type?: string; value?: string } = {};
+      obj.type = trimmed.replace("- type:", "").trim().replace(/['"]/g, "");
+      current.expected_result.push(obj);
+    } else if (inExpected && trimmed.startsWith("value:")) {
+      const arr = current.expected_result || [];
+      if (arr.length > 0) {
+        arr[arr.length - 1].value = trimmed.replace("value:", "").trim().replace(/['"]/g, "");
+      }
+    } else if (inSteps && trimmed.startsWith("- step:")) {
+      if (currentStep) current.steps!.push(currentStep);
+      currentStep = { step: parseInt(trimmed.replace("- step:", "").trim()) };
+    } else if (inSteps && currentStep) {
+      if (trimmed.startsWith("action:")) {
+        currentStep.action = trimmed.replace("action:", "").trim().replace(/['"]/g, "");
+      } else if (trimmed.startsWith("description:")) {
+        currentStep.description = trimmed.replace("description:", "").trim().replace(/['"]/g, "");
+      } else if (trimmed.startsWith("value:")) {
+        currentStep.value = trimmed.replace("value:", "").trim().replace(/['"]/g, "");
+      } else if (trimmed.startsWith("humanize:")) {
+        currentStep.humanize = trimmed.includes("true");
+      } else if (trimmed.startsWith("target:")) {
+        // target might be inline or multi-line
+        currentStep.target = {};
+      } else if (trimmed.startsWith("text:") && currentStep.target) {
+        currentStep.target.text = trimmed.replace("text:", "").trim().replace(/['"]/g, "");
+      } else if (trimmed.startsWith("assert_type:")) {
+        currentStep.assert_type = trimmed.replace("assert_type:", "").trim().replace(/['"]/g, "");
+      }
+    }
+  }
+
+  // Push last items
+  if (currentStep && current) current.steps!.push(currentStep);
+  if (current) scenarios.push(current);
+
+  return scenarios;
 }

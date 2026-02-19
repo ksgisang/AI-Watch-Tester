@@ -198,7 +198,10 @@
     "before": "이전",
     "after": "이후",
     "error": "에러",
-    "stepLabel": "스텝 {step}"
+    "stepLabel": "스텝 {step}",
+    "viewScenarios": "AI 시나리오 보기",
+    "scenarioLabel": "시나리오",
+    "expectedResult": "기대 결과"
   },
   "progress": {
     "connecting": "연결 중...",
