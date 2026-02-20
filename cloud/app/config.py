@@ -33,9 +33,9 @@ class Settings(BaseSettings):
     rate_limit_team: int = 500
 
     # Worker
-    max_concurrent: int = 2
+    max_concurrent: int = 5  # server-wide safety cap (Render memory)
     worker_poll_interval: float = 2.0  # seconds
-    stuck_timeout_minutes: int = 5  # auto-fail tests stuck in RUNNING/QUEUED
+    stuck_timeout_minutes: int = 3  # auto-fail tests stuck in RUNNING/QUEUED
 
     # AI provider for scenario generation
     # Accepts AWT_AI_PROVIDER or AWT_SERVICE_AI_PROVIDER (Render compatibility)
@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     # Concurrent execution limits per tier
     concurrent_limit_free: int = 1
     concurrent_limit_pro: int = 3
-    concurrent_limit_team: int = 10
+    concurrent_limit_team: int = 5
 
     # Lemon Squeezy
     lemon_webhook_secret: str = ""

@@ -10,12 +10,13 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.config import settings
 from app.database import async_session
 from app.executor import execute_test, generate_scenarios_for_test
-from app.models import Test, TestStatus
+from app.middleware import get_concurrent_limit
+from app.models import Test, TestStatus, User, UserTier
 from app.ws import ws_manager
 
 logger = logging.getLogger(__name__)
@@ -170,14 +171,26 @@ class Worker:
                 await db.commit()
 
     async def _claim_next(self) -> tuple[int, TestStatus] | None:
-        """Atomically claim the next GENERATING or QUEUED test.
+        """Claim the next eligible test respecting per-user concurrency limits.
 
         Returns (test_id, original_status) or None.
         GENERATING has priority over QUEUED.
+        A user's test is skipped if they've reached their tier's concurrent limit,
+        allowing other users' tests to proceed independently.
         """
         _is_sqlite = settings.database_url.startswith("sqlite")
 
         async with async_session() as db:
+            # 1. Per-user RUNNING counts (single query)
+            running_q = (
+                select(Test.user_id, func.count())
+                .where(Test.status == TestStatus.RUNNING)
+                .group_by(Test.user_id)
+            )
+            running_result = await db.execute(running_q)
+            user_running: dict[str, int] = dict(running_result.all())
+
+            # 2. Candidate tests (up to 20)
             stmt = (
                 select(Test)
                 .where(Test.status.in_([TestStatus.GENERATING, TestStatus.QUEUED]))
@@ -186,22 +199,44 @@ class Worker:
                     (Test.status == TestStatus.QUEUED).asc(),
                     Test.created_at.asc(),
                 )
-                .limit(1)
+                .limit(20)
             )
             if not _is_sqlite:
                 stmt = stmt.with_for_update(skip_locked=True)
 
             result = await db.execute(stmt)
-            test = result.scalar_one_or_none()
-            if test is None:
+            candidates = list(result.scalars().all())
+            if not candidates:
                 return None
 
-            original_status = test.status
-            test.status = TestStatus.RUNNING
-            test.updated_at = datetime.now(timezone.utc)
-            await db.commit()
-            logger.info("Claimed test %d (%s) for processing", test.id, original_status.value)
-            return test.id, original_status
+            # 3. Fetch tiers for candidate users
+            candidate_user_ids = {t.user_id for t in candidates}
+            tier_result = await db.execute(
+                select(User.id, User.tier).where(User.id.in_(candidate_user_ids))
+            )
+            user_tiers: dict[str, UserTier] = dict(tier_result.all())
+
+            # 4. First eligible candidate (per-user limit not reached)
+            for test in candidates:
+                tier = user_tiers.get(test.user_id, UserTier.FREE)
+                tier_limit = get_concurrent_limit(tier)
+                running_count = user_running.get(test.user_id, 0)
+                if running_count >= tier_limit:
+                    continue  # This user is at capacity, try next
+
+                # Claim this test
+                original_status = test.status
+                test.status = TestStatus.RUNNING
+                test.updated_at = datetime.now(timezone.utc)
+                await db.commit()
+                logger.info(
+                    "Claimed test %d (%s) for user %s (%d/%d running)",
+                    test.id, original_status.value, test.user_id,
+                    running_count + 1, tier_limit,
+                )
+                return test.id, original_status
+
+            return None
 
     async def _run(self, test_id: int, original_status: TestStatus) -> None:
         """Process a test based on its original status.

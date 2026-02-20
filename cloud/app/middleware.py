@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import logging
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import func, select
@@ -12,6 +13,8 @@ from app.auth import get_current_user
 from app.config import settings
 from app.database import get_db
 from app.models import Test, TestStatus, User, UserTier
+
+logger = logging.getLogger(__name__)
 
 # -- Tier-based limits lookup (read from settings at call time for testability) --
 
@@ -95,7 +98,32 @@ async def check_rate_limit(
             },
         )
 
-    # -- Concurrent limit --
+    # -- Auto-clean stuck tests for this user (before concurrent check) --
+    stuck_cutoff = datetime.now(timezone.utc) - timedelta(
+        minutes=settings.stuck_timeout_minutes
+    )
+    stuck_q = (
+        select(Test).where(
+            Test.user_id == user.id,
+            Test.status.in_(
+                [TestStatus.GENERATING, TestStatus.QUEUED, TestStatus.RUNNING]
+            ),
+            Test.updated_at < stuck_cutoff,
+        )
+    )
+    stuck_result = await db.execute(stuck_q)
+    stuck_tests = list(stuck_result.scalars().all())
+    for t in stuck_tests:
+        t.status = TestStatus.FAILED
+        t.error_message = (
+            f"Auto-cleaned: test stuck > {settings.stuck_timeout_minutes} min"
+        )
+        t.updated_at = datetime.now(timezone.utc)
+        logger.warning("Auto-cleaned stuck test %d for user %s", t.id, user.id)
+    if stuck_tests:
+        await db.commit()
+
+    # -- Concurrent limit (per-user) --
     concurrent_limit = get_concurrent_limit(user.tier)
     active = await get_active_count(user.id, db)
 
@@ -103,6 +131,19 @@ async def check_rate_limit(
         raise HTTPException(
             status_code=429,
             detail=f"Concurrent test limit reached ({concurrent_limit}). Wait for running tests to finish.",
+        )
+
+    # -- Global server capacity check --
+    global_running_q = (
+        select(func.count())
+        .select_from(Test)
+        .where(Test.status == TestStatus.RUNNING)
+    )
+    global_running = (await db.execute(global_running_q)).scalar() or 0
+    if global_running >= settings.max_concurrent:
+        raise HTTPException(
+            status_code=429,
+            detail="Server is busy. Please try again shortly.",
         )
 
     return user
