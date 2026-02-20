@@ -7,10 +7,11 @@ All dependencies are injected via constructor for testability.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from aat.core.exceptions import MatchError, StepExecutionError
 from aat.core.models import (
@@ -198,6 +199,14 @@ class StepExecutor:
         if step.action in FIND_ACTIONS:
             match_result = await self._find_and_act(step)
 
+            # Post-click wait: detect navigation or modal animation
+            if step.action in (
+                ActionType.FIND_AND_CLICK,
+                ActionType.FIND_AND_DOUBLE_CLICK,
+                ActionType.FIND_AND_RIGHT_CLICK,
+            ):
+                await self._post_click_wait()
+
         elif step.action == ActionType.NAVIGATE:
             await self._engine.navigate(step.value or "")
 
@@ -245,6 +254,74 @@ class StepExecutor:
                 if pos is not None:
                     break
         return pos
+
+    async def _find_input_field(self, step: StepConfig) -> tuple[int, int] | None:
+        """Enhanced input field finding for find_and_type.
+
+        Fallback chain when CSS selector fails:
+        1. placeholder text match (partial)
+        2. get_by_label
+        3. aria-label match
+        4. Short text prefix match (e.g. "이메일" from "이메일을 입력하세요")
+        5. input[type] match (email, password) inferred from selector/text
+
+        Returns None if page is not a real Playwright page.
+        """
+        try:
+            return await self._find_input_field_inner(step)
+        except Exception:
+            return None
+
+    async def _find_input_field_inner(self, step: StepConfig) -> tuple[int, int] | None:
+        """Inner implementation — may raise on non-Playwright pages."""
+        page = self._engine.page  # type: ignore[attr-defined]
+        target: TargetSpec = step.target  # type: ignore[assignment]
+        text = target.text or ""
+        selector = target.selector or ""
+
+        locators: list[Any] = []
+
+        if text:
+            # 1. placeholder partial match
+            locators.append(page.locator(f'input[placeholder*="{text}"]').first)
+            # 2. label
+            locators.append(page.get_by_label(text, exact=False).first)
+            # 3. aria-label
+            locators.append(page.locator(f'[aria-label*="{text}"]').first)
+            # 4. Short prefix match (first meaningful segment)
+            #    e.g. "이메일을 입력하세요" → try "이메일"
+            for sep in ["을 ", "를 ", "을", "를", " "]:
+                if sep in text:
+                    short = text.split(sep)[0].strip()
+                    if short and short != text:
+                        locators.append(
+                            page.locator(f'input[placeholder*="{short}"]').first,
+                        )
+                        locators.append(page.get_by_label(short, exact=False).first)
+                    break
+
+        # 5. Type-based inference from selector or text
+        hint = (selector + " " + text).lower()
+        if any(k in hint for k in ("email", "mail", "이메일")):
+            locators.append(page.locator('input[type="email"]').first)
+        if any(k in hint for k in ("password", "비밀번호", "패스워드")):
+            locators.append(page.locator('input[type="password"]').first)
+
+        for loc in locators:
+            try:
+                if await loc.count() > 0:
+                    with contextlib.suppress(Exception):
+                        await loc.scroll_into_view_if_needed(timeout=2000)
+                    box = await loc.bounding_box()
+                    if box:
+                        return (
+                            int(box["x"] + box["width"] / 2),
+                            int(box["y"] + box["height"] / 2),
+                        )
+            except Exception:
+                continue
+
+        return None
 
     async def _act_at_pos(
         self, step: StepConfig, x: int, y: int, confidence: float = 1.0,
@@ -302,10 +379,8 @@ class StepExecutor:
                 try:
                     loc = page.locator(target.selector).first
                     if await loc.count() > 0:
-                        try:
+                        with contextlib.suppress(Exception):
                             await loc.scroll_into_view_if_needed(timeout=2000)
-                        except Exception:
-                            pass  # modal elements may not need scrolling
                         box = await loc.bounding_box()
                         if box:
                             x = int(box["x"] + box["width"] / 2)
@@ -315,6 +390,12 @@ class StepExecutor:
                     pass
                 if attempt < 2:
                     await asyncio.sleep(0.5)  # wait for modal animation
+
+        # Priority 0.5: Enhanced input finding for find_and_type
+        if step.action == ActionType.FIND_AND_TYPE and hasattr(self._engine, "page"):
+            pos = await self._find_input_field(step)
+            if pos is not None:
+                return await self._act_at_pos(step, pos[0], pos[1], confidence=0.9)
 
         # Try Playwright native text search first (no screenshot needed)
         if target.text and hasattr(self._engine, "find_text_position"):
@@ -456,6 +537,33 @@ class StepExecutor:
             await self._humanizer.type_text(self._engine, text)
         else:
             await self._engine.type_text(text)
+
+    async def _post_click_wait(self) -> None:
+        """Wait for potential navigation or modal animation after click.
+
+        Detects URL change to distinguish navigation from in-page changes:
+        - URL changed → wait_for_load_state("networkidle") for full page load
+        - URL unchanged → short delay for modal/animation rendering
+        """
+        if not hasattr(self._engine, "page"):
+            return
+        page = self._engine.page
+        url_before = page.url
+
+        # Brief pause to let navigation or animation start
+        await asyncio.sleep(0.3)
+
+        url_after = page.url
+        if url_after != url_before:
+            # Navigation detected — wait for page to finish loading
+            try:
+                await page.wait_for_load_state("networkidle", timeout=10000)
+            except Exception:
+                # Fallback: at least wait a bit for content to render
+                await asyncio.sleep(1.0)
+        else:
+            # No navigation — modal or in-page animation
+            await asyncio.sleep(0.8)
 
     async def _save_screenshot(self, label: str) -> str:
         """Save screenshot and return file path.
