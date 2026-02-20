@@ -196,7 +196,16 @@
     "refDocsFormats": "PDF, DOCX, MD, TXT, PNG, JPG (최대 5MB, 3개)",
     "refDocsDropHint": "파일을 여기에 드롭하거나 클릭하여 선택",
     "refDocsMaxReached": "최대 {max}개까지 업로드 가능합니다. 기존 문서를 삭제해주세요.",
-    "refDocsUploading": "업로드 중..."
+    "refDocsUploading": "업로드 중...",
+    "additionalTests": "추가 테스트 요청 (선택)",
+    "additionalTestsDesc": "AI 추천 외에 추가로 테스트하고 싶은 내용을 설명해주세요.",
+    "additionalTestsPlaceholder": "예: 로그인 후 학생 목록이 나오는지 확인해줘",
+    "generateScenario": "시나리오 생성",
+    "generatingScenario": "시나리오 생성 중...",
+    "additionalGenerated": "추가 시나리오 {count}개 생성됨 ({steps}개 스텝)",
+    "skipScan": "스캔 없이 직접 테스트 작성",
+    "backToScan": "스캔으로 돌아가기",
+    "userRequestedTests": "사용자 요청 테스트"
   },
   "tests": {
     "title": "테스트 기록",

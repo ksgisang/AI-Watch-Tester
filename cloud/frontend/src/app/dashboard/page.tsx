@@ -32,7 +32,11 @@ export default function DashboardPage() {
   const [testPassed, setTestPassed] = useState(false);
   const [scenarioYaml, setScenarioYaml] = useState("");
   const [billing, setBilling] = useState<BillingInfo | null>(null);
-  const [activeTab, setActiveTab] = useState<"scan" | "custom">("scan");
+  const [directMode, setDirectMode] = useState(false);
+  const [additionalPrompt, setAdditionalPrompt] = useState("");
+  const [additionalConverting, setAdditionalConverting] = useState(false);
+  const [additionalYaml, setAdditionalYaml] = useState("");
+  const [additionalInfo, setAdditionalInfo] = useState<{ count: number; steps: number } | null>(null);
   const [customPrompt, setCustomPrompt] = useState("");
   const [converting, setConverting] = useState(false);
   const [convertedYaml, setConvertedYaml] = useState("");
@@ -123,6 +127,24 @@ export default function DashboardPage() {
       setError(translateApiError(msg, te));
     } finally {
       setConverting(false);
+    }
+  };
+
+  const handleGenerateAdditional = async () => {
+    setError("");
+    setAdditionalConverting(true);
+    setAdditionalYaml("");
+    setAdditionalInfo(null);
+
+    try {
+      const result = await convertScenario(url, additionalPrompt);
+      setAdditionalYaml(result.scenario_yaml);
+      setAdditionalInfo({ count: result.scenarios_count, steps: result.steps_total });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Generation failed";
+      setError(translateApiError(msg, te));
+    } finally {
+      setAdditionalConverting(false);
     }
   };
 
@@ -344,27 +366,53 @@ export default function DashboardPage() {
   };
 
   const handleExecuteScan = async () => {
-    if (!activeScan || selectedTests.size === 0) return;
+    if (!activeScan || (selectedTests.size === 0 && !additionalYaml)) return;
     setError("");
     setScanExecuting(true);
     setScanValidation([]);
     setScanValidationSummary(null);
 
     try {
-      const result = await executeScanTests(
-        activeScan.id,
-        Array.from(selectedTests),
-        authData,
-        testData,
-      );
-      // Save validation results
-      setScanValidation(result.validation || []);
-      setScanValidationSummary(result.validation_summary || null);
-      // Switch to test execution phase
-      const test = await getTest(result.test_id);
-      setActiveTest(test);
-      setPhase("executing");
-      setScanPhase("executing");
+      if (selectedTests.size === 0 && additionalYaml) {
+        // Only additional tests, skip scan execution
+        const test = await createTest(url, "auto", additionalYaml);
+        setActiveTest(test);
+        setPhase("executing");
+        setScanPhase("executing");
+      } else if (additionalYaml) {
+        // Both scan tests + additional: execute scan, merge YAMLs
+        const result = await executeScanTests(
+          activeScan.id,
+          Array.from(selectedTests),
+          authData,
+          testData,
+        );
+        setScanValidation(result.validation || []);
+        setScanValidationSummary(result.validation_summary || null);
+
+        // Merge scan YAML + additional YAML
+        const mergedYaml = result.scenario_yaml + "\n" + additionalYaml;
+        const mergedTest = await createTest(url, "auto", mergedYaml);
+        // Cancel the original scan test
+        await cancelTest(result.test_id).catch(() => {});
+        setActiveTest(mergedTest);
+        setPhase("executing");
+        setScanPhase("executing");
+      } else {
+        // Normal: only scan tests
+        const result = await executeScanTests(
+          activeScan.id,
+          Array.from(selectedTests),
+          authData,
+          testData,
+        );
+        setScanValidation(result.validation || []);
+        setScanValidationSummary(result.validation_summary || null);
+        const test = await getTest(result.test_id);
+        setActiveTest(test);
+        setPhase("executing");
+        setScanPhase("executing");
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to execute";
       setError(translateApiError(msg, te));
@@ -439,7 +487,7 @@ export default function DashboardPage() {
     return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
   };
 
-  const isBusy = submitting || (phase !== "idle" && phase !== "done");
+  const isBusy = submitting || additionalConverting || (phase !== "idle" && phase !== "done");
 
   const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:|\/|$)/.test(url);
 
@@ -605,39 +653,17 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Tabs */}
-        <div className="flex border-b border-gray-200">
-          <button
-            type="button"
-            onClick={() => setActiveTab("scan")}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === "scan"
-                ? "border-b-2 border-teal-600 text-teal-600"
-                : "text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            {t("tabAutoTest")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("custom")}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === "custom"
-                ? "border-b-2 border-blue-600 text-blue-600"
-                : "text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            {t("tabCustom")}
-          </button>
-        </div>
-        {/* Tab description */}
-        <p className="text-xs text-gray-400 mt-1">
-          {activeTab === "scan" ? t("tabAutoTestDesc") : t("tabCustomDesc")}
-        </p>
-
-        {/* Custom Scenario tab */}
-        {activeTab === "custom" && (
+        {/* Direct mode: write tests without scanning */}
+        {directMode ? (
           <div className="space-y-3">
+            <button
+              type="button"
+              onClick={() => setDirectMode(false)}
+              className="text-sm text-teal-600 hover:text-teal-700 hover:underline"
+            >
+              &larr; {t("backToScan")}
+            </button>
+            <p className="text-xs text-gray-400">{t("tabCustomDesc")}</p>
             <textarea
               value={customPrompt}
               onChange={(e) => setCustomPrompt(e.target.value)}
@@ -719,11 +745,20 @@ export default function DashboardPage() {
               </div>
             )}
           </div>
-        )}
-
-        {/* Smart Scan tab */}
-        {activeTab === "scan" && (
+        ) : (
+          /* Normal mode: Scan flow */
           <div className="space-y-4">
+            {/* Skip scan link */}
+            {scanPhase === "idle" && (
+              <button
+                type="button"
+                onClick={() => setDirectMode(true)}
+                className="text-sm text-blue-600 hover:text-blue-700 hover:underline"
+              >
+                {t("skipScan")} &rarr;
+              </button>
+            )}
+
             {/* Idle — Start button */}
             {scanPhase === "idle" && (
               <button
@@ -1005,15 +1040,59 @@ export default function DashboardPage() {
                       );
                     })}
 
+                    {/* Additional test requests (before execute button) */}
+                    {scanPhase === "ready" && (
+                      <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+                        <div>
+                          <h4 className="text-sm font-medium text-gray-700">{t("additionalTests")}</h4>
+                          <p className="text-xs text-gray-400 mt-0.5">{t("additionalTestsDesc")}</p>
+                        </div>
+                        <textarea
+                          value={additionalPrompt}
+                          onChange={(e) => setAdditionalPrompt(e.target.value)}
+                          placeholder={t("additionalTestsPlaceholder")}
+                          rows={3}
+                          className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:border-blue-500 focus:outline-none resize-none"
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleGenerateAdditional}
+                            disabled={additionalConverting || !url || !additionalPrompt.trim() || isBusy}
+                            className="whitespace-nowrap rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                          >
+                            {additionalConverting ? t("generatingScenario") : t("generateScenario")}
+                          </button>
+                          {additionalInfo && (
+                            <span className="text-sm text-gray-500">
+                              {t("additionalGenerated", { count: additionalInfo.count, steps: additionalInfo.steps })}
+                            </span>
+                          )}
+                        </div>
+                        {/* Additional YAML preview */}
+                        {additionalYaml && (
+                          <div className="space-y-2">
+                            <p className="text-xs font-medium text-gray-600">{t("userRequestedTests")}</p>
+                            <div className="max-h-40 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-3">
+                              <pre className="whitespace-pre-wrap text-xs text-gray-700">{additionalYaml}</pre>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* Execute button */}
                     <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3">
                       <span className="text-sm text-gray-600">
                         {selectedTests.size} {ts("selectedTests")}
+                        {additionalInfo && (
+                          <span className="ml-1 text-blue-600">+ {additionalInfo.count}</span>
+                        )}
                       </span>
                       <button
                         type="button"
                         onClick={handleExecuteScan}
-                        disabled={selectedTests.size === 0 || scanExecuting || isBusy}
+                        disabled={(selectedTests.size === 0 && !additionalYaml) || scanExecuting || isBusy}
                         className="rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
                       >
                         {scanExecuting ? ts("executing") : ts("runSelected")}
