@@ -1390,6 +1390,75 @@ async def _observe_single_click(
     new_text = sorted(after_lines - before_lines)[:15]
     diff_pct = _compute_screenshot_diff(before_png, after_png)
 
+    # 6a. For page_navigation: extract form fields from the NEW page
+    #     before restoring to original URL (critical for login/signup flows)
+    navigated_page_fields: list[dict[str, Any]] = []
+    if path_changed:
+        try:
+            navigated_page_fields = await page.evaluate("""() => {
+                const fields = [];
+                // Collect all visible input/textarea/select fields
+                document.querySelectorAll('input, textarea, select').forEach(f => {
+                    if (f.type === 'hidden') return;
+                    if (f.offsetParent === null && f.offsetWidth === 0) return;
+                    const labelEl = f.id
+                        ? document.querySelector('label[for="' + f.id + '"]')
+                        : null;
+                    const parentLabel = !labelEl ? f.closest('label') : null;
+                    const labelNode = labelEl || parentLabel;
+                    const label = labelNode
+                        ? (labelNode.childNodes[0]?.textContent?.trim()
+                           || labelNode.textContent?.trim()?.substring(0, 100))
+                        : '';
+                    let sel = null;
+                    if (f.id) sel = '#' + f.id;
+                    else if (f.name) sel = f.tagName.toLowerCase()
+                        + '[name="' + f.name + '"]';
+                    else if (f.type && f.type !== 'text')
+                        sel = f.tagName.toLowerCase()
+                            + '[type="' + f.type + '"]';
+                    fields.push({
+                        tag: f.tagName.toLowerCase(),
+                        type: f.type || 'text',
+                        name: f.name || '',
+                        placeholder: f.placeholder || '',
+                        label: label || '',
+                        aria_label: f.getAttribute('aria-label') || '',
+                        selector: sel,
+                        required: f.required || false
+                    });
+                });
+                // Collect visible buttons (for submit)
+                document.querySelectorAll(
+                    'button, input[type=submit]'
+                ).forEach(b => {
+                    if (b.offsetParent === null && b.offsetWidth === 0) return;
+                    const btnText = (b.textContent || b.value || '').trim();
+                    if (!btnText || btnText.length > 100) return;
+                    let sel = null;
+                    if (b.id) sel = '#' + b.id;
+                    else if (b.name) sel = b.tagName.toLowerCase()
+                        + '[name="' + b.name + '"]';
+                    else if (b.className && typeof b.className === 'string') {
+                        const cls = b.className.trim().split(/\\s+/)[0];
+                        if (cls) sel = b.tagName.toLowerCase() + '.' + cls;
+                    }
+                    fields.push({
+                        tag: b.tagName.toLowerCase(),
+                        type: 'submit_button',
+                        name: b.name || '',
+                        placeholder: '',
+                        label: btnText,
+                        aria_label: '',
+                        selector: sel,
+                        required: false
+                    });
+                });
+                return fields;
+            }""")
+        except Exception:
+            pass
+
     if path_changed:
         change_type = "page_navigation"
     elif len(new_elements) > 0:
@@ -1436,6 +1505,7 @@ async def _observe_single_click(
             "new_elements": new_elements,
             "new_text": new_text,
             "modal_form_fields": modal_form_fields if modal_form_fields else [],
+            "navigated_page_fields": navigated_page_fields if navigated_page_fields else [],
             "screenshot_diff_percent": diff_pct,
         },
         "access_path": access_path,

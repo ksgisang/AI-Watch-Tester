@@ -281,31 +281,47 @@ class StepExecutor:
 
         locators: list[Any] = []
 
+        # Build list of text variants: original + synonyms
+        text_variants = [text] if text else []
         if text:
+            for syn in _SYNONYMS.get(text.lower(), []):
+                if syn.lower() != text.lower():
+                    text_variants.append(syn)
+
+        for variant in text_variants:
             # 1. placeholder partial match
-            locators.append(page.locator(f'input[placeholder*="{text}"]').first)
+            locators.append(page.locator(f'input[placeholder*="{variant}"]').first)
+            locators.append(
+                page.locator(f'textarea[placeholder*="{variant}"]').first,
+            )
             # 2. label
-            locators.append(page.get_by_label(text, exact=False).first)
+            locators.append(page.get_by_label(variant, exact=False).first)
             # 3. aria-label
-            locators.append(page.locator(f'[aria-label*="{text}"]').first)
+            locators.append(page.locator(f'[aria-label*="{variant}"]').first)
             # 4. Short prefix match (first meaningful segment)
             #    e.g. "이메일을 입력하세요" → try "이메일"
             for sep in ["을 ", "를 ", "을", "를", " "]:
-                if sep in text:
-                    short = text.split(sep)[0].strip()
-                    if short and short != text:
+                if sep in variant:
+                    short = variant.split(sep)[0].strip()
+                    if short and short != variant:
                         locators.append(
                             page.locator(f'input[placeholder*="{short}"]').first,
                         )
-                        locators.append(page.get_by_label(short, exact=False).first)
+                        locators.append(
+                            page.get_by_label(short, exact=False).first,
+                        )
                     break
 
-        # 5. Type-based inference from selector or text
-        hint = (selector + " " + text).lower()
+        # 5. Type-based inference from selector or text (includes synonyms)
+        hint = (selector + " " + " ".join(text_variants)).lower()
         if any(k in hint for k in ("email", "mail", "이메일")):
             locators.append(page.locator('input[type="email"]').first)
         if any(k in hint for k in ("password", "비밀번호", "패스워드")):
             locators.append(page.locator('input[type="password"]').first)
+        if any(k in hint for k in ("tel", "전화", "연락처", "핸드폰")):
+            locators.append(page.locator('input[type="tel"]').first)
+        if any(k in hint for k in ("search", "검색", "찾기")):
+            locators.append(page.locator('input[type="search"]').first)
 
         for loc in locators:
             try:

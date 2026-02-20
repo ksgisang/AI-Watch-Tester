@@ -407,9 +407,16 @@ CRITICAL RULES:
    use the observed change type (page_navigation, modal_opened, anchor_scroll, section_change)
    to decide how to assert test results:
    - page_navigation → assert URL change
+   - page_navigation + NAVIGATED PAGE FIELDS → this is a FORM PAGE (login/signup).
+     Use the exact placeholder/label from navigated_page_fields for auth_fields.
    - modal_opened → assert new modal text is visible (use new_text from observation)
    - anchor_scroll → assert section text is visible (NOT URL change)
    - section_change → assert new content is visible (use new_text from observation)
+10. **LOGIN/FORM PAGE RULE**: When an observation has change_type "page_navigation" AND
+   navigated_page_fields, the click leads to a SEPARATE FORM PAGE (not a modal).
+   - auth_fields MUST use the EXACT placeholder/label from navigated_page_fields
+   - Example: if navigated_page_fields shows placeholder="이메일", use "이메일" NOT "Email"
+   - NEVER translate, NEVER guess — copy-paste the exact text from the data
 
 ## Site Info
 - URL: {target_url}
@@ -990,6 +997,28 @@ def _build_observation_table(observations: list[dict]) -> str:
                         f"placeholder={f_ph!r}, label={f_label!r}, name={f_name!r}"
                     )
 
+        # Navigated page form fields (login/signup pages reached via click)
+        nav_fields = change.get("navigated_page_fields", [])
+        if nav_fields:
+            lines.append(
+                "  - NAVIGATED PAGE FIELDS (use these EXACT selectors/placeholders for input):"
+            )
+            for f in nav_fields:
+                f_sel = f.get("selector") or "NONE"
+                f_type = f.get("type", "")
+                f_ph = f.get("placeholder", "")
+                f_label = f.get("label", "")
+                f_name = f.get("name", "")
+                if f_type == "submit_button":
+                    lines.append(
+                        f"    * SUBMIT BUTTON: selector={f_sel}, label={f_label!r}"
+                    )
+                else:
+                    lines.append(
+                        f"    * type={f_type}, selector={f_sel}, "
+                        f"placeholder={f_ph!r}, label={f_label!r}, name={f_name!r}"
+                    )
+
         # Accordion expanded content
         accordion_detail = obs.get("accordion_detail", {})
         if accordion_detail:
@@ -1068,6 +1097,17 @@ Generate AWT test scenario JSON for the selected tests below.
 8. **NO PHANTOM PAGES**: Do NOT assert URL changes to pages not seen in observations.
    If observation shows anchor_scroll or modal_opened, the URL does NOT change.
    Only assert URL change when observation change_type is "page_navigation".
+
+9. **PAGE NAVIGATION + FORM FIELDS**: When observation has change_type "page_navigation"
+   AND "NAVIGATED PAGE FIELDS" data, this click leads to a SEPARATE FORM PAGE (e.g., login).
+   Steps to generate:
+   a. navigate to target URL (homepage)
+   b. find_and_click the element (e.g., "로그인" link) to go to the form page
+   c. For find_and_type: use EXACT placeholder/label from NAVIGATED PAGE FIELDS
+      - If placeholder is "이메일", target text MUST be "이메일" — NOT "Email"
+      - If placeholder is "비밀번호", target text MUST be "비밀번호" — NOT "Password"
+   d. For submit button: use EXACT label from NAVIGATED PAGE FIELDS
+   e. NEVER translate or guess field names — copy the EXACT text from observation data
 
 ## ========== END ABSOLUTE RULES ==========
 
