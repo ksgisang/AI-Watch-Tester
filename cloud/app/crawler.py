@@ -322,11 +322,23 @@ async def _extract_page_data(page: Any, url: str, *, take_screenshot: bool = Tru
             return Array.from(document.querySelectorAll('a[href]')).map(a => {
                 const rawHref = a.getAttribute('href') || '';
                 const isAnchor = rawHref.startsWith('#') && rawHref.length > 1;
+                // Build reliable selector: #id > a[href="..."] > a.class
+                let sel = null;
+                if (a.id) {
+                    sel = '#' + a.id;
+                } else if (rawHref && rawHref !== '#') {
+                    // Use href attribute for stable selector
+                    const escaped = rawHref.replace(/"/g, '\\\\"');
+                    sel = 'a[href="' + escaped + '"]';
+                } else if (a.className && typeof a.className === 'string') {
+                    const cls = a.className.trim().split(/\\s+/)[0];
+                    if (cls) sel = 'a.' + cls;
+                }
                 return {
                     text: (a.textContent || '').trim().substring(0, 200),
                     href: a.href,
                     visible: a.offsetParent !== null || a.offsetWidth > 0 || a.offsetHeight > 0,
-                    selector: a.id ? '#' + a.id : (a.className ? 'a.' + a.className.split(' ')[0] : null),
+                    selector: sel,
                     is_anchor: isAnchor
                 };
             }).filter(l => l.text || l.href)
@@ -384,11 +396,23 @@ async def _extract_page_data(page: Any, url: str, *, take_screenshot: bool = Tru
                 if (seen.has(b)) return false;
                 seen.add(b);
                 return true;
-            }).map(b => ({
-                text: (b.textContent || b.value || '').trim().substring(0, 200),
-                type: b.type || 'button',
-                selector: b.id ? '#' + b.id : (b.className ? 'button.' + b.className.split(' ')[0] : null)
-            })).filter(b => b.text);
+            }).map(b => {
+                const txt = (b.textContent || b.value || '').trim().substring(0, 200);
+                let sel = null;
+                if (b.id) {
+                    sel = '#' + b.id;
+                } else if (b.name) {
+                    sel = b.tagName.toLowerCase() + '[name="' + b.name + '"]';
+                } else if (b.className && typeof b.className === 'string') {
+                    const cls = b.className.trim().split(/\\s+/)[0];
+                    if (cls) sel = b.tagName.toLowerCase() + '.' + cls;
+                }
+                return {
+                    text: txt,
+                    type: b.type || 'button',
+                    selector: sel
+                };
+            }).filter(b => b.text);
         }""")
         data["buttons"] = buttons[:50]
     except Exception:
@@ -407,11 +431,21 @@ async def _extract_page_data(page: Any, url: str, *, take_screenshot: bool = Tru
                 seen.add(n);
                 return true;
             }).map(nav => {
-                const items = Array.from(nav.querySelectorAll('a')).map(a => ({
-                    text: (a.textContent || '').trim().substring(0, 100),
-                    href: a.href,
-                    selector: a.id ? '#' + a.id : null
-                })).filter(i => i.text);
+                const items = Array.from(nav.querySelectorAll('a')).map(a => {
+                    const rawHref = a.getAttribute('href') || '';
+                    let sel = null;
+                    if (a.id) {
+                        sel = '#' + a.id;
+                    } else if (rawHref && rawHref !== '#') {
+                        const escaped = rawHref.replace(/"/g, '\\\\"');
+                        sel = 'a[href="' + escaped + '"]';
+                    }
+                    return {
+                        text: (a.textContent || '').trim().substring(0, 100),
+                        href: a.href,
+                        selector: sel
+                    };
+                }).filter(i => i.text);
                 return {
                     items: items,
                     selector: nav.id ? '#' + nav.id : (nav.className ? 'nav.' + nav.className.split(' ')[0] : null)
@@ -1005,26 +1039,74 @@ async def _observe_single_click(
         after_lines = set()
     after_png = await page.screenshot(type="png", full_page=False)
 
-    # 5. Detect new visible dialogs/modals
+    # 5. Detect new visible dialogs/modals AND extract their form fields
     new_elements: list[str] = []
+    modal_form_fields: list[dict[str, str]] = []
     try:
-        new_elements = await page.evaluate("""() => {
+        modal_info = await page.evaluate("""() => {
             const sels = [
                 '[role=dialog]', '[class*=modal]', '[class*=popup]',
                 '[class*=overlay]', '[class*=drawer]', '[class*=dropdown]'
             ];
-            const found = [];
+            const containers = [];
+            const fields = [];
             for (const s of sels) {
                 document.querySelectorAll(s).forEach(el => {
                     if (el.offsetParent !== null || el.offsetWidth > 0) {
-                        found.push(el.id ? '#' + el.id
-                            : el.className ? '.' + el.className.split(' ')[0]
-                            : el.tagName.toLowerCase());
+                        const id = el.id ? '#' + el.id
+                            : el.className ? '.' + el.className.split(/\\s+/)[0]
+                            : el.tagName.toLowerCase();
+                        containers.push(id);
+                        // Extract input fields inside this modal/dialog
+                        el.querySelectorAll('input, textarea, select').forEach(f => {
+                            if (f.type === 'hidden') return;
+                            if (f.offsetParent === null && f.offsetWidth === 0) return;
+                            const labelEl = f.id ? document.querySelector('label[for="' + f.id + '"]') : null;
+                            const parentLabel = !labelEl ? f.closest('label') : null;
+                            const labelNode = labelEl || parentLabel;
+                            const label = labelNode
+                                ? (labelNode.childNodes[0]?.textContent?.trim() || labelNode.textContent?.trim()?.substring(0, 100))
+                                : '';
+                            let sel = null;
+                            if (f.id) sel = '#' + f.id;
+                            else if (f.name) sel = f.tagName.toLowerCase() + '[name="' + f.name + '"]';
+                            else if (f.type) sel = f.tagName.toLowerCase() + '[type="' + f.type + '"]';
+                            fields.push({
+                                tag: f.tagName.toLowerCase(),
+                                type: f.type || 'text',
+                                name: f.name || '',
+                                placeholder: f.placeholder || '',
+                                label: label || '',
+                                aria_label: f.getAttribute('aria-label') || '',
+                                selector: sel,
+                                required: f.required || false
+                            });
+                        });
+                        // Also extract buttons inside the modal
+                        el.querySelectorAll('button, input[type=submit]').forEach(b => {
+                            const btnText = (b.textContent || b.value || '').trim();
+                            if (!btnText || btnText.length > 100) return;
+                            let sel = null;
+                            if (b.id) sel = '#' + b.id;
+                            else if (b.name) sel = b.tagName.toLowerCase() + '[name="' + b.name + '"]';
+                            fields.push({
+                                tag: b.tagName.toLowerCase(),
+                                type: 'submit_button',
+                                name: b.name || '',
+                                placeholder: '',
+                                label: btnText,
+                                aria_label: '',
+                                selector: sel,
+                                required: false
+                            });
+                        });
                     }
                 });
             }
-            return [...new Set(found)];
+            return { containers: [...new Set(containers)], fields: fields };
         }""")
+        new_elements = modal_info.get("containers", [])
+        modal_form_fields = modal_info.get("fields", [])
     except Exception:
         pass
 
@@ -1085,6 +1167,7 @@ async def _observe_single_click(
             "url_changed": before_url != after_url,
             "new_elements": new_elements,
             "new_text": new_text,
+            "modal_form_fields": modal_form_fields if modal_form_fields else [],
             "screenshot_diff_percent": diff_pct,
         },
         "access_path": access_path,

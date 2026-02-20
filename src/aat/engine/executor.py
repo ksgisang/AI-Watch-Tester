@@ -296,18 +296,25 @@ class StepExecutor:
 
         # Priority 0: CSS selector (from observation data)
         if target.selector and hasattr(self._engine, "page"):
-            try:
-                page = self._engine.page
-                loc = page.locator(target.selector).first
-                if await loc.count() > 0:
-                    await loc.scroll_into_view_if_needed(timeout=3000)
-                    box = await loc.bounding_box()
-                    if box:
-                        x = int(box["x"] + box["width"] / 2)
-                        y = int(box["y"] + box["height"] / 2)
-                        return await self._act_at_pos(step, x, y, confidence=1.0)
-            except Exception:
-                pass  # fall through to text-based
+            page = self._engine.page
+            # Try up to 3 times with short waits (handles modals still animating)
+            for attempt in range(3):
+                try:
+                    loc = page.locator(target.selector).first
+                    if await loc.count() > 0:
+                        try:
+                            await loc.scroll_into_view_if_needed(timeout=2000)
+                        except Exception:
+                            pass  # modal elements may not need scrolling
+                        box = await loc.bounding_box()
+                        if box:
+                            x = int(box["x"] + box["width"] / 2)
+                            y = int(box["y"] + box["height"] / 2)
+                            return await self._act_at_pos(step, x, y, confidence=1.0)
+                except Exception:
+                    pass
+                if attempt < 2:
+                    await asyncio.sleep(0.5)  # wait for modal animation
 
         # Try Playwright native text search first (no screenshot needed)
         if target.text and hasattr(self._engine, "find_text_position"):

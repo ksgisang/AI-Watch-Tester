@@ -608,7 +608,7 @@ async def generate_plan(
         links_json=_trunc_json(links_sample),
         broken_links_json=_trunc_json(broken),
         broken_count=len(broken),
-        observations_json=_trunc_json(observations, 5000) if observations else "No observations collected.",
+        observations_json=_build_observation_table(observations) if observations else "No observations collected.",
         business_hints=business_hints,
         reference_documents=ref_docs or "No reference documents provided.",
         special_instructions=special_instructions,
@@ -909,35 +909,105 @@ def _extract_json(text: str) -> dict:
     raise ValueError(f"No valid JSON found in response: {text[:200]}")
 
 
+def _build_observation_table(observations: list[dict]) -> str:
+    """Convert raw observations into a structured reference table for AI.
+
+    Produces a human-readable table that maps:
+    - Element selector + text → what happens when clicked
+    - Observed new_text → what to assert
+    - Modal form fields → selectors for input targeting
+    """
+    if not observations:
+        return "No observations collected. Use crawl data forms/buttons for targets."
+
+    lines: list[str] = []
+    for i, obs in enumerate(observations, 1):
+        elem = obs.get("element", {})
+        change = obs.get("observed_change", {})
+        change_type = change.get("type", "unknown")
+
+        # Skip no_change observations
+        if change_type == "no_change":
+            continue
+
+        sel = elem.get("selector") or "NONE"
+        txt = elem.get("text") or ""
+        etype = elem.get("type") or ""
+
+        lines.append(f"### Observation {i}: {txt}")
+        lines.append(f"  - element.selector: {sel}")
+        lines.append(f"  - element.text: {txt}")
+        lines.append(f"  - element.type: {etype}")
+        lines.append(f"  - change_type: {change_type}")
+        lines.append(f"  - before_url: {obs.get('before', {}).get('url', '')}")
+        lines.append(f"  - after_url: {obs.get('after', {}).get('url', '')}")
+        lines.append(f"  - access_path: {obs.get('access_path', '')}")
+
+        # New text (for assertions)
+        new_text = change.get("new_text", [])
+        if new_text:
+            lines.append(f"  - OBSERVED new_text (use for assert): {json.dumps(new_text[:10], ensure_ascii=False)}")
+
+        # Modal form fields (for find_and_type targets)
+        modal_fields = change.get("modal_form_fields", [])
+        if modal_fields:
+            lines.append("  - MODAL FORM FIELDS (use these selectors for input):")
+            for f in modal_fields:
+                f_sel = f.get("selector") or "NONE"
+                f_type = f.get("type", "")
+                f_ph = f.get("placeholder", "")
+                f_label = f.get("label", "")
+                f_name = f.get("name", "")
+                if f_type == "submit_button":
+                    lines.append(f"    * SUBMIT BUTTON: selector={f_sel}, label={f_label!r}")
+                else:
+                    lines.append(
+                        f"    * type={f_type}, selector={f_sel}, "
+                        f"placeholder={f_ph!r}, label={f_label!r}, name={f_name!r}"
+                    )
+
+        # New elements (modals/dialogs)
+        new_elems = change.get("new_elements", [])
+        if new_elems:
+            lines.append(f"  - new_elements: {new_elems}")
+
+        lines.append("")
+
+    return "\n".join(lines) if lines else "No meaningful observations."
+
+
 # ---------------------------------------------------------------------------
 # POST /api/scan/{scan_id}/execute — run selected tests
 # ---------------------------------------------------------------------------
 
 _EXECUTE_PROMPT = """\
-Generate AWT test scenario YAML for the selected tests below.
+Generate AWT test scenario JSON for the selected tests below.
 
-CRITICAL RULES:
-1. Use ONLY the actual selectors, URLs, and element text from the crawl data below.
-2. NEVER invent selectors or elements that don't exist in the crawl data.
-3. For click/type targets, prefer using "text" field with the EXACT visible text from crawl data.
-4. For all assert steps, ALWAYS set "case_insensitive": true to handle dynamic casing.
-5. Copy text strings EXACTLY from the crawl data — do not paraphrase or translate.
-6. FORM FIELD TARGETING: For find_and_type/find_and_click targeting form fields:
-   - BEST: Use CSS selector from crawl data (e.g., selector: "[name=email]", "#password")
-   - GOOD: Use exact placeholder text (e.g., text: "이메일" if that's the placeholder)
-   - NEVER translate labels/placeholders. If crawl shows placeholder "이메일", use "이메일" NOT "Email".
-7. When filling auth/login forms, use CSS selectors from the crawl data's forms[].fields[].selector.
-   If selector is null, use the exact placeholder or label text from crawl data.
-8. Each scenario MUST start with a navigate step to the target URL (test independence).
-9. For anchor links (is_anchor: true), do NOT assert URL changes. Assert section text is visible instead.
-10. For SPA sites, use text_visible assertions instead of URL assertions.
-11. **USE OBSERVATION DATA**: The "Interaction Observations" section shows what ACTUALLY happened
-    when each element was clicked. Use this to write accurate assertions:
-    - If observed_change.type is "page_navigation" → assert URL change to the observed after.url
-    - If observed_change.type is "modal_opened" → assert new_text items are visible
-    - If observed_change.type is "anchor_scroll" → assert section text is visible (NOT URL)
-    - If observed_change.type is "section_change" → assert new_text items are visible
-    - DO NOT GUESS — use the observed data.
+## ========== ABSOLUTE RULES (NEVER VIOLATE) ==========
+
+1. **SELECTOR-FIRST**: Every click/type target MUST include "selector" from the observation data.
+   WRONG: {{"text": "기능"}}
+   RIGHT: {{"selector": "a[href=\\"#features\\"]", "text": "기능"}}
+
+2. **ASSERT FROM OBSERVED DATA ONLY**: Assert values MUST come from observation new_text or crawl data.
+   WRONG: assert value "제품 목록" (AI guess — FORBIDDEN)
+   RIGHT: assert value "클래스링의 핵심 기능" (from observation new_text)
+
+3. **MODAL FORM FIELDS**: When observation shows modal_opened with modal_form_fields,
+   use the EXACT selector/placeholder from modal_form_fields for find_and_type targets.
+   observation: modal_form_fields: [{{"selector": "#email", "placeholder": "이메일을 입력하세요"}}]
+   → target: {{"selector": "#email", "text": "이메일을 입력하세요"}}
+
+4. **NEVER INVENT**: Do not use any text, selector, or URL that is NOT in the data below.
+
+5. **WAIT AFTER MODAL**: After clicking an element that opens a modal (change_type: modal_opened),
+   add a wait step (1000ms) before interacting with modal fields.
+
+6. **CASE INSENSITIVE ASSERT**: All assert steps MUST set "case_insensitive": true.
+
+7. **TEST INDEPENDENCE**: Each scenario MUST start with navigate to target URL.
+
+## ========== END ABSOLUTE RULES ==========
 
 {extra_instructions}
 
@@ -946,11 +1016,12 @@ CRITICAL RULES:
 
 ## Target URL: {target_url}
 
-## Crawl Data (navigation menus, forms, buttons)
-{crawl_data}
+## Observation Reference Table
+Each row = one observed interaction. Use these EXACT selectors and texts.
+{observation_table}
 
-## Interaction Observations (REAL click results — DO NOT GUESS)
-{observations_data}
+## Crawl Data (forms with field selectors)
+{crawl_data}
 
 ## Selected Tests
 {selected_tests}
@@ -960,30 +1031,54 @@ CRITICAL RULES:
 
 For empty user data fields, use reasonable dummy data:
 - email: use "awttest@example.com"
+- password: use "TestPass123!"
 - text fields: use contextually appropriate text
-- numbers: use reasonable values
 
-## SELECTOR-FIRST RULE (CRITICAL)
-When generating step targets, use the CSS selector from observation data as the PRIMARY target.
-Each step target MUST include "selector" if the observation data provides one.
-Example observation: element.selector = "a[href='#features']", element.text = "Features"
-→ Generate target as: {{"selector": "a[href='#features']", "text": "Features"}}
-The "selector" field is used first by the test engine; "text" is fallback only.
+## Output Format
+Return ONLY a valid JSON array. Each object:
+{{
+  "id": "SC-001",
+  "name": "Test name",
+  "description": "Test description",
+  "steps": [
+    {{
+      "step": 1,
+      "action": "navigate",
+      "value": "{target_url}",
+      "description": "Navigate to homepage"
+    }},
+    {{
+      "step": 2,
+      "action": "find_and_click",
+      "target": {{"selector": "a[href=\\"#login\\"]", "text": "로그인"}},
+      "description": "Click login button"
+    }},
+    {{
+      "step": 3,
+      "action": "wait",
+      "value": "1000",
+      "description": "Wait for modal animation"
+    }},
+    {{
+      "step": 4,
+      "action": "find_and_type",
+      "target": {{"selector": "#email", "text": "이메일"}},
+      "value": "awttest@example.com",
+      "description": "Enter email"
+    }},
+    {{
+      "step": 5,
+      "action": "assert",
+      "assert_type": "text_visible",
+      "value": "Welcome",
+      "description": "Verify welcome text",
+      "case_insensitive": true
+    }}
+  ]
+}}
 
-## ACCESS PATH RULE
-Each scenario must include the exact navigation steps observed during crawling.
-If the observation shows: click "Login" button on homepage → modal opens
-→ Generate: step 1: navigate to homepage, step 2: click {{selector: "a[href='#login']"}}, step 3: interact with modal fields
-
-Generate scenario YAML as a JSON array of objects, each with:
-- id: string
-- name: string
-- steps: array of step objects with action, target, value, description
-
-Step actions: navigate, click, type, assert, wait
-For click/type targets, include BOTH "selector" (CSS selector from observation) AND "text" (visible label).
-The test engine tries selector first, text as fallback.
-For assert, use "text" field with text to verify and always include "case_insensitive": true.
+Actions: navigate, find_and_click, find_and_type, assert, wait, scroll
+Target format: {{"selector": "CSS_FROM_OBSERVATION", "text": "VISIBLE_TEXT_FROM_OBSERVATION"}}
 
 Return ONLY valid JSON array.\
 """
@@ -1053,7 +1148,7 @@ async def execute_scan_tests(
 
     adapter = adapter_cls(ai_config)
 
-    def _trunc(obj: Any, limit: int = 3000) -> str:
+    def _trunc(obj: Any, limit: int = 4000) -> str:
         s = json.dumps(obj, ensure_ascii=False, indent=2)
         return s[:limit] if len(s) > limit else s
 
@@ -1071,6 +1166,16 @@ async def execute_scan_tests(
         )
     extra_instructions = "\n".join(extra_parts) if extra_parts else ""
 
+    # Build structured observation table for AI
+    observation_table = _build_observation_table(observations)
+
+    # Log observation data for debugging
+    logger.info(
+        "=== AI에 전달되는 관찰 데이터 (scan_id=%d) ===\n%s",
+        scan_id,
+        observation_table[:5000],
+    )
+
     # Fetch user reference documents
     from app.routers.documents import get_user_doc_text
 
@@ -1079,10 +1184,7 @@ async def execute_scan_tests(
     prompt = _EXECUTE_PROMPT.format(
         target_url=scan.target_url,
         crawl_data=_trunc(crawl_context),
-        observations_data=(
-            _trunc(observations, 5000)
-            if observations else "No observations collected."
-        ),
+        observation_table=observation_table,
         selected_tests=_trunc(selected_details),
         user_data=json.dumps(user_data, ensure_ascii=False),
         extra_instructions=extra_instructions,

@@ -467,9 +467,8 @@ async def convert_scenario(
             pdata_raw, ensure_ascii=False, indent=2,
         )[:6000]
         if observations_raw:
-            observations_str = json.dumps(
-                observations_raw, ensure_ascii=False, indent=2,
-            )[:4000]
+            from app.routers.scan import _build_observation_table
+            observations_str = _build_observation_table(observations_raw)
     except Exception as exc:
         logger.warning(
             "Page observation failed for convert: %s", exc,
