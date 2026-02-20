@@ -168,7 +168,7 @@ export default function TestProgress({ testId, onComplete, onScenariosReady }: P
           // If test hasn't started yet, show "waiting" and auto-reconnect
           if (!testStartedRef.current) {
             setStatus("waiting");
-            setStepLabel(t("waitingForRunner"));
+            setStepLabel("");  // label derived from status in render
             reconnectRef.current = setTimeout(() => {
               if (mountedRef.current) connectWS();
             }, 3000);
@@ -288,7 +288,7 @@ export default function TestProgress({ testId, onComplete, onScenariosReady }: P
             </span>
           </div>
           <span className="text-xs text-gray-500">
-            {stepLabel}
+            {stepLabel || (status === "waiting" ? t("waitingForRunner") : "")}
           </span>
         </div>
 
