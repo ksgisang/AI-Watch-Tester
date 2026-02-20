@@ -337,18 +337,31 @@ The user wants to test the following on their website.
 ## User Request
 {user_prompt}
 
+## Actual Page Data (from real browser visit)
+{page_data}
+
+## Interaction Observations (REAL click results — DO NOT GUESS)
+{observations}
+
 ## CRITICAL Rules
 1. Convert the user's natural language description into concrete E2E test scenarios
 2. Generate 1-5 test scenarios covering the described flows
 3. Each scenario should have clear steps: navigate, click, type, assert
-4. **Use EXACT text that would appear on the website** for click targets
-   - Use real button labels, link text, menu names (e.g. "Sign Up", "Pricing", "Contact")
+4. **Use EXACT text from the "Actual Page Data" and "Interaction Observations"**
+   - Use real button labels, link text, menu names exactly as they appear
    - NEVER use generic placeholders like "menu1", "menu2", "button1"
+   - NEVER guess what happens — use observed change types and new_text
 5. For click targets, use the `text` field with the exact visible label
-6. Keep steps concise and actionable
-7. Use {{{{url}}}} as the base URL placeholder in navigate actions
+6. For assertions, use the observed results:
+   - If observation shows modal_opened → assert the observed new_text
+   - If observation shows page_navigation → assert URL change
+   - If observation shows anchor_scroll → assert section text visible
+7. For form fields, use exact selectors/placeholders from page data
+8. Keep steps concise and actionable
+9. Use {{{{url}}}} as the base URL placeholder in navigate actions
 
-Return the scenarios as a JSON array following the format specified in the system instructions.\
+Return the scenarios as a JSON array following the format specified \
+in the system instructions.\
 """
 
 
@@ -357,49 +370,144 @@ async def convert_scenario(
     body: ConvertScenarioRequest,
     user: User = Depends(get_current_user),
 ) -> dict:
-    """Convert natural language to AWT YAML scenario."""
+    """Convert natural language to AWT YAML scenario.
+
+    Visits the target URL, extracts page data, observes interactions
+    related to user keywords, then generates scenarios with real data.
+    """
+    import json
+
     try:
-        from aat.core.models import AIConfig
+        from aat.core.models import AIConfig, EngineConfig
         from aat.adapters import ADAPTER_REGISTRY
+        from aat.engine.web import WebEngine
     except ImportError as exc:
         raise HTTPException(
             status_code=503,
             detail=f"AAT core not installed: {exc}",
-        )
+        ) from exc
+
+    from app.crawler import (
+        _extract_page_data,
+        _observe_interactions,
+    )
 
     ai_config = AIConfig(
         provider=settings.ai_provider,
         api_key=settings.ai_api_key,
-        model=settings.ai_model or _DEFAULT_MODELS.get(settings.ai_provider, ""),
+        model=settings.ai_model or _DEFAULT_MODELS.get(
+            settings.ai_provider, ""
+        ),
     )
-
     adapter_cls = ADAPTER_REGISTRY.get(ai_config.provider)
     if adapter_cls is None:
         raise HTTPException(
             status_code=503,
             detail=f"Unknown AI provider: {ai_config.provider}",
         )
-
     adapter = adapter_cls(ai_config)
+
+    # --- Quick page observation ---
+    page_data_str = "Page visit failed — using user prompt only."
+    observations_str = "No observations."
+    observations_raw: list[dict] = []
+    pdata_raw: dict | None = None
+    engine_config = EngineConfig(
+        type="web", headless=settings.playwright_headless,
+    )
+    engine = WebEngine(engine_config)
+
+    try:
+        await engine.start()
+        page = engine.page
+        await page.goto(
+            str(body.target_url),
+            wait_until="domcontentloaded",
+            timeout=12000,
+        )
+        try:
+            await page.wait_for_load_state(
+                "networkidle", timeout=5000,
+            )
+        except Exception:
+            pass
+
+        # Extract page data (single page, no full crawl)
+        pdata_raw = await _extract_page_data(
+            page, str(body.target_url), take_screenshot=False,
+        )
+
+        # Filter clickable elements by user keywords for
+        # targeted observation (not full scan)
+        keywords = _extract_keywords(body.user_prompt)
+        filtered_data = _filter_by_keywords(pdata_raw, keywords)
+
+        # Observe only keyword-relevant elements
+        observations_raw = await _observe_interactions(
+            page, filtered_data, str(body.target_url),
+            max_interactions=10,
+        )
+
+        # Serialize for prompt (strip screenshots)
+        pdata_raw.pop("screenshot_base64", None)
+        page_data_str = json.dumps(
+            pdata_raw, ensure_ascii=False, indent=2,
+        )[:6000]
+        if observations_raw:
+            observations_str = json.dumps(
+                observations_raw, ensure_ascii=False, indent=2,
+            )[:4000]
+    except Exception as exc:
+        logger.warning(
+            "Page observation failed for convert: %s", exc,
+        )
+    finally:
+        try:
+            await engine.stop()
+        except Exception:
+            pass
 
     prompt = _CONVERT_PROMPT.format(
         url=body.target_url,
         user_prompt=body.user_prompt,
+        page_data=page_data_str,
+        observations=observations_str,
     )
 
     try:
         scenarios = await adapter.generate_scenarios(prompt)
     except Exception as exc:
         logger.exception("Scenario conversion failed")
-        raise HTTPException(status_code=502, detail=f"AI generation failed: {exc}")
+        raise HTTPException(
+            status_code=502, detail=f"AI generation failed: {exc}",
+        ) from exc
 
     if not scenarios:
-        raise HTTPException(status_code=422, detail="AI generated no scenarios")
+        raise HTTPException(
+            status_code=422, detail="AI generated no scenarios",
+        )
+
+    # Validate against observation data and retry if needed
+    from app.routers.scan import validate_and_retry
+
+    page_list = [pdata_raw] if pdata_raw else None
+    scenarios, validation = await validate_and_retry(
+        scenarios, observations_raw, page_list, adapter, prompt,
+    )
+
+    # Compute validation summary
+    verified = sum(1 for v in validation if v["status"] == "verified")
+    total_v = len(validation)
 
     # Serialize to YAML
-    scenario_dicts = [s.model_dump(mode="json", exclude_none=True) for s in scenarios]
+    scenario_dicts = [
+        s.model_dump(mode="json", exclude_none=True)
+        for s in scenarios
+    ]
     scenario_yaml = yaml.safe_dump(
-        scenario_dicts, default_flow_style=False, allow_unicode=True
+        scenario_dicts,
+        default_flow_style=False,
+        allow_unicode=True,
     )
     total_steps = sum(len(s.steps) for s in scenarios)
 
@@ -407,7 +515,74 @@ async def convert_scenario(
         "scenario_yaml": scenario_yaml,
         "scenarios_count": len(scenarios),
         "steps_total": total_steps,
+        "validation": validation,
+        "validation_summary": {
+            "verified": verified,
+            "total": total_v,
+            "percent": (
+                round(verified / total_v * 100)
+                if total_v > 0 else 100
+            ),
+        },
     }
+
+
+def _extract_keywords(user_prompt: str) -> list[str]:
+    """Extract test-relevant keywords from user prompt."""
+    # Common Korean/English test-related words to filter on
+    stop_words = {
+        "테스트", "확인", "해줘", "해주세요", "후", "에서",
+        "되는지", "하고", "test", "check", "verify", "the",
+        "then", "and", "that", "from", "with", "after",
+        "before", "click", "type", "go", "to", "if", "is",
+        "a", "an", "on", "in", "it", "do", "can", "should",
+    }
+    words = user_prompt.replace(",", " ").replace(".", " ").split()
+    keywords = []
+    for w in words:
+        w = w.strip().lower()
+        if len(w) > 1 and w not in stop_words:
+            keywords.append(w)
+    return keywords[:15]
+
+
+def _filter_by_keywords(
+    page_data: dict, keywords: list[str],
+) -> dict:
+    """Return a copy of page_data with elements filtered by keywords.
+
+    If no keywords match anything, returns the original data
+    (so the observation still happens on nav items).
+    """
+    if not keywords:
+        return page_data
+
+    def _matches(text: str) -> bool:
+        lower = text.lower()
+        return any(kw in lower for kw in keywords)
+
+    filtered = {**page_data}
+
+    # Filter links by keyword relevance
+    links = page_data.get("links", [])
+    matched_links = [
+        l for l in links
+        if _matches(l.get("text", "")) or _matches(l.get("href", ""))
+    ]
+    # Filter buttons
+    buttons = page_data.get("buttons", [])
+    matched_buttons = [
+        b for b in buttons if _matches(b.get("text", ""))
+    ]
+
+    # Always keep nav menus (they're important for context)
+    # but also include keyword-matched nav items
+    filtered["links"] = matched_links if matched_links else links[:20]
+    filtered["buttons"] = (
+        matched_buttons if matched_buttons else buttons[:10]
+    )
+
+    return filtered
 
 
 # ---------------------------------------------------------------------------

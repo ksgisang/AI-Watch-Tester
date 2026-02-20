@@ -6,11 +6,11 @@ import { useTranslations } from "next-intl";
 import { useAuth } from "@/components/AuthProvider";
 import TestProgress from "@/components/TestProgress";
 import ScenarioEditor from "@/components/ScenarioEditor";
-import FileUpload from "@/components/FileUpload";
 import {
-  createTest, getTest, uploadDocument, fetchBilling, convertScenario, cancelTest,
+  createTest, getTest, fetchBilling, convertScenario, cancelTest,
   startScan, getScan, generateScanPlan, executeScanTests, connectScanWS,
   type TestItem, type BillingInfo, type ScanItem, type TestPlanCategory,
+  type ValidationItem, type ValidationSummary,
 } from "@/lib/api";
 import { translateApiError } from "@/lib/errorMessages";
 
@@ -30,14 +30,14 @@ export default function DashboardPage() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [testPassed, setTestPassed] = useState(false);
   const [scenarioYaml, setScenarioYaml] = useState("");
-  const [showUpload, setShowUpload] = useState(false);
-  const stagedFilesRef = useRef<File[]>([]);
   const [billing, setBilling] = useState<BillingInfo | null>(null);
-  const [activeTab, setActiveTab] = useState<"auto" | "custom" | "scan">("auto");
+  const [activeTab, setActiveTab] = useState<"scan" | "custom">("scan");
   const [customPrompt, setCustomPrompt] = useState("");
   const [converting, setConverting] = useState(false);
   const [convertedYaml, setConvertedYaml] = useState("");
   const [convertedInfo, setConvertedInfo] = useState<{ count: number; steps: number } | null>(null);
+  const [convertValidation, setConvertValidation] = useState<ValidationItem[]>([]);
+  const [convertValidationSummary, setConvertValidationSummary] = useState<ValidationSummary | null>(null);
   const [cancelling, setCancelling] = useState(false);
   // Smart Scan state
   const [scanPhase, setScanPhase] = useState<"idle" | "scanning" | "plan" | "ready" | "executing">("idle");
@@ -53,6 +53,8 @@ export default function DashboardPage() {
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set());
   const [planLoading, setPlanLoading] = useState(false);
   const [scanExecuting, setScanExecuting] = useState(false);
+  const [scanValidation, setScanValidation] = useState<ValidationItem[]>([]);
+  const [scanValidationSummary, setScanValidationSummary] = useState<ValidationSummary | null>(null);
   const scanWsRef = useRef<WebSocket | null>(null);
   // Track whether plan generation was already triggered to avoid double-calls
   const planTriggeredRef = useRef(false);
@@ -78,67 +80,20 @@ export default function DashboardPage() {
     );
   }
 
-  const handleGenerate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    setSubmitting(true);
-    setActiveTest(null);
-    setPhase("idle");
-    setScenarioYaml("");
-
-    try {
-      // 1. Create test
-      const test = await createTest(url, "review");
-
-      // 2. Upload staged files (if any)
-      for (const file of stagedFilesRef.current) {
-        await uploadDocument(test.id, file);
-      }
-
-      // 3. Start generation phase
-      setActiveTest(test);
-      setPhase("generating");
-      setShowUpload(false);
-      stagedFilesRef.current = [];
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to create test";
-      setError(translateApiError(msg, te));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleQuickTest = async () => {
-    setError("");
-    setSubmitting(true);
-    setActiveTest(null);
-    setPhase("idle");
-    setScenarioYaml("");
-
-    try {
-      const test = await createTest(url, "auto");
-      setActiveTest(test);
-      setPhase("executing");
-      setShowUpload(false);
-      stagedFilesRef.current = [];
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to create test";
-      setError(translateApiError(msg, te));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const handleConvert = async () => {
     setError("");
     setConverting(true);
     setConvertedYaml("");
     setConvertedInfo(null);
+    setConvertValidation([]);
+    setConvertValidationSummary(null);
 
     try {
       const result = await convertScenario(url, customPrompt);
       setConvertedYaml(result.scenario_yaml);
       setConvertedInfo({ count: result.scenarios_count, steps: result.steps_total });
+      setConvertValidation(result.validation || []);
+      setConvertValidationSummary(result.validation_summary || null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Conversion failed";
       setError(translateApiError(msg, te));
@@ -357,6 +312,8 @@ export default function DashboardPage() {
     if (!activeScan || selectedTests.size === 0) return;
     setError("");
     setScanExecuting(true);
+    setScanValidation([]);
+    setScanValidationSummary(null);
 
     try {
       const result = await executeScanTests(
@@ -365,6 +322,9 @@ export default function DashboardPage() {
         authData,
         testData,
       );
+      // Save validation results
+      setScanValidation(result.validation || []);
+      setScanValidationSummary(result.validation_summary || null);
       // Switch to test execution phase
       const test = await getTest(result.test_id);
       setActiveTest(test);
@@ -396,6 +356,8 @@ export default function DashboardPage() {
     blog: ts("featureBlog"),
     signup: ts("featureSignup"),
     multilingual: ts("featureMultilingual"),
+    spa: ts("featureSpa"),
+    sticky_header: ts("featureStickyHeader"),
   };
 
   const isBusy = submitting || (phase !== "idle" && phase !== "done");
@@ -468,23 +430,6 @@ export default function DashboardPage() {
             placeholder={t("urlPlaceholder")}
             className="flex-1 rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none"
           />
-          {activeTab === "auto" && (
-            <button
-              type="button"
-              onClick={() => setShowUpload((v) => !v)}
-              disabled={isBusy}
-              className={`whitespace-nowrap rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${
-                showUpload || stagedFilesRef.current.length > 0
-                  ? "border-blue-300 bg-blue-50 text-blue-700"
-                  : "border-gray-300 text-gray-500 hover:bg-gray-50"
-              } disabled:opacity-50`}
-              title="Attach specification documents"
-            >
-              {stagedFilesRef.current.length > 0
-                ? t("docsCount", { count: stagedFilesRef.current.length })
-                : t("attach")}
-            </button>
-          )}
         </div>
 
         {/* Localhost warning */}
@@ -502,14 +447,14 @@ export default function DashboardPage() {
         <div className="flex border-b border-gray-200">
           <button
             type="button"
-            onClick={() => setActiveTab("auto")}
+            onClick={() => setActiveTab("scan")}
             className={`px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === "auto"
-                ? "border-b-2 border-blue-600 text-blue-600"
+              activeTab === "scan"
+                ? "border-b-2 border-teal-600 text-teal-600"
                 : "text-gray-500 hover:text-gray-700"
             }`}
           >
-            {t("tabAutoGenerate")}
+            {t("tabAutoTest")}
           </button>
           <button
             type="button"
@@ -522,48 +467,11 @@ export default function DashboardPage() {
           >
             {t("tabCustom")}
           </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("scan")}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === "scan"
-                ? "border-b-2 border-teal-600 text-teal-600"
-                : "text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            {ts("tab")}
-          </button>
         </div>
-
-        {/* Auto Generate tab */}
-        {activeTab === "auto" && (
-          <>
-            {showUpload && (
-              <FileUpload
-                onFilesChanged={(files) => {
-                  stagedFilesRef.current = files;
-                }}
-              />
-            )}
-            <form onSubmit={handleGenerate} className="flex gap-2">
-              <button
-                type="submit"
-                disabled={isBusy || !url}
-                className="whitespace-nowrap rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-              >
-                {submitting ? t("creatingBtn") : t("generateBtn")}
-              </button>
-              <button
-                type="button"
-                onClick={handleQuickTest}
-                disabled={isBusy || !url}
-                className="whitespace-nowrap rounded-lg border border-gray-300 px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-              >
-                {t("quickTestBtn")}
-              </button>
-            </form>
-          </>
-        )}
+        {/* Tab description */}
+        <p className="text-xs text-gray-400 mt-1">
+          {activeTab === "scan" ? t("tabAutoTestDesc") : t("tabCustomDesc")}
+        </p>
 
         {/* Custom Scenario tab */}
         {activeTab === "custom" && (
@@ -594,6 +502,47 @@ export default function DashboardPage() {
             {/* Converted YAML preview */}
             {convertedYaml && (
               <div className="space-y-3">
+                {/* Validation summary */}
+                {convertValidationSummary && convertValidationSummary.total > 0 && (
+                  <div className={`rounded-lg border px-4 py-2.5 text-sm ${
+                    convertValidationSummary.percent >= 70
+                      ? "border-green-200 bg-green-50 text-green-700"
+                      : convertValidationSummary.percent >= 50
+                      ? "border-amber-200 bg-amber-50 text-amber-700"
+                      : "border-red-200 bg-red-50 text-red-700"
+                  }`}>
+                    <span className="font-medium">
+                      {t("validationSummary", {
+                        verified: convertValidationSummary.verified,
+                        total: convertValidationSummary.total,
+                        percent: convertValidationSummary.percent,
+                      })}
+                    </span>
+                    {convertValidationSummary.percent < 50 && (
+                      <p className="mt-1 text-xs">{t("validationLowQuality")}</p>
+                    )}
+                  </div>
+                )}
+                {/* Per-step validation badges */}
+                {convertValidation.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {convertValidation.map((v, i) => (
+                      <span
+                        key={i}
+                        className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                          v.status === "verified"
+                            ? "bg-green-50 text-green-600"
+                            : "bg-amber-50 text-amber-600"
+                        }`}
+                        title={v.closest_match ? `closest: ${v.closest_match}` : undefined}
+                      >
+                        {v.status === "verified" ? "\u2705" : "\u26A0\uFE0F"}{" "}
+                        S{v.scenario_idx + 1}.{v.step}{" "}
+                        {v.status === "verified" ? t("validationVerified") : t("validationUnverified")}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-3">
                   <pre className="whitespace-pre-wrap text-xs text-gray-700">{convertedYaml}</pre>
                 </div>
@@ -763,14 +712,16 @@ export default function DashboardPage() {
                           {isExpanded && (() => {
                             // Collect shared auth fields for this category (deduplicated)
                             const sharedAuthFields = new Map<string, { key: string; label: string; type: string; required: boolean }>();
-                            const hasAnySelectedAuth = catTests.some((t) => selectedTests.has(t.id) && t.requires_auth && t.auth_fields);
+                            const hasAnySelectedAuth = catTests.some((t) => selectedTests.has(t.id) && t.requires_auth);
                             if (hasAnySelectedAuth) {
+                              // Default auth fields — always present for auth-required tests
+                              sharedAuthFields.set("email", { key: "email", label: ts("authEmail"), type: "email", required: true });
+                              sharedAuthFields.set("password", { key: "password", label: ts("authPassword"), type: "password", required: true });
+                              // Merge/overwrite with plan-provided labels (from crawl data)
                               for (const t of catTests) {
                                 if (t.requires_auth && t.auth_fields) {
                                   for (const f of t.auth_fields) {
-                                    if (!sharedAuthFields.has(f.key)) {
-                                      sharedAuthFields.set(f.key, f);
-                                    }
+                                    sharedAuthFields.set(f.key, f);
                                   }
                                 }
                               }
@@ -780,7 +731,7 @@ export default function DashboardPage() {
                               <div className="divide-y divide-gray-100">
                                 {/* Category-level shared auth fields */}
                                 {sharedAuthFields.size > 0 && (
-                                  <div className="px-4 py-2.5">
+                                  <div key="shared-auth" className="px-4 py-2.5">
                                     <div className="space-y-1.5 rounded-lg border border-amber-200 bg-amber-50/50 p-3">
                                       <p className="text-[10px] font-semibold text-amber-700 uppercase">{ts("sharedAuth")}</p>
                                       {Array.from(sharedAuthFields.values()).map((field) => (
@@ -874,6 +825,49 @@ export default function DashboardPage() {
                         {scanExecuting ? ts("executing") : ts("runSelected")}
                       </button>
                     </div>
+
+                    {/* Validation results after execute */}
+                    {scanValidationSummary && scanValidationSummary.total > 0 && (
+                      <div className="space-y-2">
+                        <div className={`rounded-lg border px-4 py-2.5 text-sm ${
+                          scanValidationSummary.percent >= 70
+                            ? "border-green-200 bg-green-50 text-green-700"
+                            : scanValidationSummary.percent >= 50
+                            ? "border-amber-200 bg-amber-50 text-amber-700"
+                            : "border-red-200 bg-red-50 text-red-700"
+                        }`}>
+                          <span className="font-medium">
+                            {ts("validationSummary", {
+                              verified: scanValidationSummary.verified,
+                              total: scanValidationSummary.total,
+                              percent: scanValidationSummary.percent,
+                            })}
+                          </span>
+                          {scanValidationSummary.percent < 50 && (
+                            <p className="mt-1 text-xs">{ts("validationLowQuality")}</p>
+                          )}
+                        </div>
+                        {scanValidation.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {scanValidation.map((v, i) => (
+                              <span
+                                key={i}
+                                className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                                  v.status === "verified"
+                                    ? "bg-green-50 text-green-600"
+                                    : "bg-amber-50 text-amber-600"
+                                }`}
+                                title={v.closest_match ? `closest: ${v.closest_match}` : undefined}
+                              >
+                                {v.status === "verified" ? "\u2705" : "\u26A0\uFE0F"}{" "}
+                                S{v.scenario_idx + 1}.{v.step}{" "}
+                                {v.status === "verified" ? ts("validationVerified") : ts("validationUnverified")}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

@@ -9,6 +9,9 @@ import { getTest, API_URL, type TestItem } from "@/lib/api";
 interface StepResult {
   step: number;
   action?: string;
+  description?: string;
+  target?: string;
+  value?: string;
   status: string;
   error?: string;
   elapsed_ms?: number;
@@ -331,6 +334,15 @@ export default function TestDetailPage() {
                   <span className="text-sm text-gray-700">
                     {step.action || t("stepLabel", { step: step.step })}
                   </span>
+                  {(step.target || step.value || step.description) && (
+                    <span className="truncate text-xs text-gray-400" title={step.description || undefined}>
+                      {step.target
+                        ? `"${step.target}"`
+                        : step.value
+                          ? step.value
+                          : step.description}
+                    </span>
+                  )}
                   <span
                     className={`ml-auto text-xs ${
                       step.status === "passed"

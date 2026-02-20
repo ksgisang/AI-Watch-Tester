@@ -114,6 +114,7 @@ class Scan(Base):
     broken_links_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     detected_features: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
     plan_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    observations_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

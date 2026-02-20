@@ -211,6 +211,18 @@ BUSINESS_TEMPLATES: dict[str, list[dict[str, Any]]] = {
         },
     ],
     "portfolio": [],
+    "multilingual": [
+        {
+            "requires_feature": "multilingual",
+            "name_en": "Language Switch Test",
+            "name_ko": "언어 전환 테스트",
+            "desc_en": "Switch site language and verify page content changes accordingly without broken layout",
+            "desc_ko": "사이트 언어를 전환하고 페이지 콘텐츠가 깨지지 않고 올바르게 변경되는지 확인",
+            "priority": "medium",
+            "estimated_time": 30,
+            "requires_auth": False,
+        },
+    ],
 }
 
 
@@ -235,6 +247,7 @@ def _scan_to_response(scan: Scan) -> dict:
         "pages": _parse_json(scan.pages_json),
         "broken_links": _parse_json(scan.broken_links_json),
         "detected_features": _parse_json(scan.detected_features) or [],
+        "observations": _parse_json(getattr(scan, "observations_json", None)) or [],
         "error_message": scan.error_message,
         "created_at": scan.created_at,
         "completed_at": scan.completed_at,
@@ -301,6 +314,9 @@ async def start_scan(
                     s.pages_json = json.dumps(result["pages"])
                     s.broken_links_json = json.dumps(result["broken_links"])
                     s.detected_features = json.dumps(result["detected_features"])
+                    # Store observations if available
+                    if result.get("observations"):
+                        s.observations_json = json.dumps(result["observations"])
                 s.completed_at = datetime.now(timezone.utc)
                 await session.commit()
 
@@ -363,7 +379,8 @@ async def get_scan(
 # ---------------------------------------------------------------------------
 
 _PLAN_PROMPT = """\
-You are a senior QA engineer creating a test plan based on actual crawl data.
+You are a senior QA engineer creating a test plan based on actual crawl data and \
+**real interaction observations**.
 
 CRITICAL RULES:
 1. ONLY reference elements, selectors, URLs, and text that actually exist in the crawl data.
@@ -372,6 +389,22 @@ CRITICAL RULES:
 4. Group tests by category with clear priority.
 5. For all text assertions, set case_insensitive: true to handle dynamic casing.
 6. Respond in {language}.
+7. FORM FIELD RULE: For tests involving forms, reference the EXACT field data from crawl data:
+   - Use placeholder text as-is (e.g., if placeholder is "이메일", use "이메일" NOT "Email")
+   - Use label text as-is (e.g., if label is "비밀번호", keep "비밀번호" NOT "Password")
+   - For auth_fields, set the "label" to match the actual form field label/placeholder from crawl data
+   - NEVER translate form field labels or placeholders into another language
+8. For auth_fields in test entries: copy the exact label/placeholder from the crawl data forms.
+   Example: if crawl shows {{placeholder: "이메일", label: "이메일 주소"}}, then auth_fields should be:
+   {{"key": "email", "label": "이메일 주소", "type": "email", "required": true}}
+9. **OBSERVATION-BASED PLANNING**: The "Interaction Observations" section below contains
+   REAL results from actually clicking each element. DO NOT GUESS what happens —
+   use the observed change type (page_navigation, modal_opened, anchor_scroll, section_change)
+   to decide how to assert test results:
+   - page_navigation → assert URL change
+   - modal_opened → assert new modal text is visible (use new_text from observation)
+   - anchor_scroll → assert section text is visible (NOT URL change)
+   - section_change → assert new content is visible (use new_text from observation)
 
 ## Site Info
 - URL: {target_url}
@@ -396,8 +429,14 @@ CRITICAL RULES:
 ### Broken Links
 {broken_links_json}
 
+### Interaction Observations (REAL click results — DO NOT GUESS)
+{observations_json}
+
 ## Business Test Hints (based on site type)
 {business_hints}
+
+## Special Instructions
+{special_instructions}
 
 ## Generate Test Plan
 
@@ -470,6 +509,7 @@ async def generate_plan(
     broken = _parse_json(scan.broken_links_json) or []
     features = _parse_json(scan.detected_features) or []
     summary = _parse_json(scan.summary_json) or {}
+    observations = _parse_json(getattr(scan, "observations_json", None)) or []
 
     # Collect elements for the prompt
     nav_menus = []
@@ -482,6 +522,9 @@ async def generate_plan(
         buttons.extend(p.get("buttons", []))
         for link in p.get("links", [])[:10]:
             links_sample.append({"text": link.get("text", ""), "href": link.get("href", "")})
+        # Also collect per-page observations
+        if not observations:
+            observations.extend(p.get("observations", []))
 
     # Truncate for prompt size
     def _trunc_json(obj: Any, limit: int = 3000) -> str:
@@ -493,16 +536,47 @@ async def generate_plan(
     site_type_name = site_type_info.get("type", "unknown") if isinstance(site_type_info, dict) else "unknown"
     site_type_conf = site_type_info.get("confidence", 0.0) if isinstance(site_type_info, dict) else 0.0
 
-    # Build business hints from templates
+    # Build business hints from templates (site-type + cross-cutting)
     business_hints_lines = []
-    templates = BUSINESS_TEMPLATES.get(site_type_name, [])
-    for tmpl in templates:
-        req_feat = tmpl.get("requires_feature", "")
-        if not req_feat or req_feat in features:
+    hint_covered: set[str] = set()
+    for st in [site_type_name] + [k for k in BUSINESS_TEMPLATES if k != site_type_name]:
+        for tmpl in BUSINESS_TEMPLATES.get(st, []):
+            req_feat = tmpl.get("requires_feature", "")
+            if req_feat and req_feat not in features:
+                continue
+            if req_feat in hint_covered:
+                continue
+            if req_feat:
+                hint_covered.add(req_feat)
             name = tmpl.get("name_en", "")
             desc = tmpl.get("desc_en", "")
             business_hints_lines.append(f"- {name}: {desc}")
     business_hints = "\n".join(business_hints_lines) if business_hints_lines else "No specific business tests for this site type."
+
+    # Build special instructions based on detected features
+    special_parts: list[str] = []
+    if "spa" in features:
+        special_parts.append(
+            "SPA SITE DETECTED:\n"
+            "- Do NOT assert URL changes after menu/link clicks.\n"
+            "- Instead, assert that the target section text is visible (text_visible).\n"
+            "- For anchor links (#section), only verify the section content is visible.\n"
+            "- Consider modal-based login (overlay popup, not page navigation).\n"
+            "- Anchor links scroll within the same page — do NOT treat them as page navigations."
+        )
+    if "sticky_header" in features:
+        special_parts.append(
+            "STICKY/FIXED HEADER DETECTED:\n"
+            "- Menu items may be hidden behind the sticky header after scrolling.\n"
+            "- Add a scroll_to_top (scroll 0,0,0) step before clicking header navigation items."
+        )
+    special_parts.append(
+        "TEST INDEPENDENCE:\n"
+        "- Each test MUST start with a navigate step to the base URL.\n"
+        "- Tests are independent — a previous test failure must NOT affect the next test.\n"
+        "- For login tests, always start from the home page."
+    )
+    special_instructions = "\n\n".join(special_parts)
 
     # Build AI prompt
     lang = "Korean" if body.language == "ko" else "English"
@@ -519,7 +593,9 @@ async def generate_plan(
         links_json=_trunc_json(links_sample),
         broken_links_json=_trunc_json(broken),
         broken_count=len(broken),
+        observations_json=_trunc_json(observations, 5000) if observations else "No observations collected.",
         business_hints=business_hints,
+        special_instructions=special_instructions,
     )
 
     # Try AI plan generation, fall back to default plan on failure
@@ -717,18 +793,29 @@ def _generate_default_plan(
             "tests": form_tests,
         })
 
-    # 3. Business tests from templates (based on site type)
+    # 3. Business tests from templates (based on site type + cross-cutting features)
     site_type_info = summary.get("site_type") or {}
     site_type_name = site_type_info.get("type", "unknown") if isinstance(site_type_info, dict) else "unknown"
     feature_set = set(features)
 
-    templates = BUSINESS_TEMPLATES.get(site_type_name, [])
-    business_tests = []
-    for tmpl in templates:
+    def _add_template(tmpl: dict, covered: set[str]) -> dict[str, Any] | None:
+        """Convert a template to a test entry if its required feature is detected."""
         req_feat = tmpl.get("requires_feature", "")
         if req_feat and req_feat not in feature_set:
-            continue  # skip if required feature not detected
+            return None
+        if req_feat in covered:
+            return None  # already covered
+        if req_feat:
+            covered.add(req_feat)
+        return tmpl
 
+    covered_features: set[str] = set()
+    business_tests = []
+
+    # Phase 1: site-type-specific templates
+    for tmpl in BUSINESS_TEMPLATES.get(site_type_name, []):
+        if _add_template(tmpl, covered_features) is None:
+            continue
         test_entry: dict[str, Any] = {
             "id": f"t{tid}",
             "name": tmpl["name_ko"] if ko else tmpl["name_en"],
@@ -745,22 +832,28 @@ def _generate_default_plan(
         business_tests.append(test_entry)
         tid += 1
 
-    # Fallback: if no business templates matched, check for login_form feature
-    if not business_tests and "login_form" in feature_set:
-        business_tests.append({
-            "id": f"t{tid}",
-            "name": "로그인 흐름 테스트" if ko else "Login Flow Test",
-            "description": "로그인 페이지 접근 및 폼 동작 확인" if ko else "Access login page and verify form works",
-            "priority": "high",
-            "estimated_time": 30,
-            "requires_auth": True,
-            "selected": False,
-            "auth_fields": [
-                {"key": "email", "label": "Email", "type": "email", "required": True},
-                {"key": "password", "label": "Password", "type": "password", "required": True},
-            ],
-        })
-        tid += 1
+    # Phase 2: cross-cutting — scan ALL site types for uncovered detected features
+    for other_type, other_templates in BUSINESS_TEMPLATES.items():
+        if other_type == site_type_name:
+            continue  # already processed
+        for tmpl in other_templates:
+            if _add_template(tmpl, covered_features) is None:
+                continue
+            test_entry = {
+                "id": f"t{tid}",
+                "name": tmpl["name_ko"] if ko else tmpl["name_en"],
+                "description": tmpl["desc_ko"] if ko else tmpl["desc_en"],
+                "priority": tmpl.get("priority", "medium"),
+                "estimated_time": tmpl.get("estimated_time", 30),
+                "requires_auth": tmpl.get("requires_auth", False),
+                "selected": not tmpl.get("requires_auth", False),
+            }
+            if tmpl.get("auth_fields"):
+                test_entry["auth_fields"] = tmpl["auth_fields"]
+            if tmpl.get("test_data_fields"):
+                test_entry["test_data_fields"] = tmpl["test_data_fields"]
+            business_tests.append(test_entry)
+            tid += 1
 
     if business_tests:
         categories.append({
@@ -813,11 +906,32 @@ CRITICAL RULES:
 3. For click/type targets, prefer using "text" field with the EXACT visible text from crawl data.
 4. For all assert steps, ALWAYS set "case_insensitive": true to handle dynamic casing.
 5. Copy text strings EXACTLY from the crawl data — do not paraphrase or translate.
+6. FORM FIELD TARGETING: For find_and_type/find_and_click targeting form fields:
+   - BEST: Use CSS selector from crawl data (e.g., selector: "[name=email]", "#password")
+   - GOOD: Use exact placeholder text (e.g., text: "이메일" if that's the placeholder)
+   - NEVER translate labels/placeholders. If crawl shows placeholder "이메일", use "이메일" NOT "Email".
+7. When filling auth/login forms, use CSS selectors from the crawl data's forms[].fields[].selector.
+   If selector is null, use the exact placeholder or label text from crawl data.
+8. Each scenario MUST start with a navigate step to the target URL (test independence).
+9. For anchor links (is_anchor: true), do NOT assert URL changes. Assert section text is visible instead.
+10. For SPA sites, use text_visible assertions instead of URL assertions.
+11. **USE OBSERVATION DATA**: The "Interaction Observations" section shows what ACTUALLY happened
+    when each element was clicked. Use this to write accurate assertions:
+    - If observed_change.type is "page_navigation" → assert URL change to the observed after.url
+    - If observed_change.type is "modal_opened" → assert new_text items are visible
+    - If observed_change.type is "anchor_scroll" → assert section text is visible (NOT URL)
+    - If observed_change.type is "section_change" → assert new_text items are visible
+    - DO NOT GUESS — use the observed data.
+
+{extra_instructions}
 
 ## Target URL: {target_url}
 
 ## Crawl Data (navigation menus, forms, buttons)
 {crawl_data}
+
+## Interaction Observations (REAL click results — DO NOT GUESS)
+{observations_data}
 
 ## Selected Tests
 {selected_tests}
@@ -877,11 +991,15 @@ async def execute_scan_tests(
 
     # Gather crawl data for context
     pages = _parse_json(scan.pages_json) or []
+    observations = _parse_json(getattr(scan, "observations_json", None)) or []
     crawl_context = {"nav_menus": [], "forms": [], "buttons": []}
     for p in pages[:5]:
         crawl_context["nav_menus"].extend(p.get("nav_menus", []))
         crawl_context["forms"].extend(p.get("forms", []))
         crawl_context["buttons"].extend(p.get("buttons", []))
+        # Collect per-page observations as fallback
+        if not observations:
+            observations.extend(p.get("observations", []))
 
     user_data = {**body.auth_data, **body.test_data}
 
@@ -905,28 +1023,66 @@ async def execute_scan_tests(
 
     def _trunc(obj: Any, limit: int = 3000) -> str:
         s = json.dumps(obj, ensure_ascii=False, indent=2)
-        return s[:limit]
+        return s[:limit] if len(s) > limit else s
+
+    # Build extra instructions based on detected features
+    features = _parse_json(scan.detected_features) or []
+    extra_parts: list[str] = []
+    if "spa" in features:
+        extra_parts.append(
+            "SPA SITE: Do NOT assert URL changes. Use text_visible assertions. "
+            "Anchor links scroll within the page — assert section content is visible."
+        )
+    if "sticky_header" in features:
+        extra_parts.append(
+            "STICKY HEADER: Add scroll(0,0,0) before clicking header menu items."
+        )
+    extra_instructions = "\n".join(extra_parts) if extra_parts else ""
 
     prompt = _EXECUTE_PROMPT.format(
         target_url=scan.target_url,
         crawl_data=_trunc(crawl_context),
+        observations_data=(
+            _trunc(observations, 5000)
+            if observations else "No observations collected."
+        ),
         selected_tests=_trunc(selected_details),
         user_data=json.dumps(user_data, ensure_ascii=False),
+        extra_instructions=extra_instructions,
     )
 
     try:
         scenarios = await adapter.generate_scenarios(prompt)
     except Exception as exc:
         logger.exception("Scenario generation from scan failed")
-        raise HTTPException(status_code=502, detail=f"AI scenario generation failed: {exc}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"AI scenario generation failed: {exc}",
+        )
 
     if not scenarios:
-        raise HTTPException(status_code=422, detail="AI generated no scenarios")
+        raise HTTPException(
+            status_code=422, detail="AI generated no scenarios",
+        )
+
+    # Validate and retry if needed
+    scenarios, validation = await validate_and_retry(
+        scenarios, observations, pages, adapter, prompt,
+    )
+
+    # Compute validation summary
+    verified = sum(1 for v in validation if v["status"] == "verified")
+    total_v = len(validation)
 
     # Serialize to YAML
-    scenario_dicts = [s.model_dump(mode="json", exclude_none=True) for s in scenarios]
+    scenario_dicts = [
+        s.model_dump(mode="json", exclude_none=True)
+        for s in scenarios
+    ]
     scenario_yaml = yaml.safe_dump(
-        scenario_dicts, default_flow_style=False, allow_unicode=True
+        scenario_dicts,
+        default_flow_style=False,
+        allow_unicode=True,
     )
     total_steps = sum(len(s.steps) for s in scenarios)
 
@@ -949,7 +1105,261 @@ async def execute_scan_tests(
         "scenario_yaml": scenario_yaml,
         "scenarios_count": len(scenarios),
         "steps_total": total_steps,
+        "validation": validation,
+        "validation_summary": {
+            "verified": verified,
+            "total": total_v,
+            "percent": (
+                round(verified / total_v * 100)
+                if total_v > 0 else 100
+            ),
+        },
     }
+
+
+# ---------------------------------------------------------------------------
+# Scenario validation — verify targets against observation data
+# ---------------------------------------------------------------------------
+
+
+def validate_scenarios(
+    scenarios: list,
+    observations: list[dict],
+    page_data: list[dict] | None = None,
+) -> list[dict]:
+    """Validate scenario step targets against observation/crawl data.
+
+    Returns list of validation results per step:
+    [{"scenario_idx": 0, "step": 1, "status": "verified"|"unverified",
+      "target_text": "...", "closest_match": "..."|null}]
+    """
+    # Build lookup sets from observations and page data
+    observed_texts: set[str] = set()
+    observed_selectors: set[str] = set()
+    observed_urls: set[str] = set()
+    form_fields: set[str] = set()  # placeholder / label / name
+
+    for obs in observations:
+        elem = obs.get("element", {})
+        txt = (elem.get("text") or "").strip().lower()
+        sel = (elem.get("selector") or "").strip().lower()
+        if txt:
+            observed_texts.add(txt)
+        if sel:
+            observed_selectors.add(sel)
+        # Collect new_text from observations
+        for nt in obs.get("observed_change", {}).get("new_text", []):
+            nt_lower = nt.strip().lower()
+            if nt_lower:
+                observed_texts.add(nt_lower)
+        # URLs
+        for key in ("before", "after"):
+            u = obs.get(key, {}).get("url", "")
+            if u:
+                observed_urls.add(u.lower())
+
+    # From page data (nav, buttons, links, forms)
+    for pdata in (page_data or []):
+        for nav in pdata.get("nav_menus", []):
+            for item in nav.get("items", []):
+                txt = (item.get("text") or "").strip().lower()
+                if txt:
+                    observed_texts.add(txt)
+        for btn in pdata.get("buttons", []):
+            txt = (btn.get("text") or "").strip().lower()
+            if txt:
+                observed_texts.add(txt)
+        for link in pdata.get("links", []):
+            txt = (link.get("text") or "").strip().lower()
+            href = (link.get("href") or "").lower()
+            if txt:
+                observed_texts.add(txt)
+            if href:
+                observed_urls.add(href)
+        for form in pdata.get("forms", []):
+            for field in form.get("fields", []):
+                for key in ("name", "placeholder", "label", "aria_label"):
+                    val = (field.get(key) or "").strip().lower()
+                    if val:
+                        form_fields.add(val)
+                        observed_texts.add(val)
+                sel = (field.get("selector") or "").strip().lower()
+                if sel:
+                    observed_selectors.add(sel)
+
+    results: list[dict] = []
+
+    for si, scenario in enumerate(scenarios):
+        steps = []
+        if hasattr(scenario, "steps"):
+            steps = scenario.steps
+        elif isinstance(scenario, dict):
+            steps = scenario.get("steps", [])
+
+        for step in steps:
+            # Extract target info
+            if hasattr(step, "target"):
+                target_obj = step.target
+                action = step.action.value if hasattr(
+                    step.action, "value"
+                ) else str(step.action)
+                step_num = step.step
+                target_text = (
+                    target_obj.text if target_obj else None
+                )
+                value = step.value
+            else:
+                target_obj = step.get("target")
+                action = str(step.get("action", ""))
+                step_num = step.get("step", 0)
+                target_text = (
+                    target_obj.get("text") if target_obj else None
+                )
+                value = step.get("value")
+
+            # Skip steps that don't need validation
+            if action in ("navigate", "wait", "screenshot"):
+                # For navigate, check if URL is known
+                if action == "navigate" and value:
+                    results.append({
+                        "scenario_idx": si,
+                        "step": step_num,
+                        "status": "verified",
+                        "target_text": value,
+                    })
+                continue
+
+            if not target_text:
+                continue
+
+            tt_lower = target_text.strip().lower()
+
+            # Check exact match
+            if tt_lower in observed_texts:
+                results.append({
+                    "scenario_idx": si,
+                    "step": step_num,
+                    "status": "verified",
+                    "target_text": target_text,
+                })
+                continue
+
+            # Check partial match (target text contained in
+            # observed text or vice versa)
+            partial = None
+            for ot in observed_texts:
+                if tt_lower in ot or ot in tt_lower:
+                    partial = ot
+                    break
+
+            if partial:
+                results.append({
+                    "scenario_idx": si,
+                    "step": step_num,
+                    "status": "verified",
+                    "target_text": target_text,
+                    "closest_match": partial,
+                })
+                continue
+
+            # Check form fields
+            if tt_lower in form_fields:
+                results.append({
+                    "scenario_idx": si,
+                    "step": step_num,
+                    "status": "verified",
+                    "target_text": target_text,
+                })
+                continue
+
+            # Not found — unverified
+            # Find closest match for hint
+            closest = _find_closest(tt_lower, observed_texts)
+            results.append({
+                "scenario_idx": si,
+                "step": step_num,
+                "status": "unverified",
+                "target_text": target_text,
+                "closest_match": closest,
+            })
+
+    return results
+
+
+def _find_closest(
+    target: str, candidates: set[str],
+) -> str | None:
+    """Find the most similar string from candidates."""
+    if not candidates:
+        return None
+    best = None
+    best_score = 0
+    for c in candidates:
+        # Simple overlap scoring
+        common = sum(1 for ch in target if ch in c)
+        score = common / max(len(target), len(c), 1)
+        if score > best_score:
+            best_score = score
+            best = c
+    return best if best_score > 0.3 else None
+
+
+async def validate_and_retry(
+    scenarios: list,
+    observations: list[dict],
+    page_data: list[dict] | None,
+    adapter: Any,
+    prompt_context: str,
+) -> tuple[list, list[dict]]:
+    """Validate scenarios and retry once if too many unverified.
+
+    Returns (possibly_fixed_scenarios, validation_results).
+    """
+    results = validate_scenarios(scenarios, observations, page_data)
+    unverified = [r for r in results if r["status"] == "unverified"]
+    total_validated = len(results)
+
+    # If > 30% unverified and we have observations, retry once
+    if (
+        total_validated > 0
+        and len(unverified) / total_validated > 0.3
+        and observations
+    ):
+        logger.info(
+            "Validation: %d/%d unverified, retrying",
+            len(unverified), total_validated,
+        )
+        # Build retry prompt
+        retry_prompt = (
+            f"{prompt_context}\n\n"
+            "## VALIDATION FAILED — FIX REQUIRED\n"
+            "The following targets were NOT found in the "
+            "observation data:\n"
+        )
+        for uv in unverified:
+            closest = uv.get("closest_match")
+            hint = f" (closest: \"{closest}\")" if closest else ""
+            retry_prompt += (
+                f"- Step {uv['step']}: "
+                f"\"{uv['target_text']}\"{hint}\n"
+            )
+        retry_prompt += (
+            "\nFix these targets using ONLY elements from "
+            "the observation data. Return the complete "
+            "corrected scenario JSON array."
+        )
+
+        try:
+            fixed = await adapter.generate_scenarios(retry_prompt)
+            if fixed:
+                scenarios = fixed
+                results = validate_scenarios(
+                    scenarios, observations, page_data,
+                )
+        except Exception as exc:
+            logger.warning("Validation retry failed: %s", exc)
+
+    return scenarios, results
 
 
 # ---------------------------------------------------------------------------

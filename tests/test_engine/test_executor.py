@@ -20,7 +20,7 @@ from aat.core.models import (
     StepStatus,
     TargetSpec,
 )
-from aat.engine.executor import StepExecutor, _parse_coordinates, _parse_scroll_params
+from aat.engine.executor import StepExecutor, _SYNONYMS, _parse_coordinates, _parse_scroll_params
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -47,9 +47,11 @@ def mock_engine() -> MagicMock:
     engine.get_page_text = AsyncMock(return_value="Page text")
     engine.get_url = AsyncMock(return_value="https://example.com/page")
     engine.find_text_position = AsyncMock(return_value=None)
-    # Explicitly remove find_on_screen so hasattr() returns False
+    # Explicitly remove attributes so hasattr() returns False
     # (MagicMock auto-creates any attribute, breaking the screen-coord code path)
     del engine.find_on_screen
+    del engine.scroll_to_top
+    del engine.force_click_by_text
     return engine
 
 
@@ -517,3 +519,197 @@ class TestErrorHandling:
         step = make_step(ActionType.CLICK_AT, value="invalid")
         result = await executor.execute_step(step)
         assert result.status == StepStatus.FAILED
+
+
+# ─── Synonym fallback ────────────────────────────────────────
+
+
+class TestSynonymMapping:
+    def test_email_has_korean_synonyms(self) -> None:
+        syns = _SYNONYMS.get("email", [])
+        assert "이메일" in syns
+
+    def test_password_has_korean_synonyms(self) -> None:
+        syns = _SYNONYMS.get("password", [])
+        assert "비밀번호" in syns
+
+    def test_korean_maps_back_to_english(self) -> None:
+        assert "email" in _SYNONYMS.get("이메일", [])
+        assert "password" in _SYNONYMS.get("비밀번호", [])
+
+    def test_login_synonyms(self) -> None:
+        syns = _SYNONYMS.get("login", [])
+        assert "로그인" in syns
+        assert "sign in" in syns
+
+
+class TestSynonymFallback:
+    @pytest.mark.asyncio
+    async def test_synonym_fallback_finds_korean_text(
+        self,
+        mock_matcher: MagicMock,
+        mock_humanizer: MagicMock,
+        mock_waiter: MagicMock,
+        mock_comparator: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """When 'Email' is not found, synonym '이메일' should be tried."""
+        engine = MagicMock()
+        # First call (original "Email") returns None, second call ("이메일") returns coords
+        engine.find_text_position = AsyncMock(side_effect=[None, (150, 250)])
+        engine.click = AsyncMock()
+        engine.type_text = AsyncMock()
+        engine.screenshot = AsyncMock(return_value=b"png")
+        engine.save_screenshot = AsyncMock()
+        del engine.find_on_screen
+
+        executor = StepExecutor(
+            engine=engine,
+            matcher=mock_matcher,
+            humanizer=mock_humanizer,
+            waiter=mock_waiter,
+            comparator=mock_comparator,
+            screenshot_dir=tmp_path,
+        )
+
+        target = TargetSpec(text="Email")
+        step = make_step(ActionType.FIND_AND_TYPE, target=target, value="test@test.com")
+        result = await executor.execute_step(step)
+        assert result.status == StepStatus.PASSED
+        assert result.match_result is not None
+        assert result.match_result.x == 150
+        assert result.match_result.y == 250
+        # Should have called find_text_position twice (original + synonym)
+        assert engine.find_text_position.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_no_synonym_if_original_found(
+        self, executor: StepExecutor, mock_engine: MagicMock,
+    ) -> None:
+        """When original text is found, no synonym lookup should happen."""
+        mock_engine.find_text_position = AsyncMock(return_value=(100, 200))
+
+        target = TargetSpec(text="Email")
+        step = make_step(ActionType.FIND_AND_CLICK, target=target)
+        result = await executor.execute_step(step)
+        assert result.status == StepStatus.PASSED
+        # Only called once — no synonym needed
+        mock_engine.find_text_position.assert_awaited_once_with("Email")
+
+
+# ─── Scroll-to-top + force click fallback ────────────────────
+
+
+class TestScrollToTopFallback:
+    @pytest.mark.asyncio
+    async def test_scroll_to_top_retry_succeeds(
+        self,
+        mock_matcher: MagicMock,
+        mock_humanizer: MagicMock,
+        mock_waiter: MagicMock,
+        mock_comparator: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """When text not found, scroll to top + retry should succeed."""
+        engine = MagicMock()
+        # "login" has 3 synonyms: 로그인, sign in, log in
+        # First 4 calls (original + 3 synonyms) all return None → scroll_to_top,
+        # then 5th call (after scroll, original text) returns coords
+        engine.find_text_position = AsyncMock(
+            side_effect=[None, None, None, None, (200, 300)]
+        )
+        engine.scroll_to_top = AsyncMock()
+        engine.click = AsyncMock()
+        engine.screenshot = AsyncMock(return_value=b"png")
+        engine.save_screenshot = AsyncMock()
+        del engine.find_on_screen
+        del engine.force_click_by_text
+
+        executor = StepExecutor(
+            engine=engine,
+            matcher=mock_matcher,
+            humanizer=mock_humanizer,
+            waiter=mock_waiter,
+            comparator=mock_comparator,
+            screenshot_dir=tmp_path,
+        )
+
+        target = TargetSpec(text="Login")
+        step = make_step(ActionType.FIND_AND_CLICK, target=target)
+        result = await executor.execute_step(step)
+        assert result.status == StepStatus.PASSED
+        engine.scroll_to_top.assert_awaited_once()
+
+
+class TestForceClickFallback:
+    @pytest.mark.asyncio
+    async def test_force_click_succeeds_after_all_else_fails(
+        self,
+        mock_matcher: MagicMock,
+        mock_humanizer: MagicMock,
+        mock_waiter: MagicMock,
+        mock_comparator: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """When all find_text_position attempts fail, force_click_by_text is tried."""
+        engine = MagicMock()
+        # All find_text_position calls return None
+        engine.find_text_position = AsyncMock(return_value=None)
+        engine.scroll_to_top = AsyncMock()
+        engine.force_click_by_text = AsyncMock(return_value=True)
+        engine.type_text = AsyncMock()
+        engine.screenshot = AsyncMock(return_value=b"png")
+        engine.save_screenshot = AsyncMock()
+        del engine.find_on_screen
+
+        executor = StepExecutor(
+            engine=engine,
+            matcher=mock_matcher,
+            humanizer=mock_humanizer,
+            waiter=mock_waiter,
+            comparator=mock_comparator,
+            screenshot_dir=tmp_path,
+        )
+
+        target = TargetSpec(text="Submit")
+        step = make_step(ActionType.FIND_AND_CLICK, target=target)
+        result = await executor.execute_step(step)
+        assert result.status == StepStatus.PASSED
+        assert result.match_result is not None
+        assert result.match_result.confidence == 0.8
+        engine.force_click_by_text.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_force_click_type_action(
+        self,
+        mock_matcher: MagicMock,
+        mock_humanizer: MagicMock,
+        mock_waiter: MagicMock,
+        mock_comparator: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Force click for find_and_type should click then type."""
+        engine = MagicMock()
+        engine.find_text_position = AsyncMock(return_value=None)
+        engine.scroll_to_top = AsyncMock()
+        engine.force_click_by_text = AsyncMock(return_value=True)
+        engine.type_text = AsyncMock()
+        engine.screenshot = AsyncMock(return_value=b"png")
+        engine.save_screenshot = AsyncMock()
+        del engine.find_on_screen
+
+        executor = StepExecutor(
+            engine=engine,
+            matcher=mock_matcher,
+            humanizer=mock_humanizer,
+            waiter=mock_waiter,
+            comparator=mock_comparator,
+            screenshot_dir=tmp_path,
+        )
+
+        target = TargetSpec(text="Password")
+        step = make_step(ActionType.FIND_AND_TYPE, target=target, value="secret123")
+        result = await executor.execute_step(step)
+        assert result.status == StepStatus.PASSED
+        engine.force_click_by_text.assert_awaited()
+        engine.type_text.assert_awaited_once_with("secret123")

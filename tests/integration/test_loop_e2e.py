@@ -307,6 +307,8 @@ class TestStepExecutorE2E:
         self, executor: StepExecutor, mock_engine: AsyncMock, mock_matcher: AsyncMock
     ) -> None:
         mock_engine.find_text_position = AsyncMock(return_value=None)
+        mock_engine.scroll_to_top = AsyncMock()
+        mock_engine.force_click_by_text = AsyncMock(return_value=False)
         mock_matcher.find = AsyncMock(return_value=None)
         step = StepConfig(
             step=4,

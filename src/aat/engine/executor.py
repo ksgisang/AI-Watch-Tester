@@ -29,6 +29,26 @@ if TYPE_CHECKING:
     from aat.matchers.base import BaseMatcher
 
 
+_SYNONYMS: dict[str, list[str]] = {
+    "email": ["이메일", "e-mail", "이메일 주소"],
+    "이메일": ["email", "e-mail"],
+    "이메일 주소": ["email", "이메일"],
+    "password": ["비밀번호", "패스워드"],
+    "비밀번호": ["password", "패스워드"],
+    "패스워드": ["password", "비밀번호"],
+    "login": ["로그인", "sign in", "log in"],
+    "로그인": ["login", "sign in", "log in"],
+    "sign in": ["로그인", "login"],
+    "register": ["회원가입", "sign up", "signup"],
+    "회원가입": ["register", "sign up", "가입하기"],
+    "search": ["검색", "찾기"],
+    "검색": ["search"],
+    "submit": ["제출", "확인", "전송"],
+    "제출": ["submit", "확인"],
+    "확인": ["submit", "제출", "ok", "confirm"],
+}
+
+
 def _parse_coordinates(value: str | None) -> tuple[int, int]:
     """Parse 'x,y' coordinate string.
 
@@ -216,8 +236,51 @@ class StepExecutor:
 
         return match_result
 
+    async def _find_text_with_synonyms(self, text: str) -> tuple[int, int] | None:
+        """Try find_text_position with synonym fallback."""
+        pos = await self._engine.find_text_position(text)
+        if pos is None:
+            for syn in _SYNONYMS.get(text.lower(), []):
+                pos = await self._engine.find_text_position(syn)
+                if pos is not None:
+                    break
+        return pos
+
+    async def _act_at_pos(
+        self, step: StepConfig, x: int, y: int, confidence: float = 1.0,
+    ) -> MatchResult:
+        """Execute find_and_* action at given position, return MatchResult."""
+        from aat.core.models import MatchMethod, MatchResult
+
+        result = MatchResult(
+            found=True, x=x, y=y, confidence=confidence, method=MatchMethod.OCR,
+        )
+        if step.action in (
+            ActionType.FIND_AND_CLICK,
+            ActionType.FIND_AND_DOUBLE_CLICK,
+            ActionType.FIND_AND_RIGHT_CLICK,
+        ):
+            await self._do_click(
+                x, y, step.humanize,
+                double=(step.action == ActionType.FIND_AND_DOUBLE_CLICK),
+                right=(step.action == ActionType.FIND_AND_RIGHT_CLICK),
+            )
+        elif step.action == ActionType.FIND_AND_TYPE:
+            await self._do_click(x, y, step.humanize)
+            await self._do_type(step.value or "", step.humanize)
+        elif step.action == ActionType.FIND_AND_CLEAR:
+            await self._do_click(x, y, step.humanize)
+            await self._engine.key_combo("Control", "a")
+            await self._engine.press_key("Delete")
+        return result
+
     async def _find_and_act(self, step: StepConfig) -> MatchResult:
         """Find target and perform action: wait → match → action.
+
+        Fallback chain for text targets:
+        1. find_text_position (+ synonyms)
+        2. scroll_to_top + retry find_text_position
+        3. force_click_by_text (JS click, bypasses sticky headers)
 
         Args:
             step: Step with a find_and_* action and target.
@@ -232,38 +295,34 @@ class StepExecutor:
 
         # Try Playwright native text search first (no screenshot needed)
         if target.text and hasattr(self._engine, "find_text_position"):
-            pos = await self._engine.find_text_position(target.text)
+            pos = await self._find_text_with_synonyms(target.text)
             if pos is not None:
+                return await self._act_at_pos(step, pos[0], pos[1])
+
+            # Fallback 2: scroll to top + retry
+            if hasattr(self._engine, "scroll_to_top"):
+                await self._engine.scroll_to_top()
+                pos = await self._find_text_with_synonyms(target.text)
+                if pos is not None:
+                    return await self._act_at_pos(step, pos[0], pos[1])
+
+            # Fallback 3: JS force click via locator (bypasses sticky headers)
+            if hasattr(self._engine, "force_click_by_text"):
                 from aat.core.models import MatchMethod, MatchResult
 
-                result = MatchResult(
-                    found=True,
-                    x=pos[0],
-                    y=pos[1],
-                    confidence=1.0,
-                    method=MatchMethod.OCR,
-                )
-                x, y = result.x, result.y
-                if step.action in (
-                    ActionType.FIND_AND_CLICK,
-                    ActionType.FIND_AND_DOUBLE_CLICK,
-                    ActionType.FIND_AND_RIGHT_CLICK,
-                ):
-                    await self._do_click(
-                        x,
-                        y,
-                        step.humanize,
-                        double=(step.action == ActionType.FIND_AND_DOUBLE_CLICK),
-                        right=(step.action == ActionType.FIND_AND_RIGHT_CLICK),
-                    )
-                elif step.action == ActionType.FIND_AND_TYPE:
-                    await self._do_click(x, y, step.humanize)
-                    await self._do_type(step.value or "", step.humanize)
-                elif step.action == ActionType.FIND_AND_CLEAR:
-                    await self._do_click(x, y, step.humanize)
-                    await self._engine.key_combo("Control", "a")
-                    await self._engine.press_key("Delete")
-                return result
+                texts_to_try = [target.text] + _SYNONYMS.get(target.text.lower(), [])
+                for t in texts_to_try:
+                    if await self._engine.force_click_by_text(t):
+                        result = MatchResult(
+                            found=True, x=0, y=0, confidence=0.8,
+                            method=MatchMethod.OCR,
+                        )
+                        if step.action == ActionType.FIND_AND_TYPE:
+                            await self._do_type(step.value or "", step.humanize)
+                        elif step.action == ActionType.FIND_AND_CLEAR:
+                            await self._engine.key_combo("Control", "a")
+                            await self._engine.press_key("Delete")
+                        return result
 
         # Try PyAutoGUI screen search (DesktopEngine, image target)
         if target.image and hasattr(self._engine, "find_on_screen"):
@@ -310,28 +369,9 @@ class StepExecutor:
             raise MatchError(msg)
 
         # Perform action at matched location
-        x, y = match_result.x, match_result.y
-        if step.action in (
-            ActionType.FIND_AND_CLICK,
-            ActionType.FIND_AND_DOUBLE_CLICK,
-            ActionType.FIND_AND_RIGHT_CLICK,
-        ):
-            await self._do_click(
-                x,
-                y,
-                step.humanize,
-                double=(step.action == ActionType.FIND_AND_DOUBLE_CLICK),
-                right=(step.action == ActionType.FIND_AND_RIGHT_CLICK),
-            )
-        elif step.action == ActionType.FIND_AND_TYPE:
-            await self._do_click(x, y, step.humanize)
-            await self._do_type(step.value or "", step.humanize)
-        elif step.action == ActionType.FIND_AND_CLEAR:
-            await self._do_click(x, y, step.humanize)
-            await self._engine.key_combo("Control", "a")
-            await self._engine.press_key("Delete")
-
-        return match_result
+        return await self._act_at_pos(
+            step, match_result.x, match_result.y, match_result.confidence,
+        )
 
     async def _do_click(
         self,

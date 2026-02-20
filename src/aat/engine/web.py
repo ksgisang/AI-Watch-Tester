@@ -174,6 +174,21 @@ class WebEngine(BaseEngine):
         Automatically scrolls elements into the viewport before returning
         coordinates. Returns (x, y) center coordinates, or None.
         """
+        # If text looks like a CSS selector, try it directly first
+        if text.startswith(("#", "[", ".")) or text.startswith("input"):
+            try:
+                locator = self.page.locator(text).first
+                if await locator.count() > 0:
+                    await locator.scroll_into_view_if_needed(timeout=3000)
+                    box = await locator.bounding_box()
+                    if box:
+                        return (
+                            int(box["x"] + box["width"] / 2),
+                            int(box["y"] + box["height"] / 2),
+                        )
+            except Exception:
+                pass
+
         strategies = [
             lambda: self.page.get_by_label(text, exact=False).first,
             lambda: self.page.get_by_placeholder(text, exact=False).first,
@@ -200,6 +215,44 @@ class WebEngine(BaseEngine):
                 continue
 
         return None
+
+    async def scroll_to_top(self) -> None:
+        """Scroll page to top (0, 0)."""
+        await self.page.evaluate("window.scrollTo(0, 0)")
+
+    async def force_click_by_text(self, text: str) -> bool:
+        """Find element by text strategies and force-click it.
+
+        Uses Playwright's force option to bypass actionability checks
+        (e.g. element hidden behind sticky header). Returns True if clicked.
+        """
+        strategies = [
+            lambda: self.page.get_by_label(text, exact=False).first,
+            lambda: self.page.get_by_placeholder(text, exact=False).first,
+            lambda: self.page.get_by_role("button", name=text, exact=False).first,
+            lambda: self.page.get_by_role("link", name=text, exact=False).first,
+            lambda: self.page.get_by_text(text, exact=False).first,
+        ]
+        for strategy in strategies:
+            try:
+                locator = strategy()  # type: ignore[no-untyped-call]
+                if await locator.count() > 0:
+                    await locator.click(force=True, timeout=3000)
+                    return True
+            except Exception:
+                continue
+
+        # CSS selector fallback
+        if text.startswith(("#", "[", ".")) or text.startswith("input"):
+            try:
+                locator = self.page.locator(text).first
+                if await locator.count() > 0:
+                    await locator.click(force=True, timeout=3000)
+                    return True
+            except Exception:
+                pass
+
+        return False
 
     async def save_screenshot(self, path: Path) -> Path:
         """Save screenshot to file and return path."""

@@ -153,10 +153,26 @@ export async function getTest(id: number): Promise<TestItem> {
 
 // -- Scenario Conversion --
 
+export interface ValidationItem {
+  scenario_idx: number;
+  step: number;
+  status: "verified" | "unverified";
+  target_text: string;
+  closest_match?: string | null;
+}
+
+export interface ValidationSummary {
+  verified: number;
+  total: number;
+  percent: number;
+}
+
 export interface ConvertScenarioResult {
   scenario_yaml: string;
   scenarios_count: number;
   steps_total: number;
+  validation: ValidationItem[];
+  validation_summary: ValidationSummary | null;
 }
 
 export async function convertScenario(
@@ -299,12 +315,21 @@ export async function generateScanPlan(
   return res.json();
 }
 
+export interface ExecuteScanResult {
+  test_id: number;
+  scenario_yaml: string;
+  scenarios_count: number;
+  steps_total: number;
+  validation: ValidationItem[];
+  validation_summary: ValidationSummary | null;
+}
+
 export async function executeScanTests(
   scanId: number,
   selectedTests: string[],
   authData: Record<string, string> = {},
   testData: Record<string, string> = {}
-): Promise<{ test_id: number; scenario_yaml: string; scenarios_count: number; steps_total: number }> {
+): Promise<ExecuteScanResult> {
   const res = await authFetch(`/api/scan/${scanId}/execute`, {
     method: "POST",
     body: JSON.stringify({

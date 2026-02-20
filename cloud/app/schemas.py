@@ -21,12 +21,32 @@ class ConvertScenarioRequest(BaseModel):
     language: Literal["ko", "en"] = "en"
 
 
+class ValidationItem(BaseModel):
+    """Per-step validation result."""
+
+    scenario_idx: int
+    step: int
+    status: Literal["verified", "unverified"]
+    target_text: str
+    closest_match: str | None = None
+
+
+class ValidationSummary(BaseModel):
+    """Overall validation summary."""
+
+    verified: int
+    total: int
+    percent: int
+
+
 class ConvertScenarioResponse(BaseModel):
     """POST /api/scenarios/convert response body."""
 
     scenario_yaml: str
     scenarios_count: int
     steps_total: int
+    validation: list[ValidationItem] = []
+    validation_summary: ValidationSummary | None = None
 
 
 # -- Requests --

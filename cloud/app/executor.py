@@ -485,6 +485,9 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
                     step_results.append({
                         "step": i + 1,
                         "action": result.action if hasattr(result, "action") else str(step.action),
+                        "description": step.description or None,
+                        "target": step.target.text if step.target and step.target.text else None,
+                        "value": step.value if step.action == ActionType.NAVIGATE else None,
                         "status": status,
                         "elapsed_ms": elapsed,
                         "error": error_msg if status == "failed" else None,
@@ -528,6 +531,9 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
                     step_results.append({
                         "step": i + 1,
                         "action": str(step.action),
+                        "description": step.description or None,
+                        "target": step.target.text if step.target and step.target.text else None,
+                        "value": step.value if step.action == ActionType.NAVIGATE else None,
                         "status": "error",
                         "error": err_msg,
                         "screenshot_before": ss_before,
@@ -556,6 +562,9 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
                     step_results.append({
                         "step": i + 1,
                         "action": str(step.action),
+                        "description": step.description or None,
+                        "target": step.target.text if step.target and step.target.text else None,
+                        "value": step.value if step.action == ActionType.NAVIGATE else None,
                         "status": "error",
                         "error": err_msg,
                         "screenshot_before": ss_before,

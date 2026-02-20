@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
 import logging
 import time
@@ -146,10 +147,11 @@ FEATURE_DETECTORS: dict[str, dict[str, Any]] = {
         "threshold": 0.5,
     },
     "multilingual": {
-        "strong": [],
-        "weak": ["[class*=lang-switch]", "[class*=language]", "select[name*=lang]"],
+        "strong": ["link[hreflang]"],
+        "weak": ["[class*=lang-switch]", "[class*=language]", "select[name*=lang]",
+                 "[data-lang]", "[class*=locale]"],
         "confirm_texts": [],
-        "link_texts": ["english", "한국어", "language", "언어"],
+        "link_texts": ["english", "한국어", "language", "언어", "日本語", "中文", "EN", "KR", "JP"],
         "link_hrefs": [],
         "threshold": 0.5,
     },
@@ -168,6 +170,15 @@ FEATURE_DETECTORS: dict[str, dict[str, Any]] = {
         "link_texts": [],
         "link_hrefs": [],
         "threshold": 0.5,
+    },
+    "sticky_header": {
+        "strong": [],
+        "weak": ["[class*=sticky]", "[class*=fixed-header]", "[class*=fixed-nav]",
+                 "[class*=navbar-fixed]", "[class*=header-fixed]"],
+        "confirm_texts": [],
+        "link_texts": [],
+        "link_hrefs": [],
+        "threshold": 0.3,
     },
 }
 
@@ -305,31 +316,48 @@ async def _extract_page_data(page: Any, url: str, *, take_screenshot: bool = Tru
         "screenshot_base64": None,
     }
 
-    # Extract links
+    # Extract links (with is_anchor flag for hash-only links)
     try:
         links = await page.evaluate("""() => {
-            return Array.from(document.querySelectorAll('a[href]')).map(a => ({
-                text: (a.textContent || '').trim().substring(0, 200),
-                href: a.href,
-                visible: a.offsetParent !== null || a.offsetWidth > 0 || a.offsetHeight > 0,
-                selector: a.id ? '#' + a.id : (a.className ? 'a.' + a.className.split(' ')[0] : null)
-            })).filter(l => l.text || l.href)
+            return Array.from(document.querySelectorAll('a[href]')).map(a => {
+                const rawHref = a.getAttribute('href') || '';
+                const isAnchor = rawHref.startsWith('#') && rawHref.length > 1;
+                return {
+                    text: (a.textContent || '').trim().substring(0, 200),
+                    href: a.href,
+                    visible: a.offsetParent !== null || a.offsetWidth > 0 || a.offsetHeight > 0,
+                    selector: a.id ? '#' + a.id : (a.className ? 'a.' + a.className.split(' ')[0] : null),
+                    is_anchor: isAnchor
+                };
+            }).filter(l => l.text || l.href)
         }""")
         data["links"] = links[:200]  # cap
     except Exception:
         pass
 
-    # Extract forms
+    # Extract forms (with label + aria-label for multilingual support)
     try:
         forms = await page.evaluate("""() => {
             return Array.from(document.querySelectorAll('form')).map(form => {
-                const fields = Array.from(form.querySelectorAll('input, textarea, select')).map(f => ({
-                    name: f.name || f.id || '',
-                    type: f.type || f.tagName.toLowerCase(),
-                    placeholder: f.placeholder || '',
-                    required: f.required,
-                    selector: f.id ? '#' + f.id : (f.name ? `[name="${f.name}"]` : null)
-                })).filter(f => f.type !== 'hidden');
+                const fields = Array.from(form.querySelectorAll('input, textarea, select')).map(f => {
+                    const labelEl = f.id ? document.querySelector(`label[for="${f.id}"]`) : null;
+                    const parentLabel = !labelEl ? f.closest('label') : null;
+                    const labelNode = labelEl || parentLabel;
+                    const label = labelNode
+                        ? (labelNode.childNodes[0]?.textContent?.trim() ||
+                           labelNode.textContent.trim().substring(0, 100))
+                        : '';
+                    const ariaLabel = f.getAttribute('aria-label') || '';
+                    return {
+                        name: f.name || f.id || '',
+                        type: f.type || f.tagName.toLowerCase(),
+                        placeholder: f.placeholder || '',
+                        required: f.required,
+                        selector: f.id ? '#' + f.id : (f.name ? `[name="${f.name}"]` : null),
+                        label: label,
+                        aria_label: ariaLabel
+                    };
+                }).filter(f => f.type !== 'hidden');
                 return {
                     action: form.action || '',
                     method: (form.method || 'get').toUpperCase(),
@@ -405,6 +433,37 @@ async def _extract_page_data(page: Any, url: str, *, take_screenshot: bool = Tru
             })).filter(f => f.type !== 'hidden');
         }""")
         data["inputs"] = inputs[:30]
+    except Exception:
+        pass
+
+    # Detect sticky/fixed header via computed styles
+    try:
+        has_sticky = await page.evaluate("""() => {
+            const els = [...document.querySelectorAll('nav, header, [role=navigation]')];
+            return els.some(el => {
+                const s = getComputedStyle(el);
+                return s.position === 'fixed' || s.position === 'sticky';
+            });
+        }""")
+        data["has_sticky_header"] = has_sticky
+    except Exception:
+        pass
+
+    # Extract language info (for multilingual detection)
+    try:
+        lang_info = await page.evaluate("""() => {
+            const htmlLang = document.documentElement.lang || '';
+            const hreflangs = Array.from(document.querySelectorAll('link[hreflang]'))
+                .map(l => ({ lang: l.hreflang, href: l.href }));
+            const langSwitchers = Array.from(document.querySelectorAll(
+                '[class*=lang], [class*=language], [data-lang], [aria-label*=language]'
+            )).map(el => ({
+                text: el.textContent.trim().substring(0, 50),
+                selector: el.id ? '#' + el.id : null
+            })).filter(el => el.text);
+            return { html_lang: htmlLang, hreflangs: hreflangs, lang_switchers: langSwitchers };
+        }""")
+        data["language_info"] = lang_info
     except Exception:
         pass
 
@@ -557,6 +616,7 @@ async def crawl_site(
     all_links: set[str] = set()
     all_features: dict[str, float] = {}  # feature → confidence
     broken_links: list[dict] = []
+    all_observations: list[dict] = []  # observation-based interaction records
     total_forms = 0
     total_buttons = 0
     total_nav_menus = 0
@@ -646,6 +706,28 @@ async def crawl_site(
                             "confidence": fconf,
                         })
 
+            # Observe interactions — click elements and record changes
+            remaining_time = total_timeout - (time.monotonic() - start_time)
+            if remaining_time > 30:  # only if enough time left
+                try:
+                    page_observations = await _observe_interactions(
+                        page, page_data, url,
+                        max_interactions=15,
+                        ws=ws, scan_id=scan_id,
+                    )
+                    all_observations.extend(page_observations)
+                    page_data["observations"] = page_observations
+                except Exception as exc:
+                    logger.debug("Observation phase failed for %s: %s", url, exc)
+                    # Restore page to original URL
+                    try:
+                        if page.url != url:
+                            await page.goto(
+                                url, wait_until="domcontentloaded", timeout=8000
+                            )
+                    except Exception:
+                        pass
+
             # Collect links for BFS
             for link in page_data.get("links", []):
                 href = link.get("href", "")
@@ -670,6 +752,7 @@ async def crawl_site(
                     "forms_found": total_forms,
                     "buttons_found": total_buttons,
                     "features": list(all_features.keys()),
+                    "observations_count": len(all_observations),
                 })
 
         # Check for broken external links (sample up to 10)
@@ -695,6 +778,28 @@ async def crawl_site(
         except Exception:
             pass
 
+    # Post-crawl: SPA detection — if most internal links are anchor-only (#section)
+    anchor_count = 0
+    internal_link_count = 0
+    for p in pages:
+        for link in p.get("links", []):
+            href = link.get("href", "")
+            if href and urlparse(href).netloc == base_domain:
+                internal_link_count += 1
+                if link.get("is_anchor"):
+                    anchor_count += 1
+    if internal_link_count > 0 and (anchor_count / internal_link_count) > 0.5:
+        all_features["spa"] = 0.8
+    elif len(visited) == 1 and internal_link_count > 2:
+        # Only 1 page crawled but has many internal links → likely SPA
+        all_features["spa"] = 0.6
+
+    # Post-crawl: sticky_header from JS detection (supplement CSS-based detection)
+    for p in pages:
+        if p.get("has_sticky_header"):
+            all_features.setdefault("sticky_header", 0.9)
+            break
+
     # Build features list with confidence
     features_with_confidence = [
         {"feature": f, "confidence": c}
@@ -714,6 +819,7 @@ async def crawl_site(
         "broken_links": len(broken_links),
         "detected_features": feature_names,
         "site_type": site_type,
+        "total_observations": len(all_observations),
     }
 
     # NOTE: scan_complete is NOT broadcast here.
@@ -726,7 +832,294 @@ async def crawl_site(
         "broken_links": broken_links,
         "detected_features": feature_names,
         "features_with_confidence": features_with_confidence,
+        "observations": all_observations,
     }
+
+
+# ---------------------------------------------------------------------------
+# Observation-based interaction recording
+# ---------------------------------------------------------------------------
+
+
+def _compute_screenshot_diff(before: bytes, after: bytes) -> float:
+    """Compute percentage of pixels that differ between two screenshots.
+
+    Resizes to thumbnails for fast comparison. Uses PIL if available.
+    """
+    if before == after:
+        return 0.0
+    try:
+        from PIL import Image
+
+        thumb = (160, 120)
+        img1 = Image.open(io.BytesIO(before)).convert("RGB").resize(thumb)
+        img2 = Image.open(io.BytesIO(after)).convert("RGB").resize(thumb)
+        b1 = img1.tobytes()
+        b2 = img2.tobytes()
+        if len(b1) != len(b2):
+            return 50.0
+        total = len(b1) // 3
+        diff = 0
+        for i in range(0, len(b1), 3):
+            if (
+                abs(b1[i] - b2[i]) > 30
+                or abs(b1[i + 1] - b2[i + 1]) > 30
+                or abs(b1[i + 2] - b2[i + 2]) > 30
+            ):
+                diff += 1
+        return round((diff / total) * 100, 1) if total else 0.0
+    except ImportError:
+        return 50.0
+
+
+async def _observe_single_click(
+    page: Any,
+    element: dict[str, Any],
+    original_url: str,
+) -> dict[str, Any] | None:
+    """Click a single element and observe what happens.
+
+    Returns observation dict or None if element is not clickable.
+    """
+    text = element.get("text", "")
+
+    # 1. Before state
+    before_url = page.url
+    try:
+        before_body = await page.inner_text("body")
+        before_lines = set(line.strip() for line in before_body.split("\n") if line.strip())
+    except Exception:
+        before_lines = set()
+    before_png = await page.screenshot(type="png", full_page=False)
+
+    # 2. Click the element
+    clicked = False
+    try:
+        # Try selector first
+        sel = element.get("selector")
+        if sel:
+            loc = page.locator(sel).first
+            if await loc.count() > 0 and await loc.is_visible(timeout=1500):
+                await loc.click(timeout=3000)
+                clicked = True
+        # Try text-based
+        if not clicked:
+            loc = page.get_by_role("link", name=text).first
+            if await loc.count() > 0:
+                await loc.click(timeout=3000)
+                clicked = True
+        if not clicked:
+            loc = page.get_by_role("button", name=text).first
+            if await loc.count() > 0:
+                await loc.click(timeout=3000)
+                clicked = True
+        if not clicked:
+            loc = page.get_by_text(text, exact=True).first
+            if await loc.count() > 0:
+                await loc.click(timeout=3000)
+                clicked = True
+    except Exception:
+        return None
+    if not clicked:
+        return None
+
+    # 3. Wait for changes
+    await asyncio.sleep(0.8)
+    try:
+        await page.wait_for_load_state("networkidle", timeout=3000)
+    except Exception:
+        pass
+
+    # 4. After state
+    after_url = page.url
+    try:
+        after_body = await page.inner_text("body")
+        after_lines = set(line.strip() for line in after_body.split("\n") if line.strip())
+    except Exception:
+        after_lines = set()
+    after_png = await page.screenshot(type="png", full_page=False)
+
+    # 5. Detect new visible dialogs/modals
+    new_elements: list[str] = []
+    try:
+        new_elements = await page.evaluate("""() => {
+            const sels = [
+                '[role=dialog]', '[class*=modal]', '[class*=popup]',
+                '[class*=overlay]', '[class*=drawer]', '[class*=dropdown]'
+            ];
+            const found = [];
+            for (const s of sels) {
+                document.querySelectorAll(s).forEach(el => {
+                    if (el.offsetParent !== null || el.offsetWidth > 0) {
+                        found.push(el.id ? '#' + el.id
+                            : el.className ? '.' + el.className.split(' ')[0]
+                            : el.tagName.toLowerCase());
+                    }
+                });
+            }
+            return [...new Set(found)];
+        }""")
+    except Exception:
+        pass
+
+    # 6. Classify change
+    before_parsed = urlparse(before_url)
+    after_parsed = urlparse(after_url)
+    path_changed = (
+        before_parsed.path != after_parsed.path
+        or before_parsed.query != after_parsed.query
+    )
+    hash_changed = before_parsed.fragment != after_parsed.fragment
+
+    new_text = sorted(after_lines - before_lines)[:15]
+    diff_pct = _compute_screenshot_diff(before_png, after_png)
+
+    if path_changed:
+        change_type = "page_navigation"
+    elif len(new_elements) > 0:
+        change_type = "modal_opened"
+    elif hash_changed:
+        change_type = "anchor_scroll"
+    elif len(new_text) > 3 or diff_pct > 20:
+        change_type = "section_change"
+    elif diff_pct < 2 and len(new_text) == 0:
+        change_type = "no_change"
+    else:
+        change_type = "minor_change"
+
+    observation: dict[str, Any] = {
+        "element": {
+            "text": text,
+            "selector": element.get("selector"),
+            "type": element.get("type"),
+        },
+        "before": {
+            "url": before_url,
+        },
+        "action": "click",
+        "after": {
+            "url": after_url,
+        },
+        "observed_change": {
+            "type": change_type,
+            "url_changed": before_url != after_url,
+            "new_elements": new_elements,
+            "new_text": new_text,
+            "screenshot_diff_percent": diff_pct,
+        },
+    }
+
+    # 7. Restore state
+    try:
+        if path_changed:
+            await page.goto(original_url, wait_until="domcontentloaded", timeout=8000)
+        elif change_type == "modal_opened":
+            await page.keyboard.press("Escape")
+            await asyncio.sleep(0.3)
+        elif hash_changed:
+            await page.goto(original_url, wait_until="domcontentloaded", timeout=5000)
+    except Exception:
+        try:
+            await page.goto(original_url, wait_until="domcontentloaded", timeout=8000)
+        except Exception:
+            pass
+
+    return observation
+
+
+async def _observe_interactions(
+    page: Any,
+    page_data: dict,
+    original_url: str,
+    *,
+    max_interactions: int = 15,
+    ws: WSManager | None = None,
+    scan_id: int = 0,
+) -> list[dict[str, Any]]:
+    """Click interactive elements on a page and observe what happens.
+
+    Prioritizes: nav items > buttons > visible links.
+    Returns list of observation records with change classification.
+    """
+    clickable: list[dict[str, Any]] = []
+
+    # 1. Nav menu items (highest priority)
+    for nav in page_data.get("nav_menus", []):
+        for item in nav.get("items", []):
+            txt = (item.get("text") or "").strip()
+            if txt and len(txt) < 50:
+                clickable.append({
+                    "text": txt,
+                    "href": item.get("href", ""),
+                    "selector": item.get("selector"),
+                    "type": "nav_item",
+                })
+
+    # 2. Buttons (skip generic ones like hamburger icons)
+    for btn in page_data.get("buttons", []):
+        txt = (btn.get("text") or "").strip()
+        if txt and len(txt) < 50 and len(txt) > 1:
+            clickable.append({
+                "text": txt,
+                "selector": btn.get("selector"),
+                "type": "button",
+            })
+
+    # 3. Visible links not already in nav
+    nav_texts = {c["text"].lower() for c in clickable if c["type"] == "nav_item"}
+    for link in page_data.get("links", []):
+        txt = (link.get("text") or "").strip()
+        if (
+            txt
+            and len(txt) < 50
+            and len(txt) > 1
+            and txt.lower() not in nav_texts
+            and link.get("visible")
+        ):
+            href = link.get("href", "")
+            # Skip external links, mailto, javascript
+            if href and not href.startswith("javascript:") and not href.startswith("mailto:"):
+                clickable.append({
+                    "text": txt,
+                    "href": href,
+                    "selector": link.get("selector"),
+                    "type": "link",
+                })
+
+    # Deduplicate by text
+    seen_text: set[str] = set()
+    unique: list[dict[str, Any]] = []
+    for c in clickable:
+        key = c["text"].lower()
+        if key not in seen_text:
+            seen_text.add(key)
+            unique.append(c)
+    clickable = unique[:max_interactions]
+
+    observations: list[dict[str, Any]] = []
+    for elem in clickable:
+        try:
+            obs = await _observe_single_click(page, elem, original_url)
+            if obs:
+                observations.append(obs)
+                if ws:
+                    await ws.broadcast(scan_id, {
+                        "type": "element_observed",
+                        "element_text": elem.get("text", ""),
+                        "change_type": obs["observed_change"]["type"],
+                    })
+        except Exception as exc:
+            logger.debug("Observation failed for '%s': %s", elem.get("text"), exc)
+            # Restore state on error
+            try:
+                if page.url != original_url:
+                    await page.goto(
+                        original_url, wait_until="domcontentloaded", timeout=8000
+                    )
+            except Exception:
+                pass
+
+    return observations
 
 
 # ---------------------------------------------------------------------------

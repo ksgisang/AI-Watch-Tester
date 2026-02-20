@@ -10,6 +10,8 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from sqlalchemy import text
+
 from app.config import settings
 from app.database import engine
 from app.models import Base
@@ -73,6 +75,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # DB tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Add observations_json column if missing (SQLite doesn't auto-add)
+        try:
+            await conn.execute(text(
+                "ALTER TABLE scans ADD COLUMN observations_json TEXT"
+            ))
+            logger.info("Added observations_json column to scans table")
+        except Exception:
+            pass  # column already exists
 
     # Background worker
     from app.worker import worker
