@@ -189,7 +189,14 @@
     "runConverted": "Run Test",
     "cancelBtn": "Cancel Test",
     "cancelling": "Cancelling...",
-    "cancelled": "Test cancelled"
+    "cancelled": "Test cancelled",
+    "targetUrlLabel": "Target URL",
+    "refDocsLabel": "Reference Documents (Optional)",
+    "refDocsDesc": "Upload specs, API docs, etc. AI will reference them when generating scenarios.",
+    "refDocsFormats": "PDF, DOCX, MD, TXT, PNG, JPG (max 5MB, 3 files)",
+    "refDocsDropHint": "Drop files here or click to browse",
+    "refDocsMaxReached": "Maximum {max} documents allowed. Delete an existing one first.",
+    "refDocsUploading": "Uploading..."
   },
   "tests": {
     "title": "Test History",
@@ -470,7 +477,8 @@
     "validationSummary": "{verified}/{total} steps verified ({percent}%)",
     "validationVerified": "Verified",
     "validationUnverified": "Unverified",
-    "validationLowQuality": "Scenario quality is low. Consider writing custom scenarios instead."
+    "validationLowQuality": "Scenario quality is low. Consider writing custom scenarios instead.",
+    "scanLogTitle": "Scan Detail Log"
   },
   "metadata_extra": {
     "pricingTitle": "Pricing",

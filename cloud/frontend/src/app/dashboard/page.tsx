@@ -9,8 +9,9 @@ import ScenarioEditor from "@/components/ScenarioEditor";
 import {
   createTest, getTest, fetchBilling, convertScenario, cancelTest,
   startScan, getScan, generateScanPlan, executeScanTests, connectScanWS,
+  listDocuments, uploadUserDocument, deleteDocument,
   type TestItem, type BillingInfo, type ScanItem, type TestPlanCategory,
-  type ValidationItem, type ValidationSummary,
+  type ValidationItem, type ValidationSummary, type DocumentItem,
 } from "@/lib/api";
 import { translateApiError } from "@/lib/errorMessages";
 
@@ -58,11 +59,34 @@ export default function DashboardPage() {
   const scanWsRef = useRef<WebSocket | null>(null);
   // Track whether plan generation was already triggered to avoid double-calls
   const planTriggeredRef = useRef(false);
+  // Document upload state
+  const [userDocs, setUserDocs] = useState<DocumentItem[]>([]);
+  const [userDocsMax, setUserDocsMax] = useState(3);
+  const [docUploading, setDocUploading] = useState(false);
+  const [docError, setDocError] = useState("");
+  const [docDragOver, setDocDragOver] = useState(false);
+  const docInputRef = useRef<HTMLInputElement>(null);
+  // Scan log state
+  const [scanLogs, setScanLogs] = useState<{ phase: string; message: string; level?: string; ts: number }[]>([]);
+  const scanLogRef = useRef<HTMLDivElement>(null);
 
-  // Fetch billing info
+  // Auto-scroll scan log
+  useEffect(() => {
+    if (scanLogRef.current) {
+      scanLogRef.current.scrollTop = scanLogRef.current.scrollHeight;
+    }
+  }, [scanLogs]);
+
+  // Fetch billing info + documents
   useEffect(() => {
     if (user) {
       fetchBilling().then(setBilling).catch(() => {});
+      listDocuments()
+        .then((res) => {
+          setUserDocs(res.documents);
+          setUserDocsMax(res.max_allowed);
+        })
+        .catch(() => {});
     }
   }, [user]);
 
@@ -171,6 +195,7 @@ export default function DashboardPage() {
     setScanPhase("scanning");
     planTriggeredRef.current = false;
     setScanProgress({ pages: 0, max: 5, links: 0, forms: 0, buttons: 0, features: [], currentUrl: "" });
+    setScanLogs([]);
     setPlanCategories([]);
     setSelectedTests(new Set());
     setAuthData({});
@@ -206,6 +231,16 @@ export default function DashboardPage() {
             features: (data.features as string[]) || prev.features,
             currentUrl: (data.url as string) || prev.currentUrl,
           }));
+        } else if (type === "scan_log") {
+          setScanLogs((prev) => [
+            ...prev,
+            {
+              phase: (data.phase as string) || "",
+              message: (data.message as string) || "",
+              level: (data.level as string) || undefined,
+              ts: Date.now(),
+            },
+          ]);
         } else if (type === "feature_detected") {
           setScanProgress((prev) => ({
             ...prev,
@@ -360,6 +395,50 @@ export default function DashboardPage() {
     sticky_header: ts("featureStickyHeader"),
   };
 
+  // -- Document handlers --
+  const handleDocUpload = async (file: File) => {
+    setDocError("");
+    setDocUploading(true);
+    try {
+      const doc = await uploadUserDocument(file);
+      setUserDocs((prev) => [doc, ...prev]);
+    } catch (err) {
+      setDocError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setDocUploading(false);
+    }
+  };
+
+  const handleDocDelete = async (docId: number) => {
+    try {
+      await deleteDocument(docId);
+      setUserDocs((prev) => prev.filter((d) => d.id !== docId));
+    } catch (err) {
+      setDocError(err instanceof Error ? err.message : "Delete failed");
+    }
+  };
+
+  const handleDocDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDocDragOver(false);
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) handleDocUpload(files[0]);
+  };
+
+  const handleDocInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      handleDocUpload(files[0]);
+      e.target.value = "";
+    }
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes}B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+  };
+
   const isBusy = submitting || (phase !== "idle" && phase !== "done");
 
   const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:|\/|$)/.test(url);
@@ -421,14 +500,17 @@ export default function DashboardPage() {
 
       {/* URL Input */}
       <div className="mb-6 space-y-3">
-        <div className="flex gap-2">
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-gray-700">
+            {t("targetUrlLabel")}
+          </label>
           <input
             type="url"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             required
             placeholder={t("urlPlaceholder")}
-            className="flex-1 rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none"
+            className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none"
           />
         </div>
 
@@ -442,6 +524,86 @@ export default function DashboardPage() {
             </a>
           </div>
         )}
+
+        {/* Reference Documents */}
+        <div>
+          <label className="mb-1 block text-sm font-medium text-gray-700">
+            {t("refDocsLabel")}
+          </label>
+          <p className="mb-2 text-xs text-gray-400">{t("refDocsDesc")}</p>
+
+          {/* Uploaded file list */}
+          {userDocs.length > 0 && (
+            <div className="mb-2 space-y-1.5">
+              {userDocs.map((doc) => (
+                <div
+                  key={doc.id}
+                  className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-sm">&#128196;</span>
+                    <span className="truncate text-sm text-gray-700">{doc.filename}</span>
+                    <span className="shrink-0 text-xs text-gray-400">
+                      {formatFileSize(doc.size_bytes)}
+                    </span>
+                    {doc.extracted_chars > 0 && (
+                      <span className="shrink-0 text-[10px] text-green-600">
+                        {doc.extracted_chars.toLocaleString()} chars
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDocDelete(doc.id)}
+                    className="ml-2 shrink-0 text-gray-400 hover:text-red-500 text-sm"
+                    title="Delete"
+                  >
+                    &#10005;
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Drop zone */}
+          {userDocs.length < userDocsMax ? (
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDocDragOver(true); }}
+              onDragLeave={() => setDocDragOver(false)}
+              onDrop={handleDocDrop}
+              onClick={() => docInputRef.current?.click()}
+              className={`cursor-pointer rounded-lg border-2 border-dashed px-4 py-3 text-center transition-colors ${
+                docDragOver
+                  ? "border-blue-400 bg-blue-50"
+                  : "border-gray-200 hover:border-gray-300"
+              }`}
+            >
+              {docUploading ? (
+                <p className="text-sm text-gray-500">{t("refDocsUploading")}</p>
+              ) : (
+                <>
+                  <p className="text-sm text-gray-500">{t("refDocsDropHint")}</p>
+                  <p className="mt-0.5 text-[10px] text-gray-400">{t("refDocsFormats")}</p>
+                </>
+              )}
+              <input
+                ref={docInputRef}
+                type="file"
+                className="hidden"
+                accept=".md,.txt,.pdf,.docx,.png,.jpg,.jpeg"
+                onChange={handleDocInputChange}
+              />
+            </div>
+          ) : (
+            <p className="text-xs text-amber-600">
+              {t("refDocsMaxReached", { max: userDocsMax })}
+            </p>
+          )}
+
+          {docError && (
+            <p className="mt-1 text-xs text-red-500">{docError}</p>
+          )}
+        </div>
 
         {/* Tabs */}
         <div className="flex border-b border-gray-200">
@@ -607,6 +769,38 @@ export default function DashboardPage() {
                         {featureLabels[f] || f}
                       </span>
                     ))}
+                  </div>
+                )}
+                {/* Scan log area */}
+                {scanLogs.length > 0 && (
+                  <div className="mt-2">
+                    <p className="mb-1 text-[10px] font-medium text-teal-700 uppercase">{ts("scanLogTitle")}</p>
+                    <div
+                      ref={scanLogRef}
+                      className="max-h-40 overflow-y-auto rounded border border-teal-200 bg-white/60 px-3 py-2 text-[11px] font-mono leading-relaxed"
+                    >
+                      {scanLogs.map((log, i) => {
+                        const phaseIcons: Record<string, string> = {
+                          navigate: "\uD83C\uDF10",
+                          extract: "\uD83D\uDD0D",
+                          feature: "\u2699\uFE0F",
+                          observe: "\uD83D\uDC41",
+                          links: "\uD83D\uDD17",
+                        };
+                        const icon = phaseIcons[log.phase] || "\u25B6";
+                        const color = log.level === "error"
+                          ? "text-red-600"
+                          : log.level === "warn"
+                          ? "text-amber-600"
+                          : "text-gray-700";
+                        return (
+                          <div key={i} className={`${color} ${log.message.startsWith("  →") ? "ml-4" : ""}`}>
+                            {!log.message.startsWith("  →") && <span className="mr-1">{icon}</span>}
+                            {log.message}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
               </div>

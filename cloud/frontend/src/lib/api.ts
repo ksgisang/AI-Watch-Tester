@@ -484,4 +484,54 @@ export function getCheckoutUrl(plan: "pro" | "team", userId: string): string {
   return `${base}${sep}checkout[custom][user_id]=${encodeURIComponent(userId)}`;
 }
 
+// -- User Documents (reference docs) --
+
+export interface DocumentItem {
+  id: number;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  extracted_chars: number;
+  created_at: string;
+}
+
+export interface DocumentListResponse {
+  documents: DocumentItem[];
+  count: number;
+  max_allowed: number;
+}
+
+export async function listDocuments(): Promise<DocumentListResponse> {
+  const res = await authFetch("/api/documents");
+  if (!res.ok) throw new Error(`Error ${res.status}`);
+  return res.json();
+}
+
+export async function uploadUserDocument(file: File): Promise<DocumentItem> {
+  const token = await getToken();
+  if (!token) throw new Error("Not authenticated");
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch(`${API_URL}/api/documents/upload`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || `Error ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function deleteDocument(id: number): Promise<void> {
+  const res = await authFetch(`/api/documents/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || `Error ${res.status}`);
+  }
+}
+
 export { API_URL };

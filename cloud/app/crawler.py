@@ -656,6 +656,13 @@ async def crawl_site(
             visited.add(normalized)
 
             # Navigate to page
+            page_start = time.monotonic()
+            if ws:
+                await ws.broadcast(scan_id, {
+                    "type": "scan_log",
+                    "phase": "navigate",
+                    "message": f"페이지 접속 중... {url}",
+                })
             try:
                 response = await page.goto(
                     url, wait_until="domcontentloaded", timeout=10000
@@ -663,11 +670,25 @@ async def crawl_site(
             except Exception as exc:
                 logger.debug("Scan %d: failed to navigate %s: %s", scan_id, url, exc)
                 broken_links.append({"url": url, "status": 0, "error": str(exc)[:200]})
+                if ws:
+                    await ws.broadcast(scan_id, {
+                        "type": "scan_log",
+                        "phase": "navigate",
+                        "level": "error",
+                        "message": f"페이지 접속 실패: {str(exc)[:100]}",
+                    })
                 continue
 
             # Check response status
             if response and response.status >= 400:
                 broken_links.append({"url": url, "status": response.status})
+                if ws:
+                    await ws.broadcast(scan_id, {
+                        "type": "scan_log",
+                        "phase": "navigate",
+                        "level": "warn",
+                        "message": f"HTTP {response.status} 에러: {url}",
+                    })
                 continue
 
             # Wait for page to stabilize
@@ -676,10 +697,37 @@ async def crawl_site(
             except Exception:
                 pass  # proceed even if network isn't fully idle
 
+            page_load_time = round(time.monotonic() - page_start, 1)
+            if ws:
+                title = await page.title() if page else ""
+                await ws.broadcast(scan_id, {
+                    "type": "scan_log",
+                    "phase": "navigate",
+                    "message": f"페이지 로드 완료 ({page_load_time}초) — {title or url}",
+                })
+
             # Extract page data
+            if ws:
+                await ws.broadcast(scan_id, {
+                    "type": "scan_log",
+                    "phase": "extract",
+                    "message": "DOM 요소 수집 중...",
+                })
             take_ss = len(pages) < screenshot_limit
             page_data = await _extract_page_data(page, url, take_screenshot=take_ss)
             pages.append(page_data)
+
+            # Report DOM stats
+            n_links = len(page_data.get("links", []))
+            n_forms = len(page_data.get("forms", []))
+            n_buttons = len(page_data.get("buttons", []))
+            n_navs = len(page_data.get("nav_menus", []))
+            if ws:
+                await ws.broadcast(scan_id, {
+                    "type": "scan_log",
+                    "phase": "extract",
+                    "message": f"DOM 수집 완료: {n_buttons}개 버튼, {n_links}개 링크, {n_forms}개 폼, {n_navs}개 내비게이션",
+                })
 
             # Collect stats
             total_forms += len(page_data.get("forms", []))
@@ -687,6 +735,12 @@ async def crawl_site(
             total_nav_menus += len(page_data.get("nav_menus", []))
 
             # Detect features on this page
+            if ws:
+                await ws.broadcast(scan_id, {
+                    "type": "scan_log",
+                    "phase": "feature",
+                    "message": "사이트 기능 감지 중...",
+                })
             try:
                 page_text = await page.inner_text("body")
             except Exception:
@@ -709,6 +763,12 @@ async def crawl_site(
             # Observe interactions — click elements and record changes
             remaining_time = total_timeout - (time.monotonic() - start_time)
             if remaining_time > 30:  # only if enough time left
+                if ws:
+                    await ws.broadcast(scan_id, {
+                        "type": "scan_log",
+                        "phase": "observe",
+                        "message": "요소 관찰 시작 — 각 요소를 클릭하고 변화를 기록합니다...",
+                    })
                 try:
                     page_observations = await _observe_interactions(
                         page, page_data, url,
@@ -756,6 +816,12 @@ async def crawl_site(
                 })
 
         # Check for broken external links (sample up to 10)
+        if ws:
+            await ws.broadcast(scan_id, {
+                "type": "scan_log",
+                "phase": "links",
+                "message": "외부 링크 상태 확인 중...",
+            })
         external_links = [
             link.get("href", "")
             for p in pages
@@ -987,6 +1053,20 @@ async def _observe_single_click(
     else:
         change_type = "minor_change"
 
+    # Build access_path: how to reach and interact with this element
+    selector = element.get("selector")
+    if change_type == "page_navigation":
+        access_path = f"navigate to {before_url} → click {selector or text!r} → navigates to {after_url}"
+    elif change_type == "modal_opened":
+        modal_desc = ", ".join(new_elements[:3]) if new_elements else "modal"
+        access_path = f"navigate to {before_url} → click {selector or text!r} → {modal_desc} opens"
+    elif change_type == "anchor_scroll":
+        access_path = f"navigate to {before_url} → click {selector or text!r} → scrolls to section"
+    elif change_type == "section_change":
+        access_path = f"navigate to {before_url} → click {selector or text!r} → content changes"
+    else:
+        access_path = f"navigate to {before_url} → click {selector or text!r}"
+
     observation: dict[str, Any] = {
         "element": {
             "text": text,
@@ -1007,6 +1087,7 @@ async def _observe_single_click(
             "new_text": new_text,
             "screenshot_diff_percent": diff_pct,
         },
+        "access_path": access_path,
     }
 
     # 7. Restore state
@@ -1097,19 +1178,48 @@ async def _observe_interactions(
     clickable = unique[:max_interactions]
 
     observations: list[dict[str, Any]] = []
-    for elem in clickable:
+    for idx, elem in enumerate(clickable):
+        elem_text = elem.get("text", "")
+        if ws:
+            await ws.broadcast(scan_id, {
+                "type": "scan_log",
+                "phase": "observe",
+                "message": f"요소 관찰 중 [{idx + 1}/{len(clickable)}]: '{elem_text}' 클릭...",
+            })
         try:
             obs = await _observe_single_click(page, elem, original_url)
             if obs:
                 observations.append(obs)
+                change_type = obs["observed_change"]["type"]
+                _CHANGE_LABELS = {
+                    "page_navigation": "페이지 이동",
+                    "modal_opened": "모달/팝업 열림",
+                    "anchor_scroll": "섹션 스크롤",
+                    "section_change": "콘텐츠 변경",
+                    "no_change": "변화 없음",
+                    "minor_change": "미세 변화",
+                }
+                label = _CHANGE_LABELS.get(change_type, change_type)
                 if ws:
                     await ws.broadcast(scan_id, {
+                        "type": "scan_log",
+                        "phase": "observe",
+                        "message": f"  → 결과: {label}",
+                    })
+                    await ws.broadcast(scan_id, {
                         "type": "element_observed",
-                        "element_text": elem.get("text", ""),
-                        "change_type": obs["observed_change"]["type"],
+                        "element_text": elem_text,
+                        "change_type": change_type,
                     })
         except Exception as exc:
             logger.debug("Observation failed for '%s': %s", elem.get("text"), exc)
+            if ws:
+                await ws.broadcast(scan_id, {
+                    "type": "scan_log",
+                    "phase": "observe",
+                    "level": "warn",
+                    "message": f"  → 관찰 실패: {str(exc)[:80]}",
+                })
             # Restore state on error
             try:
                 if page.url != original_url:
@@ -1118,6 +1228,13 @@ async def _observe_interactions(
                     )
             except Exception:
                 pass
+
+    if ws and observations:
+        await ws.broadcast(scan_id, {
+            "type": "scan_log",
+            "phase": "observe",
+            "message": f"관찰 완료: {len(observations)}개 요소의 동작을 기록했습니다.",
+        })
 
     return observations
 

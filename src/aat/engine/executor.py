@@ -277,7 +277,8 @@ class StepExecutor:
     async def _find_and_act(self, step: StepConfig) -> MatchResult:
         """Find target and perform action: wait → match → action.
 
-        Fallback chain for text targets:
+        Fallback chain:
+        0. CSS selector (highest priority — from crawl observation data)
         1. find_text_position (+ synonyms)
         2. scroll_to_top + retry find_text_position
         3. force_click_by_text (JS click, bypasses sticky headers)
@@ -292,6 +293,21 @@ class StepExecutor:
             MatchError: If target not found.
         """
         target: TargetSpec = step.target  # type: ignore[assignment]
+
+        # Priority 0: CSS selector (from observation data)
+        if target.selector and hasattr(self._engine, "page"):
+            try:
+                page = self._engine.page
+                loc = page.locator(target.selector).first
+                if await loc.count() > 0:
+                    await loc.scroll_into_view_if_needed(timeout=3000)
+                    box = await loc.bounding_box()
+                    if box:
+                        x = int(box["x"] + box["width"] / 2)
+                        y = int(box["y"] + box["height"] / 2)
+                        return await self._act_at_pos(step, x, y, confidence=1.0)
+            except Exception:
+                pass  # fall through to text-based
 
         # Try Playwright native text search first (no screenshot needed)
         if target.text and hasattr(self._engine, "find_text_position"):

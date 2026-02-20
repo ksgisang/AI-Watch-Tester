@@ -486,7 +486,7 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
                         "step": i + 1,
                         "action": result.action if hasattr(result, "action") else str(step.action),
                         "description": step.description or None,
-                        "target": step.target.text if step.target and step.target.text else None,
+                        "target": step.target.selector or step.target.text if step.target else None,
                         "value": step.value if step.action == ActionType.NAVIGATE else None,
                         "status": status,
                         "elapsed_ms": elapsed,

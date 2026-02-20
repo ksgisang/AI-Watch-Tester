@@ -189,7 +189,14 @@
     "runConverted": "테스트 실행",
     "cancelBtn": "테스트 취소",
     "cancelling": "취소 중...",
-    "cancelled": "테스트가 취소되었습니다"
+    "cancelled": "테스트가 취소되었습니다",
+    "targetUrlLabel": "테스트 대상 URL",
+    "refDocsLabel": "참고 문서 (선택)",
+    "refDocsDesc": "기획서, API 문서 등을 업로드하면 AI가 시나리오 생성 시 참고합니다.",
+    "refDocsFormats": "PDF, DOCX, MD, TXT, PNG, JPG (최대 5MB, 3개)",
+    "refDocsDropHint": "파일을 여기에 드롭하거나 클릭하여 선택",
+    "refDocsMaxReached": "최대 {max}개까지 업로드 가능합니다. 기존 문서를 삭제해주세요.",
+    "refDocsUploading": "업로드 중..."
   },
   "tests": {
     "title": "테스트 기록",
@@ -470,7 +477,8 @@
     "validationSummary": "{verified}/{total} 스텝 검증됨 ({percent}%)",
     "validationVerified": "검증됨",
     "validationUnverified": "미확인",
-    "validationLowQuality": "시나리오 품질이 낮습니다. 커스텀 시나리오로 직접 작성을 추천합니다."
+    "validationLowQuality": "시나리오 품질이 낮습니다. 커스텀 시나리오로 직접 작성을 추천합니다.",
+    "scanLogTitle": "스캔 상세 로그"
   },
   "metadata_extra": {
     "pricingTitle": "요금제",

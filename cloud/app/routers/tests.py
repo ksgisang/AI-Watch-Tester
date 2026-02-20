@@ -343,6 +343,9 @@ The user wants to test the following on their website.
 ## Interaction Observations (REAL click results — DO NOT GUESS)
 {observations}
 
+## Reference Documents
+{reference_documents}
+
 ## CRITICAL Rules
 1. Convert the user's natural language description into concrete E2E test scenarios
 2. Generate 1-5 test scenarios covering the described flows
@@ -351,7 +354,11 @@ The user wants to test the following on their website.
    - Use real button labels, link text, menu names exactly as they appear
    - NEVER use generic placeholders like "menu1", "menu2", "button1"
    - NEVER guess what happens — use observed change types and new_text
-5. For click targets, use the `text` field with the exact visible label
+5. **SELECTOR-FIRST RULE**: For click/type targets, include BOTH "selector" AND "text":
+   - "selector": CSS selector from observation data (e.g., "a[href='#features']")
+   - "text": visible label text as fallback
+   - The test engine tries selector first, text as fallback
+   - Example: {{"selector": "a[href='#login']", "text": "로그인"}}
 6. For assertions, use the observed results:
    - If observation shows modal_opened → assert the observed new_text
    - If observation shows page_navigation → assert URL change
@@ -359,9 +366,14 @@ The user wants to test the following on their website.
 7. For form fields, use exact selectors/placeholders from page data
 8. Keep steps concise and actionable
 9. Use {{{{url}}}} as the base URL placeholder in navigate actions
+10. **ACCESS PATH**: Include navigation steps that match the observed access path.
+    If observation shows "click a[href='#login'] on homepage → modal opens",
+    the scenario MUST include: navigate → click a[href='#login'] → interact with modal
 
-Return the scenarios as a JSON array following the format specified \
-in the system instructions.\
+Return the scenarios as a JSON array. Each step target should include:
+- "selector": CSS selector from observation data (preferred)
+- "text": visible text label (fallback)
+Follow the format specified in the system instructions.\
 """
 
 
@@ -369,6 +381,7 @@ in the system instructions.\
 async def convert_scenario(
     body: ConvertScenarioRequest,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Convert natural language to AWT YAML scenario.
 
@@ -467,11 +480,17 @@ async def convert_scenario(
         except Exception:
             pass
 
+    # Fetch user reference documents
+    from app.routers.documents import get_user_doc_text
+
+    ref_docs = await get_user_doc_text(user.id, db)
+
     prompt = _CONVERT_PROMPT.format(
         url=body.target_url,
         user_prompt=body.user_prompt,
         page_data=page_data_str,
         observations=observations_str,
+        reference_documents=ref_docs or "No reference documents provided.",
     )
 
     try:

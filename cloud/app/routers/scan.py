@@ -435,6 +435,9 @@ CRITICAL RULES:
 ## Business Test Hints (based on site type)
 {business_hints}
 
+## Reference Documents
+{reference_documents}
+
 ## Special Instructions
 {special_instructions}
 
@@ -459,6 +462,12 @@ CATEGORY "business" - Business Flows (based on detected features):
 - Only for features actually detected in the crawl
 - Use the business test hints above as guidance
 
+IMPORTANT — SELECTOR-FIRST RULE:
+- For each test, include the exact CSS selectors from the observation data in "actual_elements".
+- The selectors from observations are PROVEN to work (they were actually clicked during crawling).
+- Tests will use these selectors to find elements, NOT text matching.
+- Include the access path: how to reach each element (e.g., "homepage → click a[href='#login'] → modal").
+
 For each test provide:
 {{
     "id": "t1",
@@ -470,7 +479,8 @@ For each test provide:
     "selected": true/false,
     "auth_fields": [],
     "test_data_fields": [],
-    "actual_elements": ["selector or text used"]
+    "actual_elements": ["selector or text used"],
+    "access_path": "homepage → click selector → result"
 }}
 
 Return ONLY valid JSON in this exact structure:
@@ -578,6 +588,11 @@ async def generate_plan(
     )
     special_instructions = "\n\n".join(special_parts)
 
+    # Fetch user reference documents
+    from app.routers.documents import get_user_doc_text
+
+    ref_docs = await get_user_doc_text(user.id, db)
+
     # Build AI prompt
     lang = "Korean" if body.language == "ko" else "English"
     prompt = _PLAN_PROMPT.format(
@@ -595,6 +610,7 @@ async def generate_plan(
         broken_count=len(broken),
         observations_json=_trunc_json(observations, 5000) if observations else "No observations collected.",
         business_hints=business_hints,
+        reference_documents=ref_docs or "No reference documents provided.",
         special_instructions=special_instructions,
     )
 
@@ -925,6 +941,9 @@ CRITICAL RULES:
 
 {extra_instructions}
 
+## Reference Documents
+{reference_documents}
+
 ## Target URL: {target_url}
 
 ## Crawl Data (navigation menus, forms, buttons)
@@ -944,13 +963,26 @@ For empty user data fields, use reasonable dummy data:
 - text fields: use contextually appropriate text
 - numbers: use reasonable values
 
+## SELECTOR-FIRST RULE (CRITICAL)
+When generating step targets, use the CSS selector from observation data as the PRIMARY target.
+Each step target MUST include "selector" if the observation data provides one.
+Example observation: element.selector = "a[href='#features']", element.text = "Features"
+→ Generate target as: {{"selector": "a[href='#features']", "text": "Features"}}
+The "selector" field is used first by the test engine; "text" is fallback only.
+
+## ACCESS PATH RULE
+Each scenario must include the exact navigation steps observed during crawling.
+If the observation shows: click "Login" button on homepage → modal opens
+→ Generate: step 1: navigate to homepage, step 2: click {{selector: "a[href='#login']"}}, step 3: interact with modal fields
+
 Generate scenario YAML as a JSON array of objects, each with:
 - id: string
 - name: string
 - steps: array of step objects with action, target, value, description
 
 Step actions: navigate, click, type, assert, wait
-For click/type, use "text" field with exact visible text, or "selector" field with CSS selector.
+For click/type targets, include BOTH "selector" (CSS selector from observation) AND "text" (visible label).
+The test engine tries selector first, text as fallback.
 For assert, use "text" field with text to verify and always include "case_insensitive": true.
 
 Return ONLY valid JSON array.\
@@ -1039,6 +1071,11 @@ async def execute_scan_tests(
         )
     extra_instructions = "\n".join(extra_parts) if extra_parts else ""
 
+    # Fetch user reference documents
+    from app.routers.documents import get_user_doc_text
+
+    ref_docs = await get_user_doc_text(user.id, db)
+
     prompt = _EXECUTE_PROMPT.format(
         target_url=scan.target_url,
         crawl_data=_trunc(crawl_context),
@@ -1049,6 +1086,7 @@ async def execute_scan_tests(
         selected_tests=_trunc(selected_details),
         user_data=json.dumps(user_data, ensure_ascii=False),
         extra_instructions=extra_instructions,
+        reference_documents=ref_docs or "No reference documents provided.",
     )
 
     try:

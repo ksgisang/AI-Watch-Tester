@@ -211,6 +211,30 @@ class ScanExecuteRequest(BaseModel):
     test_data: dict[str, str] = {}
 
 
+# -- Documents --
+
+
+class DocumentResponse(BaseModel):
+    """Single document in API responses."""
+
+    id: int
+    filename: str
+    content_type: str
+    size_bytes: int
+    extracted_chars: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DocumentListResponse(BaseModel):
+    """GET /api/documents response."""
+
+    documents: list[DocumentResponse]
+    count: int
+    max_allowed: int
+
+
 class ApiKeyCreate(BaseModel):
     """POST /api/keys request body."""
 

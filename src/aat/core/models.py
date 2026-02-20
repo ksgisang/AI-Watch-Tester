@@ -213,18 +213,19 @@ class IconHint(BaseModel):
 
 
 class TargetSpec(BaseModel):
-    """Match target. At least one of image, text, icon is required."""
+    """Match target. At least one of image, text, selector, icon is required."""
 
     image: str | None = Field(default=None, description="Target image relative path")
     text: str | None = Field(default=None, description="OCR fallback text")
+    selector: str | None = Field(default=None, description="CSS selector (highest priority)")
     icon: IconHint | None = Field(default=None, description="Icon hint (future)")
     match_method: MatchMethod | None = Field(default=None)
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
 
     @model_validator(mode="after")
     def at_least_one_target(self) -> TargetSpec:
-        if not self.image and not self.text and not self.icon:
-            msg = "TargetSpec requires at least one of: image, text, icon"
+        if not self.image and not self.text and not self.icon and not self.selector:
+            msg = "TargetSpec requires at least one of: image, text, selector, icon"
             raise ValueError(msg)
         return self
 
