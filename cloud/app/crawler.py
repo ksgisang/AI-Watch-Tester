@@ -849,10 +849,19 @@ async def crawl_site(
                 except Exception as exc:
                     logger.debug("Accordion phase failed for %s: %s", url, exc)
 
-            # Collect links for BFS
+            # Collect links for BFS (exclude file downloads)
+            _bfs_skip_exts = {
+                ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+                ".zip", ".rar", ".7z", ".tar", ".gz", ".csv", ".hwp",
+                ".hwpx", ".mp3", ".mp4", ".avi", ".mov", ".exe", ".dmg",
+            }
             for link in page_data.get("links", []):
                 href = link.get("href", "")
                 if not href or href.startswith("javascript:") or href.startswith("mailto:"):
+                    continue
+                # Skip file download links
+                link_path = urlparse(href).path.lower()
+                if any(link_path.endswith(ext) for ext in _bfs_skip_exts):
                     continue
                 abs_url = urljoin(url, href)
                 if urlparse(abs_url).netloc == base_domain:

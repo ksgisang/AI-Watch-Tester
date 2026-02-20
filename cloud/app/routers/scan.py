@@ -231,6 +231,180 @@ BUSINESS_TEMPLATES: dict[str, list[dict[str, Any]]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Feature → Required test mapping (post-plan validation)
+# If a feature is detected, the corresponding test MUST exist in the plan.
+# AI may miss these; this code-level check force-adds them.
+# ---------------------------------------------------------------------------
+
+_FEATURE_REQUIRED_TESTS: list[dict[str, Any]] = [
+    {
+        "feature": "login_form",
+        "keywords": ["로그인", "login", "sign in", "authentication"],
+        "test": {
+            "name_ko": "로그인 테스트",
+            "name_en": "Login Test",
+            "desc_ko": "로그인 페이지에서 이메일/비밀번호를 입력하고 로그인 성공 여부를 확인",
+            "desc_en": "Enter credentials on login page and verify successful authentication",
+            "priority": "high",
+            "estimated_time": 30,
+            "requires_auth": True,
+            "auth_fields": [
+                {"key": "email", "label": "이메일", "type": "email", "required": True},
+                {"key": "password", "label": "비밀번호", "type": "password", "required": True},
+            ],
+        },
+    },
+    {
+        "feature": "signup",
+        "keywords": ["회원가입", "signup", "sign up", "register"],
+        "test": {
+            "name_ko": "회원가입 흐름 테스트",
+            "name_en": "Signup Flow Test",
+            "desc_ko": "회원가입 폼을 작성하고 계정 생성 흐름을 확인",
+            "desc_en": "Complete signup form and verify account creation flow",
+            "priority": "high",
+            "estimated_time": 40,
+            "requires_auth": False,
+            "test_data_fields": [
+                {"key": "signup_email", "label": "테스트 이메일",
+                 "placeholder": "test@example.com", "required": True},
+                {"key": "signup_password", "label": "테스트 비밀번호",
+                 "placeholder": "TestPass123!", "required": True},
+            ],
+        },
+    },
+    {
+        "feature": "admin_panel",
+        "keywords": ["관리자", "admin", "manage"],
+        "test": {
+            "name_ko": "관리자 패널 접근 테스트",
+            "name_en": "Admin Panel Access Test",
+            "desc_ko": "관리자 페이지 접근 가능 여부와 권한 체크를 확인",
+            "desc_en": "Verify admin panel access and permission checks",
+            "priority": "medium",
+            "estimated_time": 20,
+            "requires_auth": True,
+            "auth_fields": [
+                {"key": "admin_id", "label": "관리자 ID", "type": "text", "required": True},
+                {"key": "admin_pw", "label": "관리자 비밀번호",
+                 "type": "password", "required": True},
+            ],
+        },
+    },
+    {
+        "feature": "search",
+        "keywords": ["검색", "search", "찾기"],
+        "test": {
+            "name_ko": "검색 기능 테스트",
+            "name_en": "Search Functionality Test",
+            "desc_ko": "검색어를 입력하고 결과가 표시되는지 확인",
+            "desc_en": "Enter search query and verify results are displayed",
+            "priority": "medium",
+            "estimated_time": 20,
+            "requires_auth": False,
+        },
+    },
+    {
+        "feature": "cart",
+        "keywords": ["장바구니", "cart", "basket"],
+        "test": {
+            "name_ko": "장바구니 테스트",
+            "name_en": "Cart Flow Test",
+            "desc_ko": "상품을 장바구니에 추가하고 장바구니 페이지에서 확인",
+            "desc_en": "Add product to cart and verify cart page shows item",
+            "priority": "high",
+            "estimated_time": 40,
+            "requires_auth": False,
+        },
+    },
+]
+
+
+def _validate_plan_against_features(
+    plan: dict[str, Any],
+    features: list[str],
+    language: str,
+) -> dict[str, Any]:
+    """Validate plan has tests for all detected features. Force-add if missing."""
+    ko = language.lower() in ("ko", "korean")
+    categories = plan.get("categories", [])
+    feature_set = set(features)
+
+    # Collect all existing test names (lowercase) across all categories
+    existing_names: set[str] = set()
+    for cat in categories:
+        for t in cat.get("tests", []):
+            existing_names.add((t.get("name") or "").lower())
+
+    # Find max test ID across all categories
+    max_tid = 0
+    for cat in categories:
+        for t in cat.get("tests", []):
+            tid_str = t.get("id", "")
+            num = "".join(c for c in tid_str if c.isdigit())
+            if num:
+                max_tid = max(max_tid, int(num))
+
+    added_tests: list[dict[str, Any]] = []
+    next_tid = max_tid + 1
+
+    for mapping in _FEATURE_REQUIRED_TESTS:
+        feat = mapping["feature"]
+        if feat not in feature_set:
+            continue
+
+        # Check if any existing test name contains a keyword
+        keywords = mapping["keywords"]
+        already_covered = any(
+            kw in name for kw in keywords for name in existing_names
+        )
+        if already_covered:
+            continue
+
+        # Force-add this test
+        tmpl = mapping["test"]
+        test_entry: dict[str, Any] = {
+            "id": f"t{next_tid}",
+            "name": tmpl["name_ko"] if ko else tmpl["name_en"],
+            "description": tmpl["desc_ko"] if ko else tmpl["desc_en"],
+            "priority": tmpl.get("priority", "medium"),
+            "estimated_time": tmpl.get("estimated_time", 30),
+            "requires_auth": tmpl.get("requires_auth", False),
+            "selected": not tmpl.get("requires_auth", False),
+        }
+        if tmpl.get("auth_fields"):
+            test_entry["auth_fields"] = tmpl["auth_fields"]
+        if tmpl.get("test_data_fields"):
+            test_entry["test_data_fields"] = tmpl["test_data_fields"]
+        added_tests.append(test_entry)
+        next_tid += 1
+        logger.info(
+            "Plan validation: force-added '%s' for detected feature '%s'",
+            test_entry["name"], feat,
+        )
+
+    if added_tests:
+        # Find or create "business" category
+        biz_cat = None
+        for cat in categories:
+            if cat.get("id") == "business":
+                biz_cat = cat
+                break
+        if biz_cat is None:
+            biz_cat = {
+                "id": "business",
+                "name": "비즈니스 흐름" if ko else "Business Flows",
+                "auto_selected": False,
+                "tests": [],
+            }
+            categories.append(biz_cat)
+        biz_cat["tests"].extend(added_tests)
+
+    plan["categories"] = categories
+    return plan
+
+
 def _parse_json(text: str | None) -> Any:
     """Safely parse JSON text."""
     if not text:
@@ -689,6 +863,18 @@ async def generate_plan(
         plan = _generate_default_plan(
             scan, pages, broken, features, summary, lang, observations,
         )
+
+    # --- Debug logging ---
+    logger.info("=== detected_features === %s", features)
+    logger.info("=== observations count === %d", len(observations))
+    login_obs = [o for o in observations if "로그인" in str(o)]
+    if login_obs:
+        logger.info("=== login-related observations === %d items", len(login_obs))
+        for lo in login_obs:
+            logger.info("  %s", lo.get("access_path", ""))
+
+    # --- Post-plan validation: force-add tests for detected features ---
+    plan = _validate_plan_against_features(plan, features, lang)
 
     categories = plan.get("categories", [])
 
