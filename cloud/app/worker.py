@@ -1,6 +1,6 @@
 """Asyncio background worker — polls DB for queued tests and executes them.
 
-Single-process, no Celery. Uses asyncio.Semaphore for concurrency control.
+Single-process, no Celery. Tracks asyncio.Task references for proper cancellation.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ class Worker:
         self._running = False
         self._active: int = 0
         self._task: asyncio.Task[None] | None = None
+        self._tasks: dict[int, asyncio.Task[None]] = {}  # test_id → asyncio.Task
 
     @property
     def is_running(self) -> bool:
@@ -42,9 +43,10 @@ class Worker:
         self._running = True
         self._task = asyncio.create_task(self._poll_loop())
         logger.info(
-            "Worker started (max_concurrent=%d, poll_interval=%.1fs)",
+            "Worker started (max_concurrent=%d, poll_interval=%.1fs, stuck_timeout=%dm)",
             settings.max_concurrent,
             settings.worker_poll_interval,
+            settings.stuck_timeout_minutes,
         )
 
     async def stop(self) -> None:
@@ -56,6 +58,11 @@ class Worker:
                 await self._task
             except asyncio.CancelledError:
                 pass
+        # Cancel all active tasks
+        for tid, task in list(self._tasks.items()):
+            if not task.done():
+                task.cancel()
+                logger.info("Cancelled active task for test %d on shutdown", tid)
         logger.info("Worker stopped (active=%d)", self._active)
 
     async def _poll_loop(self) -> None:
@@ -63,15 +70,16 @@ class Worker:
         await self._recover_stuck()
 
         poll_count = 0
-        # Check stuck tests every ~30 seconds (poll_interval * checks_per_cycle)
-        stuck_check_interval = max(1, int(30 / settings.worker_poll_interval))
+        # Check stuck tests every ~20 seconds
+        stuck_check_interval = max(1, int(20 / settings.worker_poll_interval))
 
         while self._running:
             try:
-                # Periodically clean up stuck tests
+                # Periodically clean up stuck tests and sync active counter
                 poll_count += 1
                 if poll_count % stuck_check_interval == 0:
                     await self._fail_stuck_tests()
+                    self._sync_active_counter()
 
                 # Only claim a test if we have a free slot
                 if self._active < settings.max_concurrent:
@@ -79,12 +87,28 @@ class Worker:
                     if claimed is not None:
                         test_id, original_status = claimed
                         self._active += 1
-                        asyncio.create_task(self._run(test_id, original_status))
+                        task = asyncio.create_task(self._run(test_id, original_status))
+                        self._tasks[test_id] = task
                         continue  # Check for more immediately
             except Exception:
                 logger.exception("Worker poll error")
 
             await asyncio.sleep(settings.worker_poll_interval)
+
+    def _sync_active_counter(self) -> None:
+        """Sync _active counter with actual running tasks (safety net)."""
+        # Clean up finished tasks
+        done_ids = [tid for tid, t in self._tasks.items() if t.done()]
+        for tid in done_ids:
+            self._tasks.pop(tid, None)
+
+        actual = len(self._tasks)
+        if self._active != actual:
+            logger.warning(
+                "Active counter out of sync: counter=%d, actual_tasks=%d. Correcting.",
+                self._active, actual,
+            )
+            self._active = actual
 
     async def _recover_stuck(self) -> None:
         """On startup: fail tests stuck in RUNNING from previous crash."""
@@ -102,29 +126,38 @@ class Worker:
                 await db.commit()
 
     async def _fail_stuck_tests(self) -> None:
-        """Periodically fail tests stuck in RUNNING beyond the timeout."""
+        """Periodically fail tests stuck in RUNNING or QUEUED beyond the timeout."""
         cutoff = datetime.now(timezone.utc) - timedelta(
             minutes=settings.stuck_timeout_minutes
         )
         async with async_session() as db:
             result = await db.execute(
                 select(Test).where(
-                    Test.status == TestStatus.RUNNING,
+                    Test.status.in_([TestStatus.RUNNING, TestStatus.QUEUED]),
                     Test.updated_at < cutoff,
                 )
             )
             stuck = list(result.scalars().all())
             for test in stuck:
+                old_status = test.status
                 test.status = TestStatus.FAILED
                 test.error_message = (
-                    f"Test timed out after {settings.stuck_timeout_minutes} minutes"
+                    f"Test timed out ({old_status.value} > {settings.stuck_timeout_minutes} min)"
                 )
                 test.updated_at = datetime.now(timezone.utc)
                 logger.warning(
-                    "Auto-failed stuck test %d (running > %d min)",
+                    "Auto-failed stuck test %d (%s > %d min)",
                     test.id,
+                    old_status.value,
                     settings.stuck_timeout_minutes,
                 )
+
+                # Cancel the asyncio task if it exists (for RUNNING tests)
+                task = self._tasks.pop(test.id, None)
+                if task and not task.done():
+                    task.cancel()
+                    logger.info("Cancelled stuck asyncio task for test %d", test.id)
+
                 await ws_manager.broadcast(
                     test.id,
                     {
@@ -181,13 +214,16 @@ class Worker:
                 await self._run_generate(test_id)
             else:
                 await self._run_execute(test_id)
+        except asyncio.CancelledError:
+            logger.warning("Test %d was cancelled", test_id)
+            # DB status already updated by _fail_stuck_tests; just clean up
         except Exception as exc:
             logger.exception("Test %d failed unexpectedly", test_id)
             async with async_session() as db:
                 test = (
                     await db.execute(select(Test).where(Test.id == test_id))
                 ).scalar_one_or_none()
-                if test:
+                if test and test.status == TestStatus.RUNNING:
                     test.status = TestStatus.FAILED
                     test.result_json = json.dumps({"error": str(exc)})
                     test.error_message = str(exc)
@@ -199,7 +235,8 @@ class Worker:
                 {"type": "test_fail", "test_id": test_id, "error": str(exc)},
             )
         finally:
-            self._active -= 1
+            self._active = max(0, self._active - 1)
+            self._tasks.pop(test_id, None)
 
     async def _run_generate(self, test_id: int) -> None:
         """Generate scenarios and transition to REVIEW."""

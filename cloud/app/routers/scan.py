@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import yaml
@@ -461,6 +461,9 @@ CATEGORY "auth" - Authentication (only if login_form detected):
 CATEGORY "business" - Business Flows (based on detected features):
 - Only for features actually detected in the crawl
 - Use the business test hints above as guidance
+- Test names and descriptions MUST reflect actual observed behavior, NOT generic labels
+- WRONG: "Product Browsing Test" (generic — no "product" in observations)
+- RIGHT: "기능 섹션 네비게이션 테스트" (references actual observed element)
 
 IMPORTANT — SELECTOR-FIRST RULE:
 - For each test, include the exact CSS selectors from the observation data in "actual_elements".
@@ -973,6 +976,29 @@ def _build_observation_table(observations: list[dict]) -> str:
 
         lines.append("")
 
+    # Add summary of all available texts for assertions
+    all_assert_texts: list[str] = []
+    all_element_texts: list[str] = []
+    for obs in observations:
+        elem = obs.get("element", {})
+        change = obs.get("observed_change", {})
+        if change.get("type") == "no_change":
+            continue
+        txt = elem.get("text", "")
+        if txt:
+            all_element_texts.append(txt)
+        for nt in change.get("new_text", []):
+            if nt.strip():
+                all_assert_texts.append(nt.strip())
+    if all_assert_texts or all_element_texts:
+        lines.append("### ===== AVAILABLE DATA SUMMARY =====")
+        if all_element_texts:
+            lines.append(f"Clickable element texts: {json.dumps(all_element_texts, ensure_ascii=False)}")
+        if all_assert_texts:
+            lines.append(f"Observable texts (valid for assert): {json.dumps(all_assert_texts, ensure_ascii=False)}")
+        lines.append("REMINDER: Only use texts from above for assert values. NEVER invent text.")
+        lines.append("")
+
     return "\n".join(lines) if lines else "No meaningful observations."
 
 
@@ -989,16 +1015,20 @@ Generate AWT test scenario JSON for the selected tests below.
    WRONG: {{"text": "기능"}}
    RIGHT: {{"selector": "a[href=\\"#features\\"]", "text": "기능"}}
 
-2. **ASSERT FROM OBSERVED DATA ONLY**: Assert values MUST come from observation new_text or crawl data.
-   WRONG: assert value "제품 목록" (AI guess — FORBIDDEN)
-   RIGHT: assert value "클래스링의 핵심 기능" (from observation new_text)
+2. **ASSERT FROM OBSERVED DATA ONLY**: Assert values MUST come from the "OBSERVED new_text"
+   field in the observation table below, or from crawl data text that actually exists.
+   WRONG: assert value "제품 목록" (AI guess — this text does NOT exist in observation data)
+   WRONG: assert value "Product Browsing" (from test name — test names are NOT data)
+   RIGHT: assert value "클래스링의 핵심 기능" (copy-pasted from observation new_text)
 
 3. **MODAL FORM FIELDS**: When observation shows modal_opened with modal_form_fields,
    use the EXACT selector/placeholder from modal_form_fields for find_and_type targets.
    observation: modal_form_fields: [{{"selector": "#email", "placeholder": "이메일을 입력하세요"}}]
    → target: {{"selector": "#email", "text": "이메일을 입력하세요"}}
 
-4. **NEVER INVENT**: Do not use any text, selector, or URL that is NOT in the data below.
+4. **NEVER INVENT**: Do not use any text, selector, URL, or page name that is NOT
+   in the Observation Reference Table or Crawl Data below. The selected test names
+   are LABELS ONLY — do NOT derive step targets or assert values from them.
 
 5. **WAIT AFTER MODAL**: After clicking an element that opens a modal (change_type: modal_opened),
    add a wait step (1000ms) before interacting with modal fields.
@@ -1006,6 +1036,10 @@ Generate AWT test scenario JSON for the selected tests below.
 6. **CASE INSENSITIVE ASSERT**: All assert steps MUST set "case_insensitive": true.
 
 7. **TEST INDEPENDENCE**: Each scenario MUST start with navigate to target URL.
+
+8. **NO PHANTOM PAGES**: Do NOT assert URL changes to pages not seen in observations.
+   If observation shows anchor_scroll or modal_opened, the URL does NOT change.
+   Only assert URL change when observation change_type is "page_navigation".
 
 ## ========== END ABSOLUTE RULES ==========
 
@@ -1023,7 +1057,7 @@ Each row = one observed interaction. Use these EXACT selectors and texts.
 ## Crawl Data (forms with field selectors)
 {crawl_data}
 
-## Selected Tests
+## Selected Tests (LABELS ONLY — do NOT use these names as test data)
 {selected_tests}
 
 ## User-Provided Data
@@ -1071,7 +1105,7 @@ Return ONLY a valid JSON array. Each object:
       "action": "assert",
       "assert_type": "text_visible",
       "value": "Welcome",
-      "description": "Verify welcome text",
+      "description": "Verify welcome text from OBSERVED new_text",
       "case_insensitive": true
     }}
   ]
@@ -1079,6 +1113,9 @@ Return ONLY a valid JSON array. Each object:
 
 Actions: navigate, find_and_click, find_and_type, assert, wait, scroll
 Target format: {{"selector": "CSS_FROM_OBSERVATION", "text": "VISIBLE_TEXT_FROM_OBSERVATION"}}
+
+FINAL CHECK before responding: For every assert value, verify it appears verbatim
+in the Observation Reference Table or Crawl Data. If not, REMOVE that assert step.
 
 Return ONLY valid JSON array.\
 """
@@ -1226,9 +1263,26 @@ async def execute_scan_tests(
     )
     total_steps = sum(len(s.steps) for s in scenarios)
 
-    # Create a Test record with the generated YAML
+    # Clean up stuck tests for this user before creating a new one
     from app.models import Test, TestStatus
 
+    stuck_cutoff = datetime.now(timezone.utc) - timedelta(
+        minutes=settings.stuck_timeout_minutes
+    )
+    stuck_result = await db.execute(
+        select(Test).where(
+            Test.user_id == user.id,
+            Test.status.in_([TestStatus.RUNNING, TestStatus.QUEUED]),
+            Test.updated_at < stuck_cutoff,
+        )
+    )
+    for stuck_test in stuck_result.scalars().all():
+        stuck_test.status = TestStatus.FAILED
+        stuck_test.error_message = f"Auto-cancelled: stuck {stuck_test.status.value} > {settings.stuck_timeout_minutes} min"
+        stuck_test.updated_at = datetime.now(timezone.utc)
+        logger.warning("Pre-exec cleanup: auto-failed stuck test %d for user %s", stuck_test.id, user.id)
+
+    # Create a Test record with the generated YAML
     test = Test(
         user_id=user.id,
         target_url=scan.target_url,

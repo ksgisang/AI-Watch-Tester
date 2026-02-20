@@ -42,7 +42,7 @@ export default function TestProgress({ testId, onComplete, onScenariosReady }: P
   const [currentStep, setCurrentStep] = useState(0);
   const [totalSteps, setTotalSteps] = useState(0);
   const [status, setStatus] = useState<
-    "connecting" | "generating" | "running" | "passed" | "failed"
+    "connecting" | "waiting" | "generating" | "running" | "passed" | "failed"
   >("connecting");
   const [liveImage, setLiveImage] = useState<string | null>(null);
   const [stepLabel, setStepLabel] = useState("");
@@ -50,118 +50,145 @@ export default function TestProgress({ testId, onComplete, onScenariosReady }: P
   const [showEventLog, setShowEventLog] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
+  const testStartedRef = useRef(false);
+  const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
-    const ws = connectTestWS(
-      testId,
-      (data) => {
-        const evt = data as unknown as WSEvent;
+    mountedRef.current = true;
 
-        // Screenshot events update live view only (don't add to log)
-        if (evt.type === "screenshot") {
-          if (evt.image) setLiveImage(evt.image);
-          return;
-        }
+    const connectWS = () => {
+      const ws = connectTestWS(
+        testId,
+        (data) => {
+          if (!mountedRef.current) return;
+          const evt = data as unknown as WSEvent;
 
-        setEvents((prev) => [...prev, evt]);
+          // Screenshot events update live view only (don't add to log)
+          if (evt.type === "screenshot") {
+            if (evt.image) setLiveImage(evt.image);
+            return;
+          }
 
-        switch (evt.type) {
-          case "test_start":
-            if (evt.phase === "generate") {
-              setStatus("generating");
-              setStepLabel(t("generatingScenarios"));
-            } else {
-              setStatus("running");
-              setStepLabel(t("startingTest"));
-            }
-            break;
-          case "scenarios_ready":
-            setStepLabel(t("scenariosReady"));
-            onScenariosReady?.(testId);
-            break;
-          case "scenarios_generated":
-            if (evt.steps_total) {
-              setTotalSteps(evt.steps_total);
-              // Initialize step placeholders
-              setSteps(
-                Array.from({ length: evt.steps_total }, (_, i) => ({
-                  num: i + 1,
-                  description: `Step ${i + 1}`,
-                  state: "pending" as StepState,
-                }))
-              );
-            }
-            setStepLabel(t("scenariosGenerated", { count: evt.count ?? 0 }));
-            break;
-          case "step_start": {
-            const stepNum = evt.step ?? 0;
-            if (stepNum) setCurrentStep(stepNum);
-            if (evt.total && totalSteps === 0) {
-              setTotalSteps(evt.total);
-              // Initialize if not yet done
-              setSteps((prev) => {
-                if (prev.length === 0) {
-                  return Array.from({ length: evt.total! }, (_, i) => ({
+          setEvents((prev) => [...prev, evt]);
+
+          switch (evt.type) {
+            case "test_start":
+              testStartedRef.current = true;
+              if (evt.phase === "generate") {
+                setStatus("generating");
+                setStepLabel(t("generatingScenarios"));
+              } else {
+                setStatus("running");
+                setStepLabel(t("startingTest"));
+              }
+              break;
+            case "scenarios_ready":
+              setStepLabel(t("scenariosReady"));
+              onScenariosReady?.(testId);
+              break;
+            case "scenarios_generated":
+              if (evt.steps_total) {
+                setTotalSteps(evt.steps_total);
+                // Initialize step placeholders
+                setSteps(
+                  Array.from({ length: evt.steps_total }, (_, i) => ({
                     num: i + 1,
                     description: `Step ${i + 1}`,
                     state: "pending" as StepState,
-                  }));
-                }
-                return prev;
-              });
+                  }))
+                );
+              }
+              setStepLabel(t("scenariosGenerated", { count: evt.count ?? 0 }));
+              break;
+            case "step_start": {
+              const stepNum = evt.step ?? 0;
+              if (stepNum) setCurrentStep(stepNum);
+              if (evt.total && totalSteps === 0) {
+                setTotalSteps(evt.total);
+                // Initialize if not yet done
+                setSteps((prev) => {
+                  if (prev.length === 0) {
+                    return Array.from({ length: evt.total! }, (_, i) => ({
+                      num: i + 1,
+                      description: `Step ${i + 1}`,
+                      state: "pending" as StepState,
+                    }));
+                  }
+                  return prev;
+                });
+              }
+              const desc = evt.description || `Step ${stepNum}`;
+              setStepLabel(desc);
+              // Update step state
+              setSteps((prev) =>
+                prev.map((s) =>
+                  s.num === stepNum ? { ...s, state: "running", description: desc } : s
+                )
+              );
+              break;
             }
-            const desc = evt.description || `Step ${stepNum}`;
-            setStepLabel(desc);
-            // Update step state
-            setSteps((prev) =>
-              prev.map((s) =>
-                s.num === stepNum ? { ...s, state: "running", description: desc } : s
-              )
-            );
-            break;
+            case "step_done": {
+              const stepNum = evt.step ?? 0;
+              setSteps((prev) =>
+                prev.map((s) =>
+                  s.num === stepNum
+                    ? { ...s, state: "passed", elapsedMs: evt.elapsed_ms }
+                    : s
+                )
+              );
+              break;
+            }
+            case "step_fail": {
+              const stepNum = evt.step ?? 0;
+              const isTimeout = evt.error?.toLowerCase().includes("timed out") ?? false;
+              setSteps((prev) =>
+                prev.map((s) =>
+                  s.num === stepNum
+                    ? { ...s, state: isTimeout ? "timeout" : "failed", error: evt.error }
+                    : s
+                )
+              );
+              break;
+            }
+            case "test_complete":
+              setStatus(evt.passed ? "passed" : "failed");
+              setStepLabel(evt.passed ? t("evtTestPassed") : t("evtTestFailed"));
+              onComplete?.(!!evt.passed);
+              break;
+            case "test_fail":
+              setStatus("failed");
+              setStepLabel(t("evtTestFailed"));
+              onComplete?.(false);
+              break;
           }
-          case "step_done": {
-            const stepNum = evt.step ?? 0;
-            setSteps((prev) =>
-              prev.map((s) =>
-                s.num === stepNum
-                  ? { ...s, state: "passed", elapsedMs: evt.elapsed_ms }
-                  : s
-              )
-            );
-            break;
-          }
-          case "step_fail": {
-            const stepNum = evt.step ?? 0;
-            const isTimeout = evt.error?.toLowerCase().includes("timed out") ?? false;
-            setSteps((prev) =>
-              prev.map((s) =>
-                s.num === stepNum
-                  ? { ...s, state: isTimeout ? "timeout" : "failed", error: evt.error }
-                  : s
-              )
-            );
-            break;
-          }
-          case "test_complete":
-            setStatus(evt.passed ? "passed" : "failed");
-            setStepLabel(evt.passed ? t("evtTestPassed") : t("evtTestFailed"));
-            onComplete?.(!!evt.passed);
-            break;
-          case "test_fail":
+        },
+        () => {
+          if (!mountedRef.current) return;
+          // If test hasn't started yet, show "waiting" and auto-reconnect
+          if (!testStartedRef.current) {
+            setStatus("waiting");
+            setStepLabel(t("waitingForRunner"));
+            reconnectRef.current = setTimeout(() => {
+              if (mountedRef.current) connectWS();
+            }, 3000);
+          } else {
+            // Test was running — real disconnect means failure
             setStatus("failed");
-            setStepLabel(t("evtTestFailed"));
-            onComplete?.(false);
-            break;
+          }
         }
-      },
-      () => {
-        if (status === "connecting" || status === "running") setStatus("failed");
-      }
-    );
+      );
 
-    wsRef.current = ws;
-    return () => ws.close();
+      wsRef.current = ws;
+    };
+
+    connectWS();
+
+    return () => {
+      mountedRef.current = false;
+      if (reconnectRef.current) clearTimeout(reconnectRef.current);
+      wsRef.current?.close();
+    };
   }, [testId]);
 
   // Auto-scroll event log
@@ -239,7 +266,7 @@ export default function TestProgress({ testId, onComplete, onScenariosReady }: P
                   ? "animate-pulse bg-purple-400"
                   : status === "running"
                   ? "animate-pulse bg-green-400"
-                  : status === "connecting"
+                  : status === "connecting" || status === "waiting"
                   ? "animate-pulse bg-yellow-400"
                   : status === "passed"
                   ? "bg-green-400"
@@ -249,6 +276,8 @@ export default function TestProgress({ testId, onComplete, onScenariosReady }: P
             <span className="text-xs text-gray-300">
               {status === "connecting"
                 ? t("connecting")
+                : status === "waiting"
+                ? t("waiting")
                 : status === "generating"
                 ? t("generating")
                 : status === "running"
@@ -276,19 +305,26 @@ export default function TestProgress({ testId, onComplete, onScenariosReady }: P
           ) : (
             <div className="flex flex-col items-center gap-2 py-12">
               <div className={`h-8 w-8 rounded-full border-2 border-t-transparent ${
-                status === "connecting" || status === "running"
+                status === "connecting" || status === "running" || status === "waiting"
                   ? "animate-spin border-blue-400"
+                  : status === "generating"
+                  ? "animate-spin border-purple-400"
                   : "border-gray-600"
               }`} />
               <p className="text-sm text-gray-500">
                 {status === "connecting"
                   ? t("connectingRunner")
+                  : status === "waiting"
+                  ? t("waitingForRunner")
                   : status === "generating"
                   ? t("generatingScenarios")
                   : status === "running"
                   ? t("waitingScreenshot")
                   : t("noScreenshot")}
               </p>
+              {(status === "connecting" || status === "waiting") && (
+                <p className="text-xs text-gray-400">{t("screenshotHint")}</p>
+              )}
             </div>
           )}
         </div>
@@ -307,9 +343,11 @@ export default function TestProgress({ testId, onComplete, onScenariosReady }: P
                 ? "bg-green-500"
                 : status === "failed"
                 ? "bg-red-400"
+                : status === "connecting" || status === "waiting"
+                ? "bg-gray-300"
                 : "bg-blue-500"
             }`}
-            style={{ width: `${status === "passed" || status === "failed" ? 100 : progress}%` }}
+            style={{ width: `${status === "passed" || status === "failed" ? 100 : status === "connecting" || status === "waiting" ? 5 : progress}%` }}
           />
         </div>
       </div>
