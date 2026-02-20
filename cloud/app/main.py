@@ -75,19 +75,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # DB tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # Add observations_json column if missing (SQLite doesn't auto-add)
+
+    # Column migrations — each in its own transaction
+    # (PostgreSQL aborts the entire transaction on ALTER error)
+    for col_sql in [
+        "ALTER TABLE scans ADD COLUMN observations_json TEXT",
+        "ALTER TABLE scans ADD COLUMN logs_json TEXT",
+    ]:
         try:
-            await conn.execute(text(
-                "ALTER TABLE scans ADD COLUMN observations_json TEXT"
-            ))
-            logger.info("Added observations_json column to scans table")
-        except Exception:
-            pass  # column already exists
-        try:
-            await conn.execute(text(
-                "ALTER TABLE scans ADD COLUMN logs_json TEXT"
-            ))
-            logger.info("Added logs_json column to scans table")
+            async with engine.begin() as conn:
+                await conn.execute(text(col_sql))
+                logger.info("Migration OK: %s", col_sql)
         except Exception:
             pass  # column already exists
 
