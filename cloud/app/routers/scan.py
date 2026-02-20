@@ -18,6 +18,11 @@ from app.config import settings
 from app.crawler import crawl_site, get_scan_limits
 from app.database import get_db
 from app.models import Scan, ScanStatus, User
+from app.test_patterns import (
+    build_pattern_summary,
+    build_pattern_tests,
+    match_elements_to_patterns,
+)
 from app.schemas import (
     ScanExecuteRequest,
     ScanPlanRequest,
@@ -589,6 +594,13 @@ async def generate_plan(
         "- Tests are independent — a previous test failure must NOT affect the next test.\n"
         "- For login tests, always start from the home page."
     )
+
+    # Add pattern summary to tell AI what's already covered
+    matched_patterns = match_elements_to_patterns(pages, observations)
+    pattern_hint = build_pattern_summary(matched_patterns)
+    if pattern_hint:
+        special_parts.append(pattern_hint)
+
     special_instructions = "\n\n".join(special_parts)
 
     # Fetch user reference documents
@@ -648,7 +660,9 @@ async def generate_plan(
 
     # Fallback: generate plan from crawl data without AI
     if plan is None:
-        plan = _generate_default_plan(scan, pages, broken, features, summary, lang)
+        plan = _generate_default_plan(
+            scan, pages, broken, features, summary, lang, observations,
+        )
 
     categories = plan.get("categories", [])
 
@@ -694,6 +708,7 @@ def _generate_default_plan(
     features: list,
     summary: dict,
     language: str,
+    observations: list | None = None,
 ) -> dict:
     """Generate a default test plan from crawl data without AI."""
     ko = language == "ko"
@@ -882,6 +897,12 @@ def _generate_default_plan(
             "tests": business_tests,
         })
 
+    # 4. Standard element test patterns
+    matched = match_elements_to_patterns(pages, observations or [])
+    pattern_category = build_pattern_tests(matched, language)
+    if pattern_category:
+        categories.append(pattern_category)
+
     return {"categories": categories}
 
 
@@ -968,6 +989,13 @@ def _build_observation_table(observations: list[dict]) -> str:
                         f"    * type={f_type}, selector={f_sel}, "
                         f"placeholder={f_ph!r}, label={f_label!r}, name={f_name!r}"
                     )
+
+        # Accordion expanded content
+        accordion_detail = obs.get("accordion_detail", {})
+        if accordion_detail:
+            expanded = accordion_detail.get("expanded_text", "")
+            if expanded:
+                lines.append(f"  - ACCORDION expanded_text: {expanded[:300]}")
 
         # New elements (modals/dialogs)
         new_elems = change.get("new_elements", [])
@@ -1201,6 +1229,13 @@ async def execute_scan_tests(
         extra_parts.append(
             "STICKY HEADER: Add scroll(0,0,0) before clicking header menu items."
         )
+
+    # Tell AI which elements already have standard tests
+    matched_patterns = match_elements_to_patterns(pages, observations)
+    pattern_hint = build_pattern_summary(matched_patterns)
+    if pattern_hint:
+        extra_parts.append(pattern_hint)
+
     extra_instructions = "\n".join(extra_parts) if extra_parts else ""
 
     # Build structured observation table for AI

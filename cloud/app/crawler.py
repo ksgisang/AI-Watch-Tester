@@ -740,7 +740,10 @@ async def crawl_site(
                     "message": f"페이지 로드 완료 ({page_load_time}초) — {title or url}",
                 })
 
-            # Extract page data
+            # Scroll through entire page to trigger lazy-loaded elements
+            await _full_page_scroll(page, ws=ws, scan_id=scan_id)
+
+            # Extract page data (now includes lazy-loaded elements)
             if ws:
                 await ws.broadcast(scan_id, {
                     "type": "scan_log",
@@ -821,6 +824,25 @@ async def crawl_site(
                             )
                     except Exception:
                         pass
+
+            # Accordion/toggle observation — detect and expand hidden content
+            remaining_time = total_timeout - (time.monotonic() - start_time)
+            if remaining_time > 20:
+                try:
+                    # Ensure we're on the right page before accordion scan
+                    if page.url != url:
+                        await page.goto(
+                            url, wait_until="domcontentloaded", timeout=8000
+                        )
+                    accordion_observations = await _detect_and_observe_accordions(
+                        page, url, ws=ws, scan_id=scan_id,
+                    )
+                    all_observations.extend(accordion_observations)
+                    page_data.setdefault("observations", []).extend(
+                        accordion_observations
+                    )
+                except Exception as exc:
+                    logger.debug("Accordion phase failed for %s: %s", url, exc)
 
             # Collect links for BFS
             for link in page_data.get("links", []):
@@ -934,6 +956,252 @@ async def crawl_site(
         "features_with_confidence": features_with_confidence,
         "observations": all_observations,
     }
+
+
+# ---------------------------------------------------------------------------
+# Full-page scroll scan + accordion observation
+# ---------------------------------------------------------------------------
+
+
+async def _full_page_scroll(
+    page: Any,
+    *,
+    ws: WSManager | None = None,
+    scan_id: int = 0,
+) -> None:
+    """Scroll through the entire page to trigger lazy-loaded elements.
+
+    Scrolls in 80%-viewport increments with 500ms pauses for IntersectionObserver
+    and lazy-loading to fire. Max 20 scrolls to avoid infinite-scroll pages.
+    """
+    try:
+        total_height = await page.evaluate("document.body.scrollHeight")
+        viewport_height = await page.evaluate("window.innerHeight")
+    except Exception:
+        return
+
+    if total_height <= viewport_height:
+        return  # No scrolling needed — everything fits in viewport
+
+    scroll_step = int(viewport_height * 0.8)
+    num_sections = min(20, (total_height // scroll_step) + 1)
+
+    if ws:
+        await ws.broadcast(scan_id, {
+            "type": "scan_log",
+            "phase": "scroll",
+            "message": f"페이지 스크롤 스캔 시작 ({num_sections}개 섹션)",
+        })
+
+    for i in range(1, num_sections + 1):
+        scroll_y = i * scroll_step
+        await page.evaluate(f"window.scrollTo(0, {scroll_y})")
+        await page.wait_for_timeout(500)
+
+        # Re-check height (dynamic content may have extended the page)
+        try:
+            new_height = await page.evaluate("document.body.scrollHeight")
+            if new_height > total_height:
+                total_height = new_height
+                num_sections = min(20, (total_height // scroll_step) + 1)
+        except Exception:
+            pass
+
+        if ws and (i % 3 == 0 or i == num_sections):
+            await ws.broadcast(scan_id, {
+                "type": "scan_log",
+                "phase": "scroll",
+                "message": f"페이지 스크롤 중... [{i}/{num_sections} 섹션]",
+            })
+
+    # Scroll back to top
+    try:
+        await page.evaluate("window.scrollTo(0, 0)")
+        await page.wait_for_timeout(300)
+    except Exception:
+        pass
+
+
+async def _detect_and_observe_accordions(
+    page: Any,
+    original_url: str,
+    *,
+    ws: WSManager | None = None,
+    scan_id: int = 0,
+) -> list[dict[str, Any]]:
+    """Detect accordion/toggle elements and click each to capture expanded content.
+
+    Looks for: aria-expanded="false", <details>/<summary>, +/arrow toggle buttons,
+    and FAQ-pattern elements.
+    Returns list of accordion observation dicts.
+    """
+    try:
+        accordion_elements = await page.evaluate("""() => {
+            const results = [];
+            const seen = new Set();
+
+            function addEl(el, source) {
+                if (seen.has(el)) return;
+                seen.add(el);
+                const text = (el.textContent || '').trim().substring(0, 200);
+                if (!text || text.length < 2) return;
+                let sel = null;
+                if (el.id) {
+                    sel = '#' + el.id;
+                } else if (el.className && typeof el.className === 'string') {
+                    const cls = el.className.trim().split(/\\s+/)[0];
+                    if (cls) sel = el.tagName.toLowerCase() + '.' + cls;
+                }
+                results.push({text, selector: sel, source, tag: el.tagName.toLowerCase()});
+            }
+
+            // 1. aria-expanded="false" elements
+            document.querySelectorAll('[aria-expanded="false"]').forEach(el => {
+                addEl(el, 'aria-expanded');
+            });
+
+            // 2. <details> not open
+            document.querySelectorAll('details:not([open])').forEach(el => {
+                const summary = el.querySelector('summary');
+                if (summary) addEl(summary, 'details-summary');
+            });
+
+            // 3. FAQ-pattern: common class names
+            const faqSelectors = [
+                '.faq-item', '.accordion-item', '.accordion-header',
+                '.faq-question', '[class*=accordion]', '[class*=faq]',
+                '[class*=toggle]', '[class*=collapsible]',
+                '[data-toggle="collapse"]', '[data-bs-toggle="collapse"]'
+            ];
+            for (const sel of faqSelectors) {
+                try {
+                    document.querySelectorAll(sel).forEach(el => {
+                        // Find the clickable header/button within
+                        const clickable = el.querySelector('button, [role=button], h2, h3, h4, summary')
+                            || el;
+                        addEl(clickable, 'faq-pattern');
+                    });
+                } catch(e) {}
+            }
+
+            // 4. Elements with +/arrow toggle indicators
+            document.querySelectorAll('button, [role=button]').forEach(el => {
+                const text = (el.textContent || '').trim();
+                const hasToggleIcon = text.includes('+') || text.includes('▶')
+                    || text.includes('▼') || text.includes('›')
+                    || el.querySelector('svg, .icon, [class*=arrow], [class*=chevron], [class*=plus]');
+                const isSmall = text.length < 100;
+                if (hasToggleIcon && isSmall && el.offsetParent !== null) {
+                    addEl(el, 'toggle-icon');
+                }
+            });
+
+            return results;
+        }""")
+    except Exception:
+        return []
+
+    if not accordion_elements:
+        return []
+
+    if ws:
+        await ws.broadcast(scan_id, {
+            "type": "scan_log",
+            "phase": "accordion",
+            "message": f"아코디언 요소 발견: {len(accordion_elements)}개 → 각각 펼쳐서 확인 중...",
+        })
+
+    observations: list[dict[str, Any]] = []
+    for idx, elem in enumerate(accordion_elements[:15]):  # limit to 15
+        elem_text = elem.get("text", "")
+        selector = elem.get("selector")
+        try:
+            # Capture before text
+            before_text = await page.evaluate("document.body.innerText")
+
+            # Click the element
+            clicked = False
+            if selector:
+                try:
+                    loc = page.locator(selector).first
+                    await loc.scroll_into_view_if_needed(timeout=2000)
+                    await loc.click(timeout=3000)
+                    clicked = True
+                except Exception:
+                    pass
+            if not clicked:
+                try:
+                    loc = page.get_by_text(elem_text[:60], exact=False).first
+                    await loc.scroll_into_view_if_needed(timeout=2000)
+                    await loc.click(timeout=3000)
+                    clicked = True
+                except Exception:
+                    pass
+
+            if not clicked:
+                continue
+
+            await page.wait_for_timeout(600)
+
+            # Capture after text — find new content
+            after_text = await page.evaluate("document.body.innerText")
+            before_lines = set(before_text.split("\n"))
+            new_lines = [
+                ln.strip() for ln in after_text.split("\n")
+                if ln.strip() and ln.strip() not in before_lines
+            ]
+            expanded_text = "\n".join(new_lines[:10])
+
+            if new_lines:
+                obs: dict[str, Any] = {
+                    "element": {
+                        "text": elem_text[:200],
+                        "selector": selector,
+                        "type": "accordion",
+                    },
+                    "before": {"url": original_url},
+                    "action": "click",
+                    "after": {"url": original_url},
+                    "observed_change": {
+                        "type": "content_expanded",
+                        "url_changed": False,
+                        "new_elements": [],
+                        "new_text": new_lines[:10],
+                        "screenshot_diff_percent": 0,
+                    },
+                    "accordion_detail": {
+                        "expanded_text": expanded_text,
+                        "source": elem.get("source", ""),
+                    },
+                    "access_path": f"scroll to '{elem_text[:40]}' → click → content expanded",
+                }
+                observations.append(obs)
+
+                if ws:
+                    await ws.broadcast(scan_id, {
+                        "type": "element_observed",
+                        "element_text": elem_text[:60],
+                        "change_type": "content_expanded",
+                    })
+
+        except Exception as exc:
+            logger.debug("Accordion observation failed for '%s': %s", elem_text[:40], exc)
+
+        if ws and (idx + 1) % 3 == 0:
+            await ws.broadcast(scan_id, {
+                "type": "scan_log",
+                "phase": "accordion",
+                "message": f"아코디언 확인 중... [{idx + 1}/{min(len(accordion_elements), 15)}]",
+            })
+
+    if ws and observations:
+        await ws.broadcast(scan_id, {
+            "type": "scan_log",
+            "phase": "accordion",
+            "message": f"아코디언 관찰 완료: {len(observations)}개 요소의 펼친 콘텐츠를 기록했습니다.",
+        })
+
+    return observations
 
 
 # ---------------------------------------------------------------------------
