@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
-from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.models import Test, TestStatus, User, UserTier
 from app.worker import Worker
 from app.ws import WSManager
-
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # ---------------------------------------------------------------------------
 # WSManager unit tests
@@ -327,7 +325,7 @@ async def test_middleware_stuck_cleanup(db_session: AsyncSession) -> None:
     monkeypatch_session.add(user)
 
     # A stuck test (updated long ago)
-    stuck_time = datetime.now(timezone.utc) - timedelta(minutes=10)
+    stuck_time = datetime.now(UTC) - timedelta(minutes=10)
     monkeypatch_session.add(
         Test(id=1, user_id="user-stuck", target_url="http://stuck.com",
              status=TestStatus.RUNNING, updated_at=stuck_time)
@@ -344,7 +342,7 @@ async def test_middleware_stuck_cleanup(db_session: AsyncSession) -> None:
     # Simulate stuck cleanup (same logic as middleware)
     from sqlalchemy import select as sa_select
 
-    stuck_cutoff = datetime.now(timezone.utc) - timedelta(
+    stuck_cutoff = datetime.now(UTC) - timedelta(
         minutes=config.settings.stuck_timeout_minutes
     )
     stuck_q = (
@@ -360,7 +358,7 @@ async def test_middleware_stuck_cleanup(db_session: AsyncSession) -> None:
     for t in stuck_result.scalars().all():
         t.status = TestStatus.FAILED
         t.error_message = "Auto-cleaned: test stuck"
-        t.updated_at = datetime.now(timezone.utc)
+        t.updated_at = datetime.now(UTC)
     await monkeypatch_session.commit()
 
     # After cleanup — no active tests

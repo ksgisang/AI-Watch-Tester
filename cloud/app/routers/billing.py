@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import logging
@@ -12,7 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_user
 from app.config import settings
 from app.database import get_db
-from app.middleware import get_active_count, get_concurrent_limit, get_monthly_limit, get_monthly_used
+from app.middleware import (
+    get_active_count,
+    get_concurrent_limit,
+    get_monthly_limit,
+    get_monthly_used,
+)
 from app.models import User, UserTier
 from app.schemas import BillingResponse, BillingUsage
 
@@ -91,10 +97,10 @@ async def lemon_webhook(
         user.lemon_subscription_id = str(payload.get("data", {}).get("id", ""))
         if attrs.get("renews_at"):
             from datetime import datetime
-            try:
-                user.plan_expires_at = datetime.fromisoformat(attrs["renews_at"].replace("Z", "+00:00"))
-            except (ValueError, TypeError):
-                pass
+            with contextlib.suppress(ValueError, TypeError):
+                user.plan_expires_at = datetime.fromisoformat(
+                    attrs["renews_at"].replace("Z", "+00:00")
+                )
         logger.info("Subscription created: user=%s tier=%s", user_id, user.tier.value)
 
     elif event_name == "subscription_updated":
@@ -102,10 +108,10 @@ async def lemon_webhook(
         user.tier = _resolve_tier(product_name)
         if attrs.get("renews_at"):
             from datetime import datetime
-            try:
-                user.plan_expires_at = datetime.fromisoformat(attrs["renews_at"].replace("Z", "+00:00"))
-            except (ValueError, TypeError):
-                pass
+            with contextlib.suppress(ValueError, TypeError):
+                user.plan_expires_at = datetime.fromisoformat(
+                    attrs["renews_at"].replace("Z", "+00:00")
+                )
         logger.info("Subscription updated: user=%s tier=%s", user_id, user.tier.value)
 
     elif event_name == "subscription_cancelled":
@@ -126,10 +132,10 @@ async def lemon_webhook(
     elif event_name == "subscription_payment_success":
         if attrs.get("renews_at"):
             from datetime import datetime
-            try:
-                user.plan_expires_at = datetime.fromisoformat(attrs["renews_at"].replace("Z", "+00:00"))
-            except (ValueError, TypeError):
-                pass
+            with contextlib.suppress(ValueError, TypeError):
+                user.plan_expires_at = datetime.fromisoformat(
+                    attrs["renews_at"].replace("Z", "+00:00")
+                )
         logger.info("Payment success: user=%s", user_id)
 
     elif event_name == "subscription_payment_failed":
@@ -197,7 +203,9 @@ async def billing_portal(
         raise HTTPException(status_code=502, detail="Failed to fetch customer portal")
 
     data = resp.json()
-    portal_url = data.get("data", {}).get("attributes", {}).get("urls", {}).get("customer_portal", "")
+    portal_url = (
+        data.get("data", {}).get("attributes", {}).get("urls", {}).get("customer_portal", "")
+    )
     if not portal_url:
         raise HTTPException(status_code=404, detail="Portal URL not available")
 

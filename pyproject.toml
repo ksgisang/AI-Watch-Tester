@@ -78,7 +78,16 @@ line-length = 99
 src = ["src"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "UP", "B", "SIM", "TCH"]
+select = ["E", "F", "I", "N", "UP", "B", "SIM"]
+ignore = ["B008"]  # Depends() in FastAPI default args is idiomatic
+
+[tool.ruff.lint.per-file-ignores]
+# JS-in-Python strings + Korean data literals make E501 impractical
+"cloud/app/crawler.py" = ["E501"]
+"cloud/app/test_patterns.py" = ["E501"]
+# AI prompt templates contain long lines by design
+"cloud/app/routers/scan.py" = ["E501"]
+"cloud/app/routers/tests.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.11"

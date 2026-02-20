@@ -45,8 +45,10 @@ def _extract_plaintext(file_path: Path) -> str:
 def _extract_pdf(file_path: Path) -> str:
     try:
         from pypdf import PdfReader
-    except ImportError:
-        raise ValueError("pypdf is required for PDF extraction. Install with: pip install pypdf")
+    except ImportError as err:
+        raise ValueError(
+            "pypdf is required for PDF extraction. Install with: pip install pypdf"
+        ) from err
 
     reader = PdfReader(file_path)
     pages = []
@@ -62,10 +64,10 @@ def _extract_pdf(file_path: Path) -> str:
 def _extract_docx(file_path: Path) -> str:
     try:
         from docx import Document
-    except ImportError:
+    except ImportError as err:
         raise ValueError(
             "python-docx is required for DOCX extraction. Install with: pip install python-docx"
-        )
+        ) from err
 
     doc = Document(file_path)
     paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
@@ -76,8 +78,8 @@ def _extract_docx(file_path: Path) -> str:
 
 def _extract_image(file_path: Path) -> str:
     try:
-        from PIL import Image
         import pytesseract
+        from PIL import Image
     except ImportError:
         return f"[Image: {file_path.name} — OCR not available (install pytesseract and Pillow)]"
 

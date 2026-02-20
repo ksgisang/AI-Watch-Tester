@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import json
+import contextlib
 import logging
 import time
 from datetime import UTC, datetime
@@ -47,6 +47,9 @@ Analyze the following web page and generate user-perspective E2E test scenarios.
 ## Page Content (truncated)
 {page_text}
 
+## Page Elements (observed from actual page)
+{page_elements}
+
 ## CRITICAL Rules
 1. **Use EXACT text from the page content above** for all click targets and assertions.
    - Extract actual button labels, link text, menu item names from "Page Content"
@@ -58,8 +61,35 @@ Analyze the following web page and generate user-perspective E2E test scenarios.
 5. For click targets, use the `text` field with the exact visible label
 6. For assertions, verify text that actually appears in the page content
 7. Keep steps concise and actionable
+8. **SELECTOR-FIRST**: Every click/type target MUST include "selector" from Page Elements.
+   WRONG: {{"text": "가입"}}
+   RIGHT: {{"selector": "button.MuiButtonBase-root", "text": "가입"}}
+9. **FORM SUBMIT BUTTON — CRITICAL**:
+   After filling form fields (find_and_type steps), the NEXT click MUST be the
+   form's own submit button — look for SUBMIT[form] in Page Elements.
+   - SUBMIT[form] = button INSIDE the form → USE THIS for form submission
+   - SUBMIT[nav] = navigation menu link → NEVER use this after form input
+   - SUBMIT[body] = button outside form/nav → only if no [form] button exists
+10. **TEST INDEPENDENCE**: Each scenario MUST start with navigate to target URL.
 
-Return the scenarios as a JSON array following the format specified in the system instructions.\
+## Output Format
+Return ONLY a valid JSON array. Each object:
+{{
+  "id": "SC-001",
+  "name": "Test name",
+  "description": "Test description",
+  "steps": [
+    {{"step": 1, "action": "navigate", "value": "{url}", "description": "Navigate"}},
+    {{"step": 2, "action": "find_and_click", "target": {{"selector": "CSS", "text": "TEXT"}}, \
+"description": "Click"}},
+    {{"step": 3, "action": "find_and_type", "target": {{"selector": "CSS", "text": "LABEL"}}, \
+"value": "input", "description": "Type"}},
+    {{"step": 4, "action": "assert", "assert_type": "text_visible", "value": "TEXT", \
+"case_insensitive": true, "description": "Verify"}}
+  ]
+}}
+Actions: navigate, find_and_click, find_and_type, assert, wait, scroll
+Return ONLY valid JSON array.\
 """
 
 _SCENARIO_PROMPT_WITH_DOCS = """\
@@ -73,6 +103,9 @@ user-perspective E2E test scenarios.
 
 ## Page Content (truncated)
 {page_text}
+
+## Page Elements (observed from actual page)
+{page_elements}
 
 ## Specification Documents
 {doc_text}
@@ -89,8 +122,12 @@ user-perspective E2E test scenarios.
 6. For click targets, use the `text` field with the exact visible label
 7. For assertions, verify text that actually appears in the page content
 8. Keep steps concise and actionable
+9. **SELECTOR-FIRST**: Every click/type target MUST include "selector" from Page Elements.
+10. **FORM SUBMIT BUTTON — CRITICAL**:
+   After filling form fields, click SUBMIT[form] (form's own button), NOT SUBMIT[nav].
+11. **TEST INDEPENDENCE**: Each scenario MUST start with navigate to target URL.
 
-Return the scenarios as a JSON array following the format specified in the system instructions.\
+Return the scenarios as a JSON array.\
 """
 
 
@@ -151,6 +188,146 @@ async def _save_screenshot(
 
 
 # ---------------------------------------------------------------------------
+# Quick page observation (for direct tests without full scan)
+# ---------------------------------------------------------------------------
+
+
+async def _quick_observe_page(engine: Any) -> dict[str, Any]:
+    """Collect page elements with context (form/nav/body) for AI prompt.
+
+    Returns dict with 'fields', 'summary' keys.
+    """
+    page = engine.page
+    fields = await page.evaluate("""() => {
+        const fields = [];
+        function getContext(el) {
+            if (el.closest('form')) return 'form';
+            if (el.closest('nav, header, [role="navigation"]'))
+                return 'nav';
+            return 'body';
+        }
+        // Form fields
+        document.querySelectorAll('input, textarea, select').forEach(f => {
+            if (f.type === 'hidden') return;
+            if (f.offsetParent === null && f.offsetWidth === 0) return;
+            const labelEl = f.id
+                ? document.querySelector('label[for="' + f.id + '"]')
+                : null;
+            const parentLabel = !labelEl ? f.closest('label') : null;
+            const labelNode = labelEl || parentLabel;
+            const label = labelNode
+                ? (labelNode.childNodes[0]?.textContent?.trim()
+                   || labelNode.textContent?.trim()?.substring(0, 100))
+                : '';
+            let sel = null;
+            if (f.id) sel = '#' + f.id;
+            else if (f.name)
+                sel = f.tagName.toLowerCase() + '[name="' + f.name + '"]';
+            else if (f.type && f.type !== 'text')
+                sel = f.tagName.toLowerCase() + '[type="' + f.type + '"]';
+            fields.push({
+                tag: f.tagName.toLowerCase(),
+                type: f.type || 'text',
+                name: f.name || '',
+                placeholder: f.placeholder || '',
+                label: label || '',
+                selector: sel,
+                context: getContext(f)
+            });
+        });
+        // Buttons
+        document.querySelectorAll('button, input[type=submit]').forEach(b => {
+            if (b.offsetParent === null && b.offsetWidth === 0) return;
+            const btnText = (b.textContent || b.value || '').trim();
+            if (!btnText || btnText.length > 100) return;
+            let sel = null;
+            if (b.id) sel = '#' + b.id;
+            else if (b.name)
+                sel = b.tagName.toLowerCase() + '[name="' + b.name + '"]';
+            else if (b.className && typeof b.className === 'string') {
+                const cls = b.className.trim().split(/\\s+/)[0];
+                if (cls) sel = b.tagName.toLowerCase() + '.' + cls;
+            }
+            fields.push({
+                tag: b.tagName.toLowerCase(),
+                type: 'submit_button',
+                name: b.name || '',
+                placeholder: '',
+                label: btnText,
+                selector: sel,
+                context: getContext(b)
+            });
+        });
+        // Nav links
+        document.querySelectorAll(
+            'nav a, header a, [role="navigation"] a'
+        ).forEach(a => {
+            if (a.offsetParent === null && a.offsetWidth === 0) return;
+            const text = (a.textContent || '').trim();
+            if (!text || text.length > 80) return;
+            let sel = null;
+            if (a.id) sel = '#' + a.id;
+            else {
+                const href = a.getAttribute('href') || '';
+                if (href && href !== '#')
+                    sel = 'a[href="' + href + '"]';
+                else if (a.className && typeof a.className === 'string') {
+                    const cls = a.className.trim().split(/\\s+/)[0];
+                    if (cls) sel = 'a.' + cls;
+                }
+            }
+            fields.push({
+                tag: 'a',
+                type: 'nav_link',
+                name: '',
+                placeholder: '',
+                label: text,
+                selector: sel,
+                context: 'nav'
+            });
+        });
+        return fields;
+    }""")
+
+    # Build 1-line summaries for prompt
+    summary_lines: list[str] = []
+    for f in fields:
+        ctx = f.get("context", "")
+        ctx_tag = f"[{ctx}]" if ctx else ""
+        sel = f.get("selector") or "?"
+        if f["type"] == "submit_button":
+            summary_lines.append(
+                f"SUBMIT{ctx_tag}({sel}, {f.get('label', '')!r})"
+            )
+        elif f["type"] == "nav_link":
+            summary_lines.append(
+                f"NAV_LINK({sel}, {f.get('label', '')!r})"
+            )
+        else:
+            ph = f.get("placeholder") or f.get("label") or ""
+            summary_lines.append(
+                f"{f['type']}{ctx_tag}({sel}, {ph!r})"
+            )
+
+    return {
+        "fields": fields,
+        "summary": "\n".join(summary_lines) if summary_lines else "No elements found.",
+    }
+
+
+def _build_observation_from_quick(fields: list[dict]) -> list[dict]:
+    """Build observation-like data from quick page fields for fix_form_submit_steps."""
+    # Synthesize a single observation with all fields as navigated_page_fields
+    return [{
+        "element": {"text": "", "selector": "", "type": "page"},
+        "observed_change": {
+            "type": "page_navigation",
+            "navigated_page_fields": fields,
+        },
+    }]
+
+
+# ---------------------------------------------------------------------------
 # Scenario generation (Phase 1: navigate + AI generate)
 # ---------------------------------------------------------------------------
 
@@ -168,15 +345,20 @@ async def generate_scenarios_for_test(
         doc_text = test.doc_text
 
     try:
-        from aat.core.models import AIConfig, EngineConfig
         from aat.adapters import ADAPTER_REGISTRY
+        from aat.core.models import AIConfig, EngineConfig
         from aat.engine.web import WebEngine
     except ImportError as exc:
         msg = f"AAT core not installed: {exc}. Run 'pip install -e .' from project root."
         logger.error(msg)
         return {"error": msg}
 
-    engine_config = EngineConfig(type="web", headless=settings.playwright_headless)
+    engine_config = EngineConfig(
+        type="web",
+        headless=settings.playwright_headless,
+        viewport_width=1920,
+        viewport_height=1080,
+    )
     engine = WebEngine(engine_config)
 
     try:
@@ -184,6 +366,9 @@ async def generate_scenarios_for_test(
         await engine.navigate(target_url)
         page_text = await engine.get_page_text()
         screenshot = await engine.screenshot()
+
+        # Quick observation — collect page elements with form/nav context
+        observed = await _quick_observe_page(engine)
 
         # Save initial screenshot + stream to frontend
         await _save_screenshot(
@@ -208,12 +393,24 @@ async def generate_scenarios_for_test(
             prompt = _SCENARIO_PROMPT_WITH_DOCS.format(
                 url=target_url,
                 page_text=page_text[:8000],
+                page_elements=observed["summary"][:4000],
                 doc_text=doc_text[:16000],
             )
         else:
-            prompt = _SCENARIO_PROMPT.format(url=target_url, page_text=page_text[:8000])
+            prompt = _SCENARIO_PROMPT.format(
+                url=target_url,
+                page_text=page_text[:8000],
+                page_elements=observed["summary"][:4000],
+            )
 
         scenarios = await adapter.generate_scenarios(prompt, images=[screenshot])
+
+        # Apply form-submit fix
+        if scenarios:
+            from app.scenario_utils import fix_form_submit_steps
+
+            fake_obs = _build_observation_from_quick(observed["fields"])
+            scenarios = fix_form_submit_steps(scenarios, fake_obs)
 
         if not scenarios:
             return {"error": "AI generated no scenarios"}
@@ -250,10 +447,8 @@ async def generate_scenarios_for_test(
         logger.exception("Scenario generation failed for test %d", test_id)
         return {"error": str(exc)}
     finally:
-        try:
+        with contextlib.suppress(Exception):
             await engine.stop()
-        except Exception:
-            pass
 
 
 # ---------------------------------------------------------------------------
@@ -279,6 +474,7 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
 
     # -- Import AAT core (lazy to give clear error if missing) --
     try:
+        from aat.adapters import ADAPTER_REGISTRY
         from aat.core.models import (
             ActionType,
             AIConfig,
@@ -287,12 +483,11 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
             MatchingConfig,
             Scenario,
         )
-        from aat.adapters import ADAPTER_REGISTRY
-        from aat.engine.web import WebEngine
+        from aat.engine.comparator import Comparator
         from aat.engine.executor import StepExecutor
         from aat.engine.humanizer import Humanizer
         from aat.engine.waiter import Waiter
-        from aat.engine.comparator import Comparator
+        from aat.engine.web import WebEngine
         from aat.matchers import MATCHER_REGISTRY
         from aat.matchers.hybrid import HybridMatcher
     except ImportError as exc:
@@ -300,8 +495,13 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
         logger.error(msg)
         return {"passed": False, "error": msg, "duration_ms": _elapsed(start)}
 
-    # -- Start headless browser --
-    engine_config = EngineConfig(type="web", headless=settings.playwright_headless)
+    # -- Start headless browser (same viewport as scan crawler) --
+    engine_config = EngineConfig(
+        type="web",
+        headless=settings.playwright_headless,
+        viewport_width=1920,
+        viewport_height=1080,
+    )
     engine = WebEngine(engine_config)
 
     # Console log collector
@@ -352,9 +552,10 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
                 raw = [raw]
             scenarios = [Scenario.model_validate(item) for item in raw]
         else:
-            # Auto mode: generate scenarios inline
+            # Auto mode: quick observation + AI generation (same pipeline as scan)
             page_text = await engine.get_page_text()
             screenshot = await engine.screenshot()
+            observed = await _quick_observe_page(engine)
 
             ai_config = AIConfig(
                 provider=settings.ai_provider,
@@ -369,8 +570,19 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
                     "duration_ms": _elapsed(start),
                 }
             adapter = adapter_cls(ai_config)
-            prompt = _SCENARIO_PROMPT.format(url=target_url, page_text=page_text[:8000])
+            prompt = _SCENARIO_PROMPT.format(
+                url=target_url,
+                page_text=page_text[:8000],
+                page_elements=observed["summary"][:4000],
+            )
             scenarios = await adapter.generate_scenarios(prompt, images=[screenshot])
+
+            # Apply form-submit fix
+            if scenarios:
+                from app.scenario_utils import fix_form_submit_steps
+
+                fake_obs = _build_observation_from_quick(observed["fields"])
+                scenarios = fix_form_submit_steps(scenarios, fake_obs)
 
         if not scenarios:
             return {
@@ -481,13 +693,19 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
                     )
 
                     elapsed = getattr(result, "elapsed_ms", 0)
-                    error_msg = getattr(result, "error_message", None) if status == "failed" else None
+                    error_msg = (
+                        getattr(result, "error_message", None) if status == "failed" else None
+                    )
 
                     step_results.append({
                         "step": i + 1,
-                        "action": result.action if hasattr(result, "action") else str(step.action),
+                        "action": (
+                            result.action if hasattr(result, "action") else str(step.action)
+                        ),
                         "description": step.description or None,
-                        "target": step.target.selector or step.target.text if step.target else None,
+                        "target": (
+                            step.target.selector or step.target.text if step.target else None
+                        ),
                         "value": step.value if step.action == ActionType.NAVIGATE else None,
                         "status": status,
                         "elapsed_ms": elapsed,
@@ -615,10 +833,8 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
             "duration_ms": _elapsed(start),
         }
     finally:
-        try:
+        with contextlib.suppress(Exception):
             await engine.stop()
-        except Exception:
-            pass
 
 
 def _elapsed(start: float) -> float:

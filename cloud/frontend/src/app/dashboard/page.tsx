@@ -37,6 +37,9 @@ export default function DashboardPage() {
   const [additionalConverting, setAdditionalConverting] = useState(false);
   const [additionalYaml, setAdditionalYaml] = useState("");
   const [additionalInfo, setAdditionalInfo] = useState<{ count: number; steps: number } | null>(null);
+  const [additionalRelevance, setAdditionalRelevance] = useState<{
+    valid: boolean; reason: string; feature_missing: boolean; warnings: string[];
+  } | null>(null);
   const [customPrompt, setCustomPrompt] = useState("");
   const [converting, setConverting] = useState(false);
   const [convertedYaml, setConvertedYaml] = useState("");
@@ -95,12 +98,13 @@ export default function DashboardPage() {
   }, [user]);
 
   // Redirect if not authenticated
-  if (!authLoading && !user) {
-    router.push("/login");
-    return null;
-  }
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push("/login");
+    }
+  }, [authLoading, user, router]);
 
-  if (authLoading) {
+  if (authLoading || !user) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <p className="text-gray-500">{tc("loading")}</p>
@@ -135,11 +139,15 @@ export default function DashboardPage() {
     setAdditionalConverting(true);
     setAdditionalYaml("");
     setAdditionalInfo(null);
+    setAdditionalRelevance(null);
 
     try {
-      const result = await convertScenario(url, additionalPrompt);
+      const result = await convertScenario(url, additionalPrompt, "en", activeScan?.id);
       setAdditionalYaml(result.scenario_yaml);
       setAdditionalInfo({ count: result.scenarios_count, steps: result.steps_total });
+      if (result.relevance) {
+        setAdditionalRelevance(result.relevance);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Generation failed";
       setError(translateApiError(msg, te));
@@ -1100,10 +1108,33 @@ export default function DashboardPage() {
                             </span>
                           )}
                         </div>
+                        {/* Relevance validation warning */}
+                        {additionalRelevance && !additionalRelevance.valid && (
+                          <div className={`rounded-lg border p-3 text-sm space-y-1 ${
+                            additionalRelevance.feature_missing
+                              ? "border-amber-300 bg-amber-50"
+                              : "border-orange-300 bg-orange-50"
+                          }`}>
+                            <p className="font-medium text-amber-800">
+                              {additionalRelevance.feature_missing ? "\u26A0\uFE0F " : "\u26A0\uFE0F "}
+                              {additionalRelevance.reason}
+                            </p>
+                            {additionalRelevance.warnings.map((w, i) => (
+                              <p key={i} className="text-xs text-amber-700 ml-5">• {w}</p>
+                            ))}
+                          </div>
+                        )}
                         {/* Additional YAML preview */}
                         {additionalYaml && (
                           <div className="space-y-2">
-                            <p className="text-xs font-medium text-gray-600">{t("userRequestedTests")}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-xs font-medium text-gray-600">{t("userRequestedTests")}</p>
+                              {additionalRelevance && !additionalRelevance.valid && !additionalRelevance.feature_missing && (
+                                <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                                  {"\u26A0\uFE0F"} {t("unverifiedScenario")}
+                                </span>
+                              )}
+                            </div>
                             <div className="max-h-40 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-3">
                               <pre className="whitespace-pre-wrap text-xs text-gray-700">{additionalYaml}</pre>
                             </div>
@@ -1116,8 +1147,11 @@ export default function DashboardPage() {
                     <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3">
                       <span className="text-sm text-gray-600">
                         {selectedTests.size} {ts("selectedTests")}
-                        {additionalInfo && (
-                          <span className="ml-1 text-blue-600">+ {additionalInfo.count}</span>
+                        {additionalInfo && additionalInfo.count > 0 && !(additionalRelevance?.feature_missing) && (
+                          <span className={`ml-1 ${additionalRelevance && !additionalRelevance.valid ? "text-amber-600" : "text-blue-600"}`}>
+                            + {additionalInfo.count}
+                            {additionalRelevance && !additionalRelevance.valid && " \u26A0\uFE0F"}
+                          </span>
                         )}
                       </span>
                       <button

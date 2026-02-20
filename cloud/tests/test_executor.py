@@ -2,36 +2,38 @@
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import pytest
-
 from app.executor import _SCENARIO_PROMPT, _screenshot_dir_for_test
 
 
 def test_scenario_prompt_contains_instructions() -> None:
     """AI prompt includes key generation instructions."""
-    prompt = _SCENARIO_PROMPT.format(url="https://example.com", page_text="Hello")
+    prompt = _SCENARIO_PROMPT.format(
+        url="https://example.com", page_text="Hello", page_elements="No elements",
+    )
 
     assert "E2E test scenario" in prompt
     assert "JSON" in prompt
     assert "https://example.com" in prompt
     assert "Hello" in prompt
-    # Should mention user-perspective flows
-    assert "user flow" in prompt.lower() or "login" in prompt.lower()
     # Should request exact text targets (not generic placeholders)
     assert "exact text" in prompt.lower()
+    # Should include form submit rule
+    assert "SUBMIT[form]" in prompt
 
 
 def test_scenario_prompt_format_placeholders() -> None:
-    """Prompt template accepts url and page_text placeholders."""
+    """Prompt template accepts url, page_text, and page_elements placeholders."""
     prompt = _SCENARIO_PROMPT.format(
         url="https://myapp.com/login",
         page_text="Username Password Login",
+        page_elements="email[form](#email, 'Email')",
     )
     assert "https://myapp.com/login" in prompt
     assert "Username Password Login" in prompt
+    assert "email[form](#email" in prompt
 
 
 def test_screenshot_dir_creation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

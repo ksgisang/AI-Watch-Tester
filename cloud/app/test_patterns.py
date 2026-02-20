@@ -337,7 +337,7 @@ def build_pattern_tests(
 
     return {
         "id": "patterns",
-        "name": "표준 요소 테스트" if ko else "Standard Element Tests",
+        "name": "UI 요소 테스트" if ko else "Standard Element Tests",
         "auto_selected": True,
         "tests": tests,
     }

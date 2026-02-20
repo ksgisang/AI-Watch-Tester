@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import jwt
-from jwt import PyJWKClient
 from fastapi import Depends, HTTPException, Request
+from jwt import PyJWKClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -131,7 +131,7 @@ async def _authenticate_api_key(api_key: str, db: AsyncSession) -> User:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
     # Update last_used_at
-    ak.last_used_at = datetime.now(timezone.utc)
+    ak.last_used_at = datetime.now(UTC)
     await db.commit()
 
     # Load user

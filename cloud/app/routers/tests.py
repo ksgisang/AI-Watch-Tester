@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
+import json
 import logging
+from datetime import UTC
 from pathlib import Path
 
 import yaml
@@ -24,6 +27,17 @@ from app.database import get_db
 from app.docparse import allowed_extension, extract_text
 from app.middleware import check_rate_limit
 from app.models import Test, TestStatus, User
+from app.scenario_utils import (
+    DEFAULT_AI_MODELS as _DEFAULT_MODELS,
+)
+from app.scenario_utils import (
+    compress_observations_for_ai,
+    fix_form_submit_steps,
+    validate_and_retry,
+)
+from app.scenario_utils import (
+    parse_json as _parse_json,
+)
 from app.schemas import (
     ConvertScenarioRequest,
     ConvertScenarioResponse,
@@ -56,7 +70,7 @@ async def create_test(
         try:
             parsed = yaml.safe_load(body.scenario_yaml)
         except yaml.YAMLError as exc:
-            raise HTTPException(status_code=422, detail=f"Invalid YAML: {exc}")
+            raise HTTPException(status_code=422, detail=f"Invalid YAML: {exc}") from exc
         if not parsed:
             raise HTTPException(status_code=422, detail="Empty scenario YAML")
         try:
@@ -68,7 +82,7 @@ async def create_test(
         except ImportError:
             pass
         except Exception as exc:
-            raise HTTPException(status_code=422, detail=f"Scenario validation error: {exc}")
+            raise HTTPException(status_code=422, detail=f"Scenario validation error: {exc}") from exc
 
     if body.scenario_yaml:
         initial_status = TestStatus.QUEUED
@@ -162,7 +176,7 @@ async def update_scenarios(
     try:
         parsed = yaml.safe_load(body.scenario_yaml)
     except yaml.YAMLError as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid YAML: {exc}")
+        raise HTTPException(status_code=422, detail=f"Invalid YAML: {exc}") from exc
     if not parsed:
         raise HTTPException(status_code=422, detail="Empty scenario YAML")
 
@@ -175,7 +189,7 @@ async def update_scenarios(
     except ImportError:
         pass  # AAT not installed — skip model validation
     except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Scenario validation error: {exc}")
+        raise HTTPException(status_code=422, detail=f"Scenario validation error: {exc}") from exc
 
     test.scenario_yaml = body.scenario_yaml
     test.steps_total = sum(
@@ -231,8 +245,8 @@ async def cancel_test(
 
     test.status = TestStatus.FAILED
     test.error_message = "Cancelled by user"
-    from datetime import datetime, timezone
-    test.updated_at = datetime.now(timezone.utc)
+    from datetime import datetime
+    test.updated_at = datetime.now(UTC)
     await db.commit()
     await db.refresh(test)
 
@@ -274,7 +288,7 @@ async def upload_document(
     if not allowed_extension(filename):
         raise HTTPException(
             status_code=422,
-            detail=f"Unsupported file type. Allowed: .md, .txt, .pdf, .docx",
+            detail="Unsupported file type. Allowed: .md, .txt, .pdf, .docx",
         )
 
     # Read file content with size check
@@ -296,7 +310,7 @@ async def upload_document(
         text = extract_text(file_path)
     except ValueError as exc:
         file_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # Append to doc_text (support multiple uploads)
     header = f"\n\n--- {filename} ---\n\n"
@@ -319,23 +333,34 @@ async def upload_document(
 
 logger = logging.getLogger(__name__)
 
-# Default model per AI provider (mirrors executor.py)
-_DEFAULT_MODELS: dict[str, str] = {
-    "claude": "claude-sonnet-4-20250514",
-    "openai": "gpt-4o",
-    "ollama": "codellama:7b",
-}
-
 _CONVERT_PROMPT = """\
 You are an E2E test scenario generator.
 
-The user wants to test the following on their website.
+## ========== #1 PRIORITY: USER REQUEST (OVERRIDE ALL OTHER RULES) ==========
+
+The user's request below is the SINGLE MOST IMPORTANT instruction.
+Generate scenarios ONLY for what the user asked. Do NOT test other features.
+
+- "회원가입 테스트 해줘" → Generate ONLY signup test scenarios. Do NOT test login,
+  navigation, about page, blog, help, or any other feature.
+- "로그인 테스트 해줘" → Generate ONLY login test scenarios.
+- "전체 테스트 해줘" / "사이트 테스트 해줘" → Test all features found.
+
+If the user asks for a SPECIFIC feature, your response MUST contain:
+  1. Navigate to homepage
+  2. Click the element that leads to the requested feature
+  3. Interact with the feature (fill form fields, click buttons, etc.)
+  4. Assert the expected result
+If you generate tests for features the user did NOT ask for, your response is WRONG.
 
 ## Target
 - URL: {url}
 
 ## User Request
 {user_prompt}
+
+## Element Summary
+{element_summary}
 
 ## Actual Page Data (from real browser visit)
 {page_data}
@@ -346,34 +371,61 @@ The user wants to test the following on their website.
 ## Reference Documents
 {reference_documents}
 
-## CRITICAL Rules
-1. Convert the user's natural language description into concrete E2E test scenarios
-2. Generate 1-5 test scenarios covering the described flows
-3. Each scenario should have clear steps: navigate, click, type, assert
-4. **Use EXACT text from the "Actual Page Data" and "Interaction Observations"**
-   - Use real button labels, link text, menu names exactly as they appear
-   - NEVER use generic placeholders like "menu1", "menu2", "button1"
-   - NEVER guess what happens — use observed change types and new_text
-5. **SELECTOR-FIRST RULE**: For click/type targets, include BOTH "selector" AND "text":
-   - "selector": CSS selector from observation data (e.g., "a[href='#features']")
-   - "text": visible label text as fallback
-   - The test engine tries selector first, text as fallback
-   - Example: {{"selector": "a[href='#login']", "text": "로그인"}}
-6. For assertions, use the observed results:
-   - If observation shows modal_opened → assert the observed new_text
-   - If observation shows page_navigation → assert URL change
-   - If observation shows anchor_scroll → assert section text visible
-7. For form fields, use exact selectors/placeholders from page data
-8. Keep steps concise and actionable
-9. Use {{{{url}}}} as the base URL placeholder in navigate actions
-10. **ACCESS PATH**: Include navigation steps that match the observed access path.
-    If observation shows "click a[href='#login'] on homepage → modal opens",
-    the scenario MUST include: navigate → click a[href='#login'] → interact with modal
+## ========== RULES ==========
+
+1. **USER REQUEST FIRST**: Generate scenarios ONLY for the user's requested feature.
+   The "TEST ALL ELEMENTS" rule ONLY applies when the user asks for broad testing
+   (e.g., "전체 테스트", "사이트 테스트", "모든 기능 테스트").
+   For specific requests like "회원가입 테스트", generate ONLY that feature's test.
+
+2. **FORM INTERACTION IS REQUIRED**: When the user requests a form-based feature
+   (signup, login, search, payment), the scenario MUST include:
+   a. navigate to homepage
+   b. find_and_click the element that opens the form page/modal
+   c. find_and_type into EACH form field (use selectors from Form Fields section)
+   d. find_and_click the SUBMIT[form] button
+   e. assert the expected result
+   A scenario with ONLY navigation + assert (no find_and_type) is INCOMPLETE and WRONG.
+
+3. **FORM SUBMIT BUTTON — CRITICAL**:
+   After filling form fields, the NEXT click MUST be SUBMIT[form], NOT SUBMIT[nav].
+   - SUBMIT[form] = button INSIDE the form → USE THIS
+   - SUBMIT[nav] = navigation menu link → NEVER use after form input
+   Example: SUBMIT[form](button.btn, '다음') and SUBMIT[nav](a.nav, '가입')
+   → After filling email/password, click '다음' (SUBMIT[form]), NOT '가입' (SUBMIT[nav])
+
+4. **USE ONLY OBSERVED DATA**: Every text, selector, URL MUST come from the
+   Page Data or Interaction Observations sections above.
+   - NEVER invent text — copy-paste from data.
+   - NEVER guess button labels or field names.
+
+5. **SELECTOR-FIRST**: Every click/type target MUST include BOTH "selector" AND "text":
+   {{"selector": "a[href='#login']", "text": "로그인"}}
+
+6. **ACCESS PATH**: Include navigation steps matching the observed access path.
+   If observation shows "click '가입' → navigate to /register with form fields",
+   the scenario MUST: navigate homepage → click '가입' → fill form → submit.
+
+7. **CASE INSENSITIVE ASSERT**: All assert steps MUST set "case_insensitive": true.
+
+8. **NO-SUBSTITUTION RULE**: If the requested feature does NOT exist in the data,
+   return an EMPTY array []. NEVER substitute a different feature.
+   "회원가입" requested but only "로그인" exists → return [], NOT a login test.
+
+9. **TEST INDEPENDENCE**: Each scenario MUST start with navigate to {{{{url}}}}.
+
+10. For form fields, use EXACT selectors/placeholders from the Form Fields section.
+    For dummy data: email → "awttest@example.com", password → "TestPass123!"
 
 Return the scenarios as a JSON array. Each step target should include:
 - "selector": CSS selector from observation data (preferred)
 - "text": visible text label (fallback)
-Follow the format specified in the system instructions.\
+
+FINAL CHECK: Before responding, verify:
+1. Does every scenario match the user's request? (NOT other features)
+2. Does every form-feature test include find_and_type steps?
+3. Does the submit click use SUBMIT[form], not SUBMIT[nav]?
+Remove any scenario that tests a feature the user did NOT request.\
 """
 
 
@@ -391,8 +443,8 @@ async def convert_scenario(
     import json
 
     try:
-        from aat.core.models import AIConfig, EngineConfig
         from aat.adapters import ADAPTER_REGISTRY
+        from aat.core.models import AIConfig, EngineConfig
         from aat.engine.web import WebEngine
     except ImportError as exc:
         raise HTTPException(
@@ -420,73 +472,146 @@ async def convert_scenario(
         )
     adapter = adapter_cls(ai_config)
 
-    # --- Quick page observation ---
+    # --- Gather page data + observations ---
     page_data_str = "Page visit failed — using user prompt only."
     observations_str = "No observations."
+    element_summary = "No element data available."
     observations_raw: list[dict] = []
     pdata_raw: dict | None = None
-    engine_config = EngineConfig(
-        type="web", headless=settings.playwright_headless,
-    )
-    engine = WebEngine(engine_config)
+    page_list_for_validation: list[dict] | None = None
 
-    try:
-        await engine.start()
-        page = engine.page
-        await page.goto(
-            str(body.target_url),
-            wait_until="domcontentloaded",
-            timeout=12000,
+    # If scan_id provided, use existing scan data (much richer than fresh visit)
+    if body.scan_id:
+        from app.models import Scan, ScanStatus
+
+        scan_q = select(Scan).where(
+            Scan.id == body.scan_id, Scan.user_id == user.id,
         )
-        try:
-            await page.wait_for_load_state(
-                "networkidle", timeout=5000,
+        scan = (await db.execute(scan_q)).scalar_one_or_none()
+        if scan and scan.status in (ScanStatus.COMPLETED, ScanStatus.PLANNED):
+            pages = _parse_json(scan.pages_json) or []
+            observations_raw = _parse_json(
+                getattr(scan, "observations_json", None),
+            ) or []
+            # Collect per-page observations as fallback
+            if not observations_raw:
+                for p in pages:
+                    observations_raw.extend(p.get("observations", []))
+
+            # Build page data from all scanned pages
+            all_page_data: dict = {
+                "nav_menus": [], "forms": [], "buttons": [],
+                "links": [], "images": [],
+            }
+            for p in pages:
+                all_page_data["nav_menus"].extend(p.get("nav_menus", []))
+                all_page_data["forms"].extend(p.get("forms", []))
+                all_page_data["buttons"].extend(p.get("buttons", []))
+                all_page_data["links"].extend(p.get("links", [])[:20])
+                all_page_data["images"].extend(p.get("images", []))
+
+            pdata_raw = all_page_data
+            page_list_for_validation = pages
+            page_data_str = json.dumps(
+                all_page_data, ensure_ascii=False, indent=2,
+            )[:8000]
+            if observations_raw:
+                observations_str = compress_observations_for_ai(observations_raw, max_tokens=10000)
+
+            # Build element summary with counts
+            element_summary = _build_element_summary(
+                observations_raw, all_page_data,
             )
-        except Exception:
-            pass
+            logger.info(
+                "Convert: using scan %d data — %d observations, %d pages",
+                body.scan_id, len(observations_raw), len(pages),
+            )
 
-        # Extract page data (single page, no full crawl)
-        pdata_raw = await _extract_page_data(
-            page, str(body.target_url), take_screenshot=False,
+    # Fallback: fresh page visit (no scan data)
+    if pdata_raw is None:
+        engine_config = EngineConfig(
+            type="web", headless=settings.playwright_headless,
+            viewport_width=1920, viewport_height=1080,
         )
+        engine = WebEngine(engine_config)
 
-        # Filter clickable elements by user keywords for
-        # targeted observation (not full scan)
-        keywords = _extract_keywords(body.user_prompt)
-        filtered_data = _filter_by_keywords(pdata_raw, keywords)
-
-        # Observe only keyword-relevant elements
-        observations_raw = await _observe_interactions(
-            page, filtered_data, str(body.target_url),
-            max_interactions=10,
-        )
-
-        # Serialize for prompt (strip screenshots)
-        pdata_raw.pop("screenshot_base64", None)
-        page_data_str = json.dumps(
-            pdata_raw, ensure_ascii=False, indent=2,
-        )[:6000]
-        if observations_raw:
-            from app.routers.scan import _build_observation_table
-            observations_str = _build_observation_table(observations_raw)
-    except Exception as exc:
-        logger.warning(
-            "Page observation failed for convert: %s", exc,
-        )
-    finally:
         try:
-            await engine.stop()
-        except Exception:
-            pass
+            await engine.start()
+            page = engine.page
+            await page.goto(
+                str(body.target_url),
+                wait_until="domcontentloaded",
+                timeout=12000,
+            )
+            with contextlib.suppress(Exception):
+                await page.wait_for_load_state(
+                    "networkidle", timeout=5000,
+                )
+
+            # Extract page data (single page, no full crawl)
+            pdata_raw = await _extract_page_data(
+                page, str(body.target_url), take_screenshot=False,
+            )
+
+            # Filter clickable elements by user keywords for
+            # targeted observation (not full scan)
+            keywords = _extract_keywords(body.user_prompt)
+            filtered_data = _filter_by_keywords(pdata_raw, keywords)
+
+            # Observe only keyword-relevant elements
+            observations_raw = await _observe_interactions(
+                page, filtered_data, str(body.target_url),
+                max_interactions=10,
+            )
+
+            # Serialize for prompt (strip screenshots)
+            pdata_raw.pop("screenshot_base64", None)
+            page_data_str = json.dumps(
+                pdata_raw, ensure_ascii=False, indent=2,
+            )[:6000]
+            if observations_raw:
+                observations_str = compress_observations_for_ai(observations_raw, max_tokens=10000)
+
+            # Build element summary with counts
+            element_summary = _build_element_summary(
+                observations_raw, pdata_raw,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Page observation failed for convert: %s", exc,
+            )
+        finally:
+            with contextlib.suppress(Exception):
+                await engine.stop()
 
     # Fetch user reference documents
     from app.routers.documents import get_user_doc_text
 
     ref_docs = await get_user_doc_text(user.id, db)
 
+    # --- Pre-generation: check if the requested feature exists ---
+    relevance_pre = validate_scenario_relevance(
+        body.user_prompt, [], observations_raw, pdata_raw,
+    )
+    if relevance_pre.get("feature_missing"):
+        # Feature doesn't exist on site — don't generate wrong scenario
+        logger.info(
+            "Convert: feature missing for request '%s'",
+            body.user_prompt[:60],
+        )
+        return {
+            "scenario_yaml": "",
+            "scenarios_count": 0,
+            "steps_total": 0,
+            "validation": [],
+            "validation_summary": {"verified": 0, "total": 0, "percent": 0},
+            "relevance": relevance_pre,
+        }
+
     prompt = _CONVERT_PROMPT.format(
         url=body.target_url,
         user_prompt=body.user_prompt,
+        element_summary=element_summary,
         page_data=page_data_str,
         observations=observations_str,
         reference_documents=ref_docs or "No reference documents provided.",
@@ -505,12 +630,47 @@ async def convert_scenario(
             status_code=422, detail="AI generated no scenarios",
         )
 
-    # Validate against observation data and retry if needed
-    from app.routers.scan import validate_and_retry
+    # --- Post-generation: validate relevance ---
+    relevance = validate_scenario_relevance(
+        body.user_prompt, scenarios, observations_raw, pdata_raw,
+    )
 
-    page_list = [pdata_raw] if pdata_raw else None
+    # If invalid (wrong scenario), retry once with stronger prompt
+    if not relevance.get("valid") and not relevance.get("feature_missing"):
+        logger.info(
+            "Convert: relevance check failed (%s), retrying",
+            relevance.get("reason", ""),
+        )
+        retry_prompt = (
+            f"{prompt}\n\n"
+            "## RELEVANCE CHECK FAILED — REGENERATE\n"
+            f"Your previous response did NOT match the user's request.\n"
+            f"User asked for: {body.user_prompt}\n"
+            f"Problem: {relevance.get('reason', '')}\n"
+            f"Warnings: {relevance.get('warnings', [])}\n\n"
+            "REGENERATE the scenario to EXACTLY match the user's request.\n"
+            "If the requested feature does not exist in the page data, "
+            "return an EMPTY array [].\n"
+            "Return ONLY valid JSON array."
+        )
+        try:
+            retry_scenarios = await adapter.generate_scenarios(retry_prompt)
+            if retry_scenarios:
+                scenarios = retry_scenarios
+                relevance = validate_scenario_relevance(
+                    body.user_prompt, scenarios, observations_raw, pdata_raw,
+                )
+        except Exception as exc:
+            logger.warning("Relevance retry failed: %s", exc)
+
+    # Fix form-submit-after-input: replace nav clicks with form submit buttons
+    scenarios = fix_form_submit_steps(scenarios, observations_raw)
+
+    # Validate against observation data and retry if needed
+    if page_list_for_validation is None:
+        page_list_for_validation = [pdata_raw] if pdata_raw else None
     scenarios, validation = await validate_and_retry(
-        scenarios, observations_raw, page_list, adapter, prompt,
+        scenarios, observations_raw, page_list_for_validation, adapter, prompt,
     )
 
     # Compute validation summary
@@ -542,6 +702,426 @@ async def convert_scenario(
                 if total_v > 0 else 100
             ),
         },
+        "relevance": relevance,
+    }
+
+
+def _build_element_summary(
+    observations: list[dict], page_data: dict,
+) -> str:
+    """Build a concise element count summary for the AI prompt.
+
+    Tells the AI exactly how many elements exist so it generates
+    tests for ALL of them, not just a sample.
+    """
+    lines: list[str] = []
+
+    # Count observation types
+    accordion_items: list[str] = []
+    modal_items: list[str] = []
+    nav_items: list[str] = []
+    page_nav_items: list[str] = []
+    other_items: list[str] = []
+
+    for obs in observations:
+        elem = obs.get("element", {})
+        change = obs.get("observed_change", {})
+        change_type = change.get("type", "")
+        text = (elem.get("text") or "")[:60]
+
+        if change_type == "no_change":
+            continue
+        elif change_type == "content_expanded" or elem.get("type") == "accordion":
+            accordion_items.append(text)
+        elif change_type == "modal_opened":
+            modal_items.append(text)
+        elif change_type == "anchor_scroll" or change_type == "section_change":
+            nav_items.append(text)
+        elif change_type == "page_navigation":
+            page_nav_items.append(text)
+        else:
+            other_items.append(text)
+
+    if accordion_items:
+        lines.append(
+            f"- Accordions: {len(accordion_items)} items — "
+            f"test ALL: {json.dumps(accordion_items, ensure_ascii=False)}"
+        )
+    if modal_items:
+        lines.append(
+            f"- Modals: {len(modal_items)} triggers — "
+            f"test ALL: {json.dumps(modal_items, ensure_ascii=False)}"
+        )
+    if page_nav_items:
+        lines.append(
+            f"- Page navigations: {len(page_nav_items)} links — "
+            f"{json.dumps(page_nav_items, ensure_ascii=False)}"
+        )
+
+    # Count page data elements
+    images = page_data.get("images", [])
+    if images:
+        img_alts = [
+            (img.get("alt") or img.get("src", "").split("/")[-1])[:40]
+            for img in images[:20]
+        ]
+        lines.append(
+            f"- Images: {len(images)} total — "
+            f"test ALL: {json.dumps(img_alts, ensure_ascii=False)}"
+        )
+
+    buttons = page_data.get("buttons", [])
+    if buttons:
+        btn_texts = [(b.get("text") or "")[:30] for b in buttons[:15]]
+        lines.append(f"- Buttons: {len(buttons)} — {json.dumps(btn_texts, ensure_ascii=False)}")
+
+    forms = page_data.get("forms", [])
+    if forms:
+        total_fields = sum(len(f.get("fields", [])) for f in forms)
+        lines.append(f"- Forms: {len(forms)} forms, {total_fields} total fields")
+
+    if not lines:
+        return "No element data available."
+
+    header = (
+        "**You MUST generate test steps for ALL elements listed below.**\n"
+        "Do NOT test only 2-3 samples — cover EVERY item.\n"
+    )
+    return header + "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Scenario relevance validation — user request ↔ generated scenario match
+# ---------------------------------------------------------------------------
+
+_TEST_INTENTS: dict[str, dict] = {
+    "signup": {
+        "label": "회원가입",
+        "request_kw": [
+            "회원가입", "signup", "sign up", "register", "가입",
+            "계정 생성", "계정생성", "registration",
+        ],
+        "scenario_kw": [
+            "회원가입", "signup", "register", "가입", "sign up",
+            "이름", "name",
+        ],
+        "anti_kw": ["로그인", "login", "sign in", "signin"],
+        "observation_kw": [
+            "회원가입", "signup", "register", "가입", "sign up",
+        ],
+        "min_step_types": ["page_or_modal", "field_input", "submit"],
+    },
+    "login": {
+        "label": "로그인",
+        "request_kw": [
+            "로그인", "login", "sign in", "signin", "로그 인",
+            "인증", "authentication",
+        ],
+        "scenario_kw": [
+            "로그인", "login", "sign in", "signin",
+        ],
+        "anti_kw": ["회원가입", "signup", "register", "가입"],
+        "observation_kw": [
+            "로그인", "login", "sign in",
+        ],
+        "min_step_types": ["page_or_modal", "field_input", "submit"],
+    },
+    "search": {
+        "label": "검색",
+        "request_kw": [
+            "검색", "search", "찾기", "검색어", "서치",
+        ],
+        "scenario_kw": [
+            "검색", "search", "찾기", "서치",
+        ],
+        "anti_kw": [],
+        "observation_kw": [
+            "검색", "search",
+        ],
+        "min_step_types": ["field_input"],
+    },
+    "payment": {
+        "label": "결제",
+        "request_kw": [
+            "결제", "payment", "checkout", "구매", "주문",
+            "pay", "purchase", "order",
+        ],
+        "scenario_kw": [
+            "결제", "payment", "checkout", "구매", "주문",
+        ],
+        "anti_kw": [],
+        "observation_kw": [
+            "결제", "payment", "checkout", "구매", "주문", "장바구니", "cart",
+        ],
+        "min_step_types": ["page_or_modal"],
+    },
+    "cart": {
+        "label": "장바구니",
+        "request_kw": [
+            "장바구니", "cart", "basket", "담기",
+        ],
+        "scenario_kw": [
+            "장바구니", "cart", "basket", "담기",
+        ],
+        "anti_kw": [],
+        "observation_kw": [
+            "장바구니", "cart", "basket",
+        ],
+        "min_step_types": ["page_or_modal"],
+    },
+}
+
+
+def _detect_intent(user_request: str) -> dict | None:
+    """Detect the user's test intent from their request text."""
+    req_lower = user_request.lower()
+    for intent_key, intent in _TEST_INTENTS.items():
+        for kw in intent["request_kw"]:
+            if kw.lower() in req_lower:
+                return {**intent, "key": intent_key}
+    return None
+
+
+def _check_feature_exists(
+    intent: dict,
+    observations: list[dict],
+    page_data: dict | None,
+) -> bool:
+    """Check if the requested feature exists in observation/page data."""
+    obs_kw = intent["observation_kw"]
+
+    # Check observations
+    for obs in observations:
+        elem = obs.get("element", {})
+        change = obs.get("observed_change", {})
+        searchable = " ".join([
+            (elem.get("text") or ""),
+            (elem.get("selector") or ""),
+            str(change.get("new_text", [])),
+            str(obs.get("access_path", "")),
+            str(change.get("navigated_page_fields", [])),
+        ]).lower()
+        for kw in obs_kw:
+            if kw.lower() in searchable:
+                return True
+
+    # Check page data (nav menus, buttons, links, forms)
+    if page_data:
+        for section in ["nav_menus", "buttons", "links", "forms"]:
+            for item in page_data.get(section, []):
+                item_str = json.dumps(item, ensure_ascii=False).lower()
+                for kw in obs_kw:
+                    if kw.lower() in item_str:
+                        return True
+
+    return False
+
+
+def _check_scenario_matches_intent(
+    intent: dict,
+    scenarios: list,
+) -> dict:
+    """Check if generated scenarios match the detected intent.
+
+    Returns {"matches": bool, "has_anti_only": bool, "missing_steps": list}
+    """
+    scenario_kw = [k.lower() for k in intent["scenario_kw"]]
+    anti_kw = [k.lower() for k in intent["anti_kw"]]
+    min_steps = intent.get("min_step_types", [])
+
+    # Collect all text from scenarios
+    all_texts: list[str] = []
+    has_field_input = False
+    has_submit = False
+    has_page_or_modal = False
+
+    for sc in scenarios:
+        steps = []
+        if hasattr(sc, "steps"):
+            sc_name = getattr(sc, "name", "") or ""
+            sc_desc = getattr(sc, "description", "") or ""
+            steps = sc.steps
+        elif isinstance(sc, dict):
+            sc_name = sc.get("name", "")
+            sc_desc = sc.get("description", "")
+            steps = sc.get("steps", [])
+        else:
+            continue
+
+        all_texts.extend([sc_name, sc_desc])
+
+        for step in steps:
+            if hasattr(step, "action"):
+                action = step.action.value if hasattr(
+                    step.action, "value"
+                ) else str(step.action)
+                target_text = (
+                    step.target.text if step.target else ""
+                ) or ""
+                value = step.value or ""
+                desc = step.description or ""
+            else:
+                action = str(step.get("action", ""))
+                target_obj = step.get("target")
+                target_text = (
+                    target_obj.get("text", "") if target_obj else ""
+                )
+                value = step.get("value", "")
+                desc = step.get("description", "")
+
+            all_texts.extend([target_text, value, desc])
+
+            if action == "find_and_type":
+                has_field_input = True
+            if action == "find_and_click":
+                # Check if this is a submit-like button
+                click_text = target_text.lower()
+                if any(w in click_text for w in [
+                    "가입", "등록", "submit", "register", "로그인",
+                    "login", "sign", "검색", "search", "결제",
+                    "pay", "구매", "주문", "확인",
+                ]):
+                    has_submit = True
+            if action in ("navigate", "find_and_click"):
+                has_page_or_modal = True
+
+    combined = " ".join(all_texts).lower()
+
+    # Check if scenario contains intent keywords
+    has_intent_kw = any(kw in combined for kw in scenario_kw)
+
+    # Check if scenario ONLY contains anti-keywords (wrong test)
+    has_anti_only = False
+    if anti_kw and not has_intent_kw:
+        has_anti = any(kw in combined for kw in anti_kw)
+        if has_anti:
+            has_anti_only = True
+
+    # Check minimum step requirements
+    missing: list[str] = []
+    step_map = {
+        "page_or_modal": has_page_or_modal,
+        "field_input": has_field_input,
+        "submit": has_submit,
+    }
+    for req in min_steps:
+        if not step_map.get(req, False):
+            missing.append(req)
+
+    matches = has_intent_kw and not has_anti_only and len(missing) == 0
+
+    return {
+        "matches": matches,
+        "has_anti_only": has_anti_only,
+        "missing_steps": missing,
+        "has_intent_kw": has_intent_kw,
+    }
+
+
+def validate_scenario_relevance(
+    user_request: str,
+    scenarios: list,
+    observations: list[dict],
+    page_data: dict | None = None,
+) -> dict:
+    """Validate that generated scenarios match the user's request.
+
+    Returns:
+        {
+            "valid": bool,
+            "confidence": float,
+            "reason": str,
+            "feature_missing": bool,
+            "warnings": list[str],
+        }
+    """
+    intent = _detect_intent(user_request)
+    if intent is None:
+        return {
+            "valid": True,
+            "confidence": 0.5,
+            "reason": "",
+            "feature_missing": False,
+            "warnings": [],
+        }
+
+    label = intent["label"]
+
+    # B) Check if feature exists in site data
+    feature_exists = _check_feature_exists(intent, observations, page_data)
+    if not feature_exists:
+        return {
+            "valid": False,
+            "confidence": 0.9,
+            "reason": f"사이트에서 '{label}' 기능을 찾지 못했습니다.",
+            "feature_missing": True,
+            "warnings": [
+                f"'{label}' 기능을 사이트에서 찾지 못했습니다.",
+                f"'{label}' 페이지가 별도 URL인 경우 해당 URL을 직접 입력해주세요.",
+                "외부 서비스(Google, Kakao 등)를 통한 경우 자동 테스트가 어려울 수 있습니다.",
+            ],
+        }
+
+    # A + C) Check scenario content
+    if not scenarios:
+        return {
+            "valid": False,
+            "confidence": 0.8,
+            "reason": "시나리오가 생성되지 않았습니다.",
+            "feature_missing": False,
+            "warnings": [],
+        }
+
+    match_result = _check_scenario_matches_intent(intent, scenarios)
+
+    if match_result["has_anti_only"]:
+        return {
+            "valid": False,
+            "confidence": 0.9,
+            "reason": (
+                f"'{label}' 테스트를 요청했지만 "
+                f"다른 기능의 시나리오가 생성되었습니다."
+            ),
+            "feature_missing": False,
+            "warnings": [
+                f"요청: '{label}' 테스트",
+                "생성된 시나리오가 요청과 다른 기능을 테스트합니다.",
+                "재생성을 시도합니다.",
+            ],
+        }
+
+    if not match_result["matches"]:
+        warnings: list[str] = []
+        if not match_result["has_intent_kw"]:
+            warnings.append(
+                f"시나리오에 '{label}' 관련 키워드가 포함되어 있지 않습니다."
+            )
+        if match_result["missing_steps"]:
+            step_names = {
+                "page_or_modal": "페이지/모달 진입",
+                "field_input": "필드 입력",
+                "submit": "제출 버튼 클릭",
+            }
+            missing_names = [
+                step_names.get(s, s) for s in match_result["missing_steps"]
+            ]
+            warnings.append(
+                f"필수 스텝 누락: {', '.join(missing_names)}"
+            )
+        return {
+            "valid": False,
+            "confidence": 0.7,
+            "reason": f"'{label}' 테스트의 필수 요건을 충족하지 않습니다.",
+            "feature_missing": False,
+            "warnings": warnings,
+        }
+
+    return {
+        "valid": True,
+        "confidence": 0.9,
+        "reason": "",
+        "feature_missing": False,
+        "warnings": [],
     }
 
 
@@ -584,8 +1164,8 @@ def _filter_by_keywords(
     # Filter links by keyword relevance
     links = page_data.get("links", [])
     matched_links = [
-        l for l in links
-        if _matches(l.get("text", "")) or _matches(l.get("href", ""))
+        lnk for lnk in links
+        if _matches(lnk.get("text", "")) or _matches(lnk.get("href", ""))
     ]
     # Filter buttons
     buttons = page_data.get("buttons", [])

@@ -8,12 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import io
-import json
 import logging
 import time
 from collections import deque
-from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urljoin, urlparse, urlunparse
 
@@ -656,6 +655,7 @@ async def crawl_site(
     all_features: dict[str, float] = {}  # feature → confidence
     broken_links: list[dict] = []
     all_observations: list[dict] = []  # observation-based interaction records
+    observed_element_keys: set[str] = set()  # cross-page dedup: "selector|text"
     total_forms = 0
     total_buttons = 0
     total_nav_menus = 0
@@ -731,10 +731,8 @@ async def crawl_site(
                 continue
 
             # Wait for page to stabilize
-            try:
+            with contextlib.suppress(Exception):
                 await page.wait_for_load_state("networkidle", timeout=5000)
-            except Exception:
-                pass  # proceed even if network isn't fully idle
 
             page_load_time = round(time.monotonic() - page_start, 1)
             if ws:
@@ -816,8 +814,13 @@ async def crawl_site(
                         page, page_data, url,
                         max_interactions=15,
                         ws=ws, scan_id=scan_id,
+                        already_observed=observed_element_keys,
                     )
                     all_observations.extend(page_observations)
+                    for obs in page_observations:
+                        elem = obs.get("element", {})
+                        key = f"{elem.get('selector', '')}|{elem.get('text', '').lower()}"
+                        observed_element_keys.add(key)
                     page_data["observations"] = page_observations
                 except Exception as exc:
                     logger.debug("Observation phase failed for %s: %s", url, exc)
@@ -909,10 +912,8 @@ async def crawl_site(
         logger.exception("Scan %d: crawl error", scan_id)
         return {"error": str(exc)}
     finally:
-        try:
+        with contextlib.suppress(Exception):
             await engine.stop()
-        except Exception:
-            pass
 
     # Post-crawl: SPA detection — if most internal links are anchor-only (#section)
     anchor_count = 0
@@ -1277,13 +1278,21 @@ async def _observe_single_click(
     # 2. Click the element
     clicked = False
     try:
-        # Try selector first
+        # Try selector + text filter (avoids clicking wrong element
+        # when selector is generic like "button.MuiButtonBase-root")
         sel = element.get("selector")
         if sel:
-            loc = page.locator(sel).first
-            if await loc.count() > 0 and await loc.is_visible(timeout=1500):
-                await loc.click(timeout=3000)
-                clicked = True
+            base_loc = page.locator(sel)
+            if text:
+                loc = base_loc.filter(has_text=text).first
+                if await loc.count() > 0 and await loc.is_visible(timeout=1500):
+                    await loc.click(timeout=3000)
+                    clicked = True
+            if not clicked:
+                loc = base_loc.first
+                if await loc.count() > 0 and await loc.is_visible(timeout=1500):
+                    await loc.click(timeout=3000)
+                    clicked = True
         # Try text-based
         if not clicked:
             loc = page.get_by_role("link", name=text).first
@@ -1307,10 +1316,8 @@ async def _observe_single_click(
 
     # 3. Wait for changes
     await asyncio.sleep(0.8)
-    try:
+    with contextlib.suppress(Exception):
         await page.wait_for_load_state("networkidle", timeout=3000)
-    except Exception:
-        pass
 
     # 4. After state
     after_url = page.url
@@ -1408,9 +1415,22 @@ async def _observe_single_click(
     #     before restoring to original URL (critical for login/signup flows)
     navigated_page_fields: list[dict[str, Any]] = []
     if path_changed:
+        # Wait for the navigated page to render form fields
+        with contextlib.suppress(Exception):
+            await page.wait_for_load_state("domcontentloaded", timeout=3000)
+        with contextlib.suppress(Exception):
+            await page.wait_for_selector(
+                "input, textarea, select, form", timeout=3000,
+            )
         try:
             navigated_page_fields = await page.evaluate("""() => {
                 const fields = [];
+                function getContext(el) {
+                    if (el.closest('form')) return 'form';
+                    if (el.closest('nav, header, [role="navigation"]'))
+                        return 'nav';
+                    return 'body';
+                }
                 // Collect all visible input/textarea/select fields
                 document.querySelectorAll('input, textarea, select').forEach(f => {
                     if (f.type === 'hidden') return;
@@ -1439,7 +1459,8 @@ async def _observe_single_click(
                         label: label || '',
                         aria_label: f.getAttribute('aria-label') || '',
                         selector: sel,
-                        required: f.required || false
+                        required: f.required || false,
+                        context: getContext(f)
                     });
                 });
                 // Collect visible buttons (for submit)
@@ -1465,13 +1486,169 @@ async def _observe_single_click(
                         label: btnText,
                         aria_label: '',
                         selector: sel,
-                        required: false
+                        required: false,
+                        context: getContext(b)
                     });
                 });
                 return fields;
             }""")
-        except Exception:
-            pass
+            logger.debug(
+                "Navigated page fields for %s → %s: %d fields",
+                text, after_url, len(navigated_page_fields),
+            )
+        except Exception as nav_exc:
+            logger.debug("Failed to collect navigated page fields: %s", nav_exc)
+
+        # 6b. Tab-switching detection: if the navigated page has a button
+        #     matching the original clicked element's text, click it to
+        #     reveal the actual form (e.g., signup tab on login/signup page)
+        if navigated_page_fields and text:
+            with contextlib.suppress(Exception):
+                tab_clicked = await page.evaluate("""(targetText) => {
+                    const buttons = document.querySelectorAll(
+                        'button, a, [role=tab], [class*=tab]'
+                    );
+                    for (const b of buttons) {
+                        const btnText = (b.textContent || '').trim();
+                        if (btnText === targetText
+                            && b.offsetParent !== null) {
+                            b.click();
+                            return btnText;
+                        }
+                    }
+                    return null;
+                }""", text)
+                if tab_clicked:
+                    await asyncio.sleep(1.0)
+                    with contextlib.suppress(Exception):
+                        await page.wait_for_selector(
+                            "input, textarea, select, form",
+                            timeout=2000,
+                        )
+                    # Re-collect form fields after tab switch
+                    tab_fields = await page.evaluate("""() => {
+                        const fields = [];
+                        function getContext(el) {
+                            if (el.closest('form')) return 'form';
+                            if (el.closest(
+                                'nav, header, [role="navigation"]'
+                            )) return 'nav';
+                            return 'body';
+                        }
+                        document.querySelectorAll(
+                            'input, textarea, select'
+                        ).forEach(f => {
+                            if (f.type === 'hidden') return;
+                            if (f.offsetParent === null
+                                && f.offsetWidth === 0) return;
+                            const labelEl = f.id
+                                ? document.querySelector(
+                                    'label[for="' + f.id + '"]')
+                                : null;
+                            const parentLabel = !labelEl
+                                ? f.closest('label') : null;
+                            const labelNode = labelEl || parentLabel;
+                            const label = labelNode
+                                ? (labelNode.childNodes[0]
+                                    ?.textContent?.trim()
+                                   || labelNode.textContent?.trim()
+                                    ?.substring(0, 100))
+                                : '';
+                            let sel = null;
+                            if (f.id) sel = '#' + f.id;
+                            else if (f.name) sel = f.tagName
+                                .toLowerCase()
+                                + '[name="' + f.name + '"]';
+                            else if (f.type && f.type !== 'text')
+                                sel = f.tagName.toLowerCase()
+                                + '[type="' + f.type + '"]';
+                            fields.push({
+                                tag: f.tagName.toLowerCase(),
+                                type: f.type || 'text',
+                                name: f.name || '',
+                                placeholder: f.placeholder || '',
+                                label: label || '',
+                                aria_label:
+                                    f.getAttribute('aria-label')
+                                    || '',
+                                selector: sel,
+                                required: f.required || false,
+                                context: getContext(f)
+                            });
+                        });
+                        document.querySelectorAll(
+                            'button, input[type=submit]'
+                        ).forEach(b => {
+                            if (b.offsetParent === null
+                                && b.offsetWidth === 0) return;
+                            const btnText = (b.textContent
+                                || b.value || '').trim();
+                            if (!btnText
+                                || btnText.length > 100) return;
+                            let sel = null;
+                            if (b.id) sel = '#' + b.id;
+                            else if (b.name) sel = b.tagName
+                                .toLowerCase()
+                                + '[name="' + b.name + '"]';
+                            else if (b.className
+                                     && typeof b.className
+                                        === 'string') {
+                                const cls = b.className.trim()
+                                    .split(/\\s+/)[0];
+                                if (cls) sel = b.tagName
+                                    .toLowerCase() + '.' + cls;
+                            }
+                            fields.push({
+                                tag: b.tagName.toLowerCase(),
+                                type: 'submit_button',
+                                name: b.name || '',
+                                placeholder: '',
+                                label: btnText,
+                                aria_label: '',
+                                selector: sel,
+                                required: false,
+                                context: getContext(b)
+                            });
+                        });
+                        return fields;
+                    }""")
+                    if tab_fields and tab_fields != navigated_page_fields:
+                        logger.debug(
+                            "Tab-switch '%s' revealed %d fields "
+                            "(was %d)",
+                            tab_clicked, len(tab_fields),
+                            len(navigated_page_fields),
+                        )
+                        navigated_page_fields = tab_fields
+
+        # 6c. Auth page detection — detect registration/login patterns
+        #     (runs AFTER tab-switching so we analyze the correct form)
+        auth_pattern_info: dict[str, Any] | None = None
+        if navigated_page_fields and path_changed:
+            from app.auth_patterns import (
+                collect_page_html_hints,
+                detect_auth_pattern,
+            )
+
+            with contextlib.suppress(Exception):
+                page_type = "login"
+                if text and any(
+                    kw in text.lower()
+                    for kw in ("가입", "signup", "register", "회원")
+                ):
+                    page_type = "registration"
+
+                html_hints = await collect_page_html_hints(page)
+                auth_result = detect_auth_pattern(
+                    navigated_page_fields, html_hints, page_type=page_type,
+                )
+
+                if auth_result.get("pattern"):
+                    logger.info(
+                        "Auth pattern detected for '%s': %s",
+                        text, auth_result["pattern"],
+                    )
+                    auth_pattern_info = auth_result
 
     if path_changed:
         change_type = "page_navigation"
@@ -1525,6 +1702,10 @@ async def _observe_single_click(
         "access_path": access_path,
     }
 
+    # Attach auth pattern info if detected
+    if auth_pattern_info:
+        observation["auth_pattern"] = auth_pattern_info
+
     # 7. Restore state
     try:
         if path_changed:
@@ -1535,10 +1716,8 @@ async def _observe_single_click(
         elif hash_changed:
             await page.goto(original_url, wait_until="domcontentloaded", timeout=5000)
     except Exception:
-        try:
+        with contextlib.suppress(Exception):
             await page.goto(original_url, wait_until="domcontentloaded", timeout=8000)
-        except Exception:
-            pass
 
     return observation
 
@@ -1551,6 +1730,7 @@ async def _observe_interactions(
     max_interactions: int = 15,
     ws: WSManager | None = None,
     scan_id: int = 0,
+    already_observed: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Click interactive elements on a page and observe what happens.
 
@@ -1558,7 +1738,7 @@ async def _observe_interactions(
     Returns list of observation records with change classification.
     """
     # File extensions that indicate a download (not a navigable page)
-    _FILE_EXTS = {
+    file_exts = {
         ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
         ".zip", ".rar", ".7z", ".tar", ".gz",
         ".csv", ".hwp", ".hwpx",
@@ -1571,7 +1751,7 @@ async def _observe_interactions(
         if not href:
             return False
         path = urlparse(href).path.lower()
-        return any(path.endswith(ext) for ext in _FILE_EXTS)
+        return any(path.endswith(ext) for ext in file_exts)
 
     clickable: list[dict[str, Any]] = []
     file_downloads: list[dict[str, Any]] = []
@@ -1640,6 +1820,21 @@ async def _observe_interactions(
             unique.append(c)
     clickable = unique[:max_interactions]
 
+    # Cross-page dedup: skip elements already observed on previous pages
+    if already_observed:
+        filtered = []
+        for c in clickable:
+            key = f"{c.get('selector', '')}|{c['text'].lower()}"
+            if key not in already_observed:
+                filtered.append(c)
+        skipped = len(clickable) - len(filtered)
+        if skipped and ws:
+            await ws.broadcast(scan_id, {
+                "type": "scan_log", "phase": "observe",
+                "message": f"이전 페이지에서 관찰된 {skipped}개 요소 스킵",
+            })
+        clickable = filtered
+
     observations: list[dict[str, Any]] = []
 
     # Record file download links as observations (no click, just record)
@@ -1690,7 +1885,7 @@ async def _observe_interactions(
             if obs:
                 observations.append(obs)
                 change_type = obs["observed_change"]["type"]
-                _CHANGE_LABELS = {
+                change_labels = {
                     "page_navigation": "페이지 이동",
                     "modal_opened": "모달/팝업 열림",
                     "anchor_scroll": "섹션 스크롤",
@@ -1698,7 +1893,7 @@ async def _observe_interactions(
                     "no_change": "변화 없음",
                     "minor_change": "미세 변화",
                 }
-                label = _CHANGE_LABELS.get(change_type, change_type)
+                label = change_labels.get(change_type, change_type)
                 if ws:
                     await ws.broadcast(scan_id, {
                         "type": "scan_log",

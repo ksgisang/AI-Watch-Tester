@@ -5,12 +5,10 @@ from __future__ import annotations
 import io
 
 import pytest
+from app.models import Test, TestStatus
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.models import Test, TestStatus
-
 
 # ---------------------------------------------------------------------------
 # Create test — mode=review (default) → GENERATING
@@ -307,9 +305,10 @@ async def test_upload_unsupported_type(client: AsyncClient) -> None:
     )
     test_id = create_resp.json()["id"]
 
+    # .exe is not in _ALLOWED_EXTENSIONS
     resp = await client.post(
         f"/api/tests/{test_id}/upload",
-        files={"file": ("image.png", io.BytesIO(b"\x89PNG"), "image/png")},
+        files={"file": ("malware.exe", io.BytesIO(b"\x00\x00"), "application/octet-stream")},
     )
     assert resp.status_code == 422
 

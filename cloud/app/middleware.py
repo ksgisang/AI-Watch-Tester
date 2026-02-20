@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import func, select
@@ -39,7 +39,7 @@ def get_concurrent_limit(tier: UserTier) -> int:
 
 async def get_monthly_used(user_id: str, db: AsyncSession) -> int:
     """Count tests created this month by the user."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     q = (
         select(func.count())
@@ -72,7 +72,7 @@ async def check_rate_limit(
     Returns the user if within limits, raises 429 if exceeded.
     Adds X-RateLimit-* headers via request.state for the response middleware.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     limit = get_monthly_limit(user.tier)
 
     # -- Monthly limit --
@@ -99,7 +99,7 @@ async def check_rate_limit(
         )
 
     # -- Auto-clean stuck tests for this user (before concurrent check) --
-    stuck_cutoff = datetime.now(timezone.utc) - timedelta(
+    stuck_cutoff = datetime.now(UTC) - timedelta(
         minutes=settings.stuck_timeout_minutes
     )
     stuck_q = (
@@ -118,7 +118,7 @@ async def check_rate_limit(
         t.error_message = (
             f"Auto-cleaned: test stuck > {settings.stuck_timeout_minutes} min"
         )
-        t.updated_at = datetime.now(timezone.utc)
+        t.updated_at = datetime.now(UTC)
         logger.warning("Auto-cleaned stuck test %d for user %s", t.id, user.id)
     if stuck_tests:
         await db.commit()
@@ -130,7 +130,10 @@ async def check_rate_limit(
     if active >= concurrent_limit:
         raise HTTPException(
             status_code=429,
-            detail=f"Concurrent test limit reached ({concurrent_limit}). Wait for running tests to finish.",
+            detail=(
+                f"Concurrent test limit reached ({concurrent_limit})."
+                " Wait for running tests to finish."
+            ),
         )
 
     # -- Global server capacity check --
@@ -152,7 +155,9 @@ async def check_rate_limit(
 def _next_month_iso(now: datetime) -> str:
     """Return ISO timestamp of the first day of next month."""
     if now.month == 12:
-        reset = now.replace(year=now.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        reset = now.replace(
+            year=now.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0
+        )
     else:
         reset = now.replace(month=now.month + 1, day=1, hour=0, minute=0, second=0, microsecond=0)
     return reset.isoformat()

@@ -205,7 +205,9 @@
     "additionalGenerated": "{count} additional scenario(s) generated ({steps} steps)",
     "skipScan": "Write tests directly without scanning",
     "backToScan": "Back to scan",
-    "userRequestedTests": "User Requested Tests"
+    "userRequestedTests": "User Requested Tests",
+    "unverifiedScenario": "Unverified",
+    "relevanceWarning": "The test may not match your original request"
   },
   "tests": {
     "title": "Test History",

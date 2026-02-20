@@ -9,7 +9,6 @@ from pydantic import BaseModel, HttpUrl
 
 from app.models import ScanStatus, TestStatus, UserTier
 
-
 # -- Scenario Conversion --
 
 
@@ -19,6 +18,7 @@ class ConvertScenarioRequest(BaseModel):
     target_url: str
     user_prompt: str
     language: Literal["ko", "en"] = "en"
+    scan_id: int | None = None  # If provided, use scan's observation data
 
 
 class ValidationItem(BaseModel):
@@ -39,6 +39,16 @@ class ValidationSummary(BaseModel):
     percent: int
 
 
+class RelevanceValidation(BaseModel):
+    """Scenario-request relevance validation result."""
+
+    valid: bool
+    confidence: float = 0.5
+    reason: str = ""
+    feature_missing: bool = False
+    warnings: list[str] = []
+
+
 class ConvertScenarioResponse(BaseModel):
     """POST /api/scenarios/convert response body."""
 
@@ -47,6 +57,7 @@ class ConvertScenarioResponse(BaseModel):
     steps_total: int
     validation: list[ValidationItem] = []
     validation_summary: ValidationSummary | None = None
+    relevance: RelevanceValidation | None = None
 
 
 # -- Requests --

@@ -35,7 +35,7 @@ async def upload_document(
     if not allowed_extension(filename):
         raise HTTPException(
             status_code=422,
-            detail=f"Unsupported file type. Allowed: .md, .txt, .pdf, .docx, .png, .jpg, .jpeg",
+            detail="Unsupported file type. Allowed: .md, .txt, .pdf, .docx, .png, .jpg, .jpeg",
         )
 
     # Read content + size check
@@ -52,7 +52,10 @@ async def upload_document(
     if current_count >= _MAX_DOCS_PER_USER:
         raise HTTPException(
             status_code=409,
-            detail=f"Document limit reached ({_MAX_DOCS_PER_USER}). Delete an existing document first.",
+            detail=(
+                f"Document limit reached ({_MAX_DOCS_PER_USER})."
+                " Delete an existing document first."
+            ),
         )
 
     # Extract text

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import jwt
@@ -19,7 +19,7 @@ def _make_token(
     expired: bool = False,
 ) -> str:
     """Create a valid Supabase-style JWT for testing."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": sub,
         "email": email,
@@ -136,7 +136,7 @@ async def test_wrong_secret_returns_401() -> None:
             "sub": "user-1",
             "email": "a@b.com",
             "aud": "authenticated",
-            "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+            "exp": datetime.now(UTC) + timedelta(hours=1),
         },
         "wrong-secret",
         algorithm="HS256",

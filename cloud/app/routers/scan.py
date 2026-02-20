@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import yaml
@@ -18,10 +18,14 @@ from app.config import settings
 from app.crawler import crawl_site, get_scan_limits
 from app.database import get_db
 from app.models import Scan, ScanStatus, User
-from app.test_patterns import (
-    build_pattern_summary,
-    build_pattern_tests,
-    match_elements_to_patterns,
+from app.scenario_utils import (
+    DEFAULT_AI_MODELS as _DEFAULT_MODELS,
+)
+from app.scenario_utils import (
+    compress_observations_for_ai,
+    fix_form_submit_steps,
+    parse_json,
+    validate_and_retry,
 )
 from app.schemas import (
     ScanExecuteRequest,
@@ -31,17 +35,15 @@ from app.schemas import (
     ScanResponse,
     ScanSummary,
 )
+from app.test_patterns import (
+    build_pattern_summary,
+    build_pattern_tests,
+    match_elements_to_patterns,
+)
 from app.ws import ws_manager
 
 router = APIRouter(prefix="/api/scan", tags=["scan"])
 logger = logging.getLogger(__name__)
-
-# Default model per AI provider
-_DEFAULT_MODELS: dict[str, str] = {
-    "claude": "claude-sonnet-4-20250514",
-    "openai": "gpt-4o",
-    "ollama": "codellama:7b",
-}
 
 # ---------------------------------------------------------------------------
 # Business test templates — site-type-specific test suggestions
@@ -185,8 +187,18 @@ BUSINESS_TEMPLATES: dict[str, list[dict[str, Any]]] = {
             "estimated_time": 40,
             "requires_auth": False,
             "test_data_fields": [
-                {"key": "signup_email", "label": "Test Email", "placeholder": "test@example.com", "required": True},
-                {"key": "signup_password", "label": "Test Password", "placeholder": "TestPass123!", "required": True},
+                {
+                    "key": "signup_email",
+                    "label": "Test Email",
+                    "placeholder": "test@example.com",
+                    "required": True,
+                },
+                {
+                    "key": "signup_password",
+                    "label": "Test Password",
+                    "placeholder": "TestPass123!",
+                    "required": True,
+                },
             ],
         },
         {
@@ -211,7 +223,12 @@ BUSINESS_TEMPLATES: dict[str, list[dict[str, Any]]] = {
             "estimated_time": 20,
             "requires_auth": False,
             "test_data_fields": [
-                {"key": "newsletter_email", "label": "Test Email", "placeholder": "test@example.com", "required": True},
+                {
+                    "key": "newsletter_email",
+                    "label": "Test Email",
+                    "placeholder": "test@example.com",
+                    "required": True,
+                },
             ],
         },
     ],
@@ -221,7 +238,10 @@ BUSINESS_TEMPLATES: dict[str, list[dict[str, Any]]] = {
             "requires_feature": "multilingual",
             "name_en": "Language Switch Test",
             "name_ko": "언어 전환 테스트",
-            "desc_en": "Switch site language and verify page content changes accordingly without broken layout",
+            "desc_en": (
+                "Switch site language and verify page content changes"
+                " accordingly without broken layout"
+            ),
             "desc_ko": "사이트 언어를 전환하고 페이지 콘텐츠가 깨지지 않고 올바르게 변경되는지 확인",
             "priority": "medium",
             "estimated_time": 30,
@@ -394,7 +414,7 @@ def _validate_plan_against_features(
         if biz_cat is None:
             biz_cat = {
                 "id": "business",
-                "name": "비즈니스 흐름" if ko else "Business Flows",
+                "name": "주요 기능 테스트" if ko else "Business Flows",
                 "auto_selected": False,
                 "tests": [],
             }
@@ -405,14 +425,55 @@ def _validate_plan_against_features(
     return plan
 
 
-def _parse_json(text: str | None) -> Any:
-    """Safely parse JSON text."""
-    if not text:
-        return None
-    try:
-        return json.loads(text)
-    except (json.JSONDecodeError, TypeError):
-        return None
+def _dedup_section_nav_tests(plan: dict[str, Any]) -> dict[str, Any]:
+    """Remove section navigation tests that duplicate the nav menu test.
+
+    AI sometimes generates tests like "기능 섹션 네비게이션" or "About 페이지 이동"
+    which are already covered by the nav_menu_test in the basic category.
+    """
+    nav_dedup_keywords = [
+        "섹션 네비게이션", "섹션 이동", "섹션 확인", "페이지 이동",
+        "section navigation", "section nav", "navigate to section",
+    ]
+
+    # Check if nav menu test exists in basic category
+    has_nav_test = False
+    for cat in plan.get("categories", []):
+        if cat.get("id") == "basic":
+            for t in cat.get("tests", []):
+                name_lower = (t.get("name") or "").lower()
+                if "네비게이션 메뉴" in name_lower or "navigation menu" in name_lower:
+                    has_nav_test = True
+                    break
+            break
+
+    if not has_nav_test:
+        return plan
+
+    for cat in plan.get("categories", []):
+        original_count = len(cat.get("tests", []))
+        cat["tests"] = [
+            t for t in cat.get("tests", [])
+            if not any(
+                kw in (t.get("name") or "").lower()
+                for kw in nav_dedup_keywords
+            )
+        ]
+        removed = original_count - len(cat["tests"])
+        if removed:
+            logger.info(
+                "Dedup: removed %d section nav test(s) from category '%s'",
+                removed, cat.get("name"),
+            )
+
+    # Remove empty categories
+    plan["categories"] = [
+        c for c in plan.get("categories", []) if c.get("tests")
+    ]
+    return plan
+
+
+_parse_json = parse_json  # alias for internal usage
 
 
 def _scan_to_response(scan: Scan) -> dict:
@@ -515,7 +576,7 @@ async def start_scan(
                 # Always persist collected scan logs
                 if collected_logs:
                     s.logs_json = json.dumps(collected_logs)
-                s.completed_at = datetime.now(timezone.utc)
+                s.completed_at = datetime.now(UTC)
                 await session.commit()
 
             # Broadcast scan_complete AFTER DB commit so /plan endpoint sees COMPLETED status
@@ -540,7 +601,7 @@ async def start_scan(
                 )).scalar_one()
                 s.status = ScanStatus.FAILED
                 s.error_message = str(exc)[:500]
-                s.completed_at = datetime.now(timezone.utc)
+                s.completed_at = datetime.now(UTC)
                 await session.commit()
 
             await ws_manager.broadcast(scan_id, {
@@ -610,6 +671,15 @@ CRITICAL RULES:
    - auth_fields MUST use the EXACT placeholder/label from navigated_page_fields
    - Example: if navigated_page_fields shows placeholder="이메일", use "이메일" NOT "Email"
    - NEVER translate, NEVER guess — copy-paste the exact text from the data
+11. **NO SECTION NAVIGATION TESTS**: Do NOT generate tests that only navigate to a page section
+   (e.g., "기능 섹션 네비게이션", "About 페이지 이동", "서비스 섹션 확인").
+   Section navigation is ALREADY covered by the nav_menu_test in the "basic" category.
+   Instead, for sections with interactive elements, generate INTERACTION tests:
+   - accordion → test expand/collapse with actual FAQ items
+   - modal → test open/close with actual trigger buttons
+   - tab → test tab switching with actual tab labels
+   - carousel → test slide navigation
+   - form → test input validation with actual fields
 
 ## Site Info
 - URL: {target_url}
@@ -668,7 +738,9 @@ CATEGORY "business" - Business Flows (based on detected features):
 - Use the business test hints above as guidance
 - Test names and descriptions MUST reflect actual observed behavior, NOT generic labels
 - WRONG: "Product Browsing Test" (generic — no "product" in observations)
-- RIGHT: "기능 섹션 네비게이션 테스트" (references actual observed element)
+- WRONG: "기능 섹션 네비게이션 테스트" (this is just section navigation — ALREADY covered by nav menu test)
+- RIGHT: "FAQ 아코디언 펼치기/접기 테스트" (tests INTERACTIVE BEHAVIOR within a section)
+- RIGHT: "로그인 모달 열기/입력 테스트" (tests INTERACTIVE BEHAVIOR triggered by click)
 
 IMPORTANT — SELECTOR-FIRST RULE:
 - For each test, include the exact CSS selectors from the observation data in "actual_elements".
@@ -751,8 +823,12 @@ async def generate_plan(
 
     # Build site type info for prompt
     site_type_info = summary.get("site_type") or {}
-    site_type_name = site_type_info.get("type", "unknown") if isinstance(site_type_info, dict) else "unknown"
-    site_type_conf = site_type_info.get("confidence", 0.0) if isinstance(site_type_info, dict) else 0.0
+    site_type_name = (
+        site_type_info.get("type", "unknown") if isinstance(site_type_info, dict) else "unknown"
+    )
+    site_type_conf = (
+        site_type_info.get("confidence", 0.0) if isinstance(site_type_info, dict) else 0.0
+    )
 
     # Build business hints from templates (site-type + cross-cutting)
     business_hints_lines = []
@@ -769,7 +845,11 @@ async def generate_plan(
             name = tmpl.get("name_en", "")
             desc = tmpl.get("desc_en", "")
             business_hints_lines.append(f"- {name}: {desc}")
-    business_hints = "\n".join(business_hints_lines) if business_hints_lines else "No specific business tests for this site type."
+    business_hints = (
+        "\n".join(business_hints_lines)
+        if business_hints_lines
+        else "No specific business tests for this site type."
+    )
 
     # Build special instructions based on detected features
     special_parts: list[str] = []
@@ -801,6 +881,17 @@ async def generate_plan(
     if pattern_hint:
         special_parts.append(pattern_hint)
 
+    # Auth pattern context — inject limitations and pattern hints
+    from app.auth_patterns import build_auth_context_for_ai
+
+    for obs in observations:
+        auth_info = obs.get("auth_pattern")
+        if auth_info:
+            auth_ctx = build_auth_context_for_ai(auth_info)
+            if auth_ctx:
+                special_parts.append(auth_ctx)
+            break  # first auth observation only
+
     special_instructions = "\n\n".join(special_parts)
 
     # Fetch user reference documents
@@ -823,9 +914,13 @@ async def generate_plan(
         links_json=_trunc_json(links_sample),
         broken_links_json=_trunc_json(broken),
         broken_count=len(broken),
-        observations_json=_build_observation_table(observations) if observations else "No observations collected.",
+        observations_json=(
+            compress_observations_for_ai(observations, max_tokens=6000)
+            if observations
+            else "No observations collected."
+        ),
         business_hints=business_hints,
-        reference_documents=ref_docs or "No reference documents provided.",
+        reference_documents=(ref_docs[:6000] if ref_docs else "No reference documents provided."),
         special_instructions=special_instructions,
     )
 
@@ -834,8 +929,8 @@ async def generate_plan(
     lang = body.language or "en"
 
     try:
-        from aat.core.models import AIConfig
         from aat.adapters import ADAPTER_REGISTRY
+        from aat.core.models import AIConfig
 
         ai_config = AIConfig(
             provider=settings.ai_provider,
@@ -865,16 +960,19 @@ async def generate_plan(
         )
 
     # --- Debug logging ---
-    logger.info("=== detected_features === %s", features)
-    logger.info("=== observations count === %d", len(observations))
+    logger.debug("=== detected_features === %s", features)
+    logger.debug("=== observations count === %d", len(observations))
     login_obs = [o for o in observations if "로그인" in str(o)]
     if login_obs:
-        logger.info("=== login-related observations === %d items", len(login_obs))
+        logger.debug("=== login-related observations === %d items", len(login_obs))
         for lo in login_obs:
             logger.info("  %s", lo.get("access_path", ""))
 
     # --- Post-plan validation: force-add tests for detected features ---
     plan = _validate_plan_against_features(plan, features, lang)
+
+    # --- Dedup: remove section nav tests that duplicate nav menu test ---
+    plan = _dedup_section_nav_tests(plan)
 
     categories = plan.get("categories", [])
 
@@ -1000,7 +1098,7 @@ def _generate_default_plan(
 
     categories.append({
         "id": "basic",
-        "name": "기본 상태 점검" if ko else "Basic Health Check",
+        "name": "기본 점검" if ko else "Basic Health Check",
         "auto_selected": True,
         "tests": basic_tests,
     })
@@ -1016,7 +1114,10 @@ def _generate_default_plan(
     if all_forms:
         form_tests = []
         for i, form in enumerate(all_forms[:5]):
-            field_names = [f.get("name") or f.get("placeholder") or "field" for f in form.get("fields", [])]
+            field_names = [
+                f.get("name") or f.get("placeholder") or "field"
+                for f in form.get("fields", [])
+            ]
             form_tests.append({
                 "id": f"t{tid}",
                 "name": f"폼 입력 테스트 #{i + 1}" if ko else f"Form Input Test #{i + 1}",
@@ -1041,7 +1142,9 @@ def _generate_default_plan(
 
     # 3. Business tests from templates (based on site type + cross-cutting features)
     site_type_info = summary.get("site_type") or {}
-    site_type_name = site_type_info.get("type", "unknown") if isinstance(site_type_info, dict) else "unknown"
+    site_type_name = (
+        site_type_info.get("type", "unknown") if isinstance(site_type_info, dict) else "unknown"
+    )
     feature_set = set(features)
 
     def _add_template(tmpl: dict, covered: set[str]) -> dict[str, Any] | None:
@@ -1104,7 +1207,7 @@ def _generate_default_plan(
     if business_tests:
         categories.append({
             "id": "business",
-            "name": "비즈니스 흐름" if ko else "Business Flows",
+            "name": "주요 기능 테스트" if ko else "Business Flows",
             "auto_selected": False,
             "tests": business_tests,
         })
@@ -1182,7 +1285,10 @@ def _build_observation_table(observations: list[dict]) -> str:
         # New text (for assertions)
         new_text = change.get("new_text", [])
         if new_text:
-            lines.append(f"  - OBSERVED new_text (use for assert): {json.dumps(new_text[:10], ensure_ascii=False)}")
+            lines.append(
+                f"  - OBSERVED new_text (use for assert): "
+                f"{json.dumps(new_text[:10], ensure_ascii=False)}"
+            )
 
         # Modal form fields (for find_and_type targets)
         modal_fields = change.get("modal_form_fields", [])
@@ -1255,9 +1361,15 @@ def _build_observation_table(observations: list[dict]) -> str:
     if all_assert_texts or all_element_texts:
         lines.append("### ===== AVAILABLE DATA SUMMARY =====")
         if all_element_texts:
-            lines.append(f"Clickable element texts: {json.dumps(all_element_texts, ensure_ascii=False)}")
+            lines.append(
+                f"Clickable element texts: "
+                f"{json.dumps(all_element_texts, ensure_ascii=False)}"
+            )
         if all_assert_texts:
-            lines.append(f"Observable texts (valid for assert): {json.dumps(all_assert_texts, ensure_ascii=False)}")
+            lines.append(
+                f"Observable texts (valid for assert): "
+                f"{json.dumps(all_assert_texts, ensure_ascii=False)}"
+            )
         lines.append("REMINDER: Only use texts from above for assert values. NEVER invent text.")
         lines.append("")
 
@@ -1313,6 +1425,16 @@ Generate AWT test scenario JSON for the selected tests below.
       - If placeholder is "비밀번호", target text MUST be "비밀번호" — NOT "Password"
    d. For submit button: use EXACT label from NAVIGATED PAGE FIELDS
    e. NEVER translate or guess field names — copy the EXACT text from observation data
+
+10. **FORM SUBMIT BUTTON — CRITICAL**:
+   After filling form fields (find_and_type steps), the NEXT click MUST be the
+   form's own submit button — look for SUBMIT[form] in the PAGE/MODAL FIELDS.
+   - SUBMIT[form] = button INSIDE the form → USE THIS for form submission
+   - SUBMIT[nav] = navigation menu link → NEVER use this after form input
+   - SUBMIT[body] = button outside form/nav → only use if no [form] button exists
+   Example: PAGE FIELDS shows SUBMIT[form](button.btn, '다음') and SUBMIT[nav](a.nav, '가입')
+   → After filling email/password, click '다음' (SUBMIT[form]), NOT '가입' (SUBMIT[nav])
+   - The nav link '가입' is for PAGE NAVIGATION (step b above), NOT for form submission
 
 ## ========== END ABSOLUTE RULES ==========
 
@@ -1442,10 +1564,10 @@ async def execute_scan_tests(
 
     # Generate scenarios via AI
     try:
-        from aat.core.models import AIConfig, Scenario
         from aat.adapters import ADAPTER_REGISTRY
+        from aat.core.models import AIConfig
     except ImportError as exc:
-        raise HTTPException(status_code=503, detail=f"AAT core not installed: {exc}")
+        raise HTTPException(status_code=503, detail=f"AAT core not installed: {exc}") from exc
 
     ai_config = AIConfig(
         provider=settings.ai_provider,
@@ -1481,46 +1603,176 @@ async def execute_scan_tests(
     if pattern_hint:
         extra_parts.append(pattern_hint)
 
+    # Auth pattern context — inject limitations and pattern hints
+    from app.auth_patterns import build_auth_context_for_ai
+
+    for obs in observations:
+        auth_info = obs.get("auth_pattern")
+        if auth_info:
+            auth_ctx = build_auth_context_for_ai(auth_info)
+            if auth_ctx:
+                extra_parts.append(auth_ctx)
+            break  # first auth observation only
+
     extra_instructions = "\n".join(extra_parts) if extra_parts else ""
-
-    # Build structured observation table for AI
-    observation_table = _build_observation_table(observations)
-
-    # Log observation data for debugging
-    logger.info(
-        "=== AI에 전달되는 관찰 데이터 (scan_id=%d) ===\n%s",
-        scan_id,
-        observation_table[:5000],
-    )
 
     # Fetch user reference documents
     from app.routers.documents import get_user_doc_text
 
     ref_docs = await get_user_doc_text(user.id, db)
 
+    # --- Dynamic token budget allocation ---
+    # Reserve tokens for: template (~4000), output (~5000), overhead (~1000)
+    max_input_tokens = 20_000  # safe for 30K TPM (leaves room for output)
+    template_tokens = 4000
+    overhead_tokens = 1000
+    budget = max_input_tokens - template_tokens - overhead_tokens  # ~15000
+
+    # Fixed-size parts first
+    user_data_str = json.dumps(user_data, ensure_ascii=False)
+    extra_str = extra_instructions
+    fixed_tokens = (len(user_data_str) + len(extra_str)) // 3
+
+    # Remaining budget split: ref_docs(20%), crawl(15%), selected(15%), obs(50%)
+    remaining = max(budget - fixed_tokens, 3000)
+    ref_limit = int(remaining * 0.20) * 3   # chars (token * 3)
+    crawl_limit = int(remaining * 0.15) * 3
+    selected_limit = int(remaining * 0.15) * 3
+    obs_tokens = int(remaining * 0.50)
+
+    ref_docs_str = ref_docs or "No reference documents provided."
+    if len(ref_docs_str) > ref_limit:
+        ref_docs_str = ref_docs_str[:ref_limit] + "\n... (truncated)"
+
+    # Log raw observation form fields for debugging
+    for obs in observations:
+        change = obs.get("observed_change", {})
+        nav_fields = change.get("navigated_page_fields", [])
+        if nav_fields:
+            elem_text = obs.get("element", {}).get("text", "?")
+            after_url = obs.get("after", {}).get("url", "?")
+            logger.info(
+                "Observation '%s' → %s has %d navigated_page_fields: %s",
+                elem_text, after_url, len(nav_fields),
+                json.dumps(nav_fields[:5], ensure_ascii=False)[:500],
+            )
+
+    observation_table = compress_observations_for_ai(observations, max_tokens=obs_tokens)
+    crawl_data_str = _trunc(crawl_context, crawl_limit)
+    selected_str = _trunc(selected_details, selected_limit)
+
+    # Log for debugging
+    prompt_parts_info = (
+        f"obs={len(observation_table)//3}t, crawl={len(crawl_data_str)//3}t, "
+        f"selected={len(selected_str)//3}t, ref={len(ref_docs_str)//3}t, "
+        f"fixed={fixed_tokens}t, budget={remaining}t"
+    )
+    logger.info("Token budget (scan_id=%d): %s", scan_id, prompt_parts_info)
+    logger.info(
+        "=== AI에 전달되는 관찰 데이터 (scan_id=%d) ===\n%s",
+        scan_id,
+        observation_table[:3000],
+    )
+
     prompt = _EXECUTE_PROMPT.format(
         target_url=scan.target_url,
-        crawl_data=_trunc(crawl_context),
+        crawl_data=crawl_data_str,
         observation_table=observation_table,
-        selected_tests=_trunc(selected_details),
-        user_data=json.dumps(user_data, ensure_ascii=False),
-        extra_instructions=extra_instructions,
-        reference_documents=ref_docs or "No reference documents provided.",
+        selected_tests=selected_str,
+        user_data=user_data_str,
+        extra_instructions=extra_str,
+        reference_documents=ref_docs_str,
     )
+
+    # Final safety check: if prompt is still too large, aggressively trim
+    estimated_total = len(prompt) // 3
+    if estimated_total > max_input_tokens:
+        logger.warning(
+            "Prompt still %d tokens (limit %d), trimming further",
+            estimated_total, max_input_tokens,
+        )
+        observation_table = compress_observations_for_ai(observations, max_tokens=3000)
+        prompt = _EXECUTE_PROMPT.format(
+            target_url=scan.target_url,
+            crawl_data=_trunc(crawl_context, 2000),
+            observation_table=observation_table,
+            selected_tests=_trunc(selected_details, 2000),
+            user_data=user_data_str,
+            extra_instructions=extra_str,
+            reference_documents=ref_docs_str[:3000],
+        )
 
     try:
         scenarios = await adapter.generate_scenarios(prompt)
     except Exception as exc:
-        logger.exception("Scenario generation from scan failed")
-        raise HTTPException(
-            status_code=502,
-            detail=f"AI scenario generation failed: {exc}",
-        )
+        err_msg = str(exc).lower()
+        # Token limit exceeded → compress further and retry
+        if "token" in err_msg and ("limit" in err_msg or "rate" in err_msg or "tpm" in err_msg):
+            logger.warning("Token limit exceeded, retrying with minimal prompt")
+            observation_table = compress_observations_for_ai(observations, max_tokens=2000)
+            prompt = _EXECUTE_PROMPT.format(
+                target_url=scan.target_url,
+                crawl_data=_trunc(crawl_context, 1500),
+                observation_table=observation_table,
+                selected_tests=_trunc(selected_details, 1500),
+                user_data=user_data_str,
+                extra_instructions=extra_str,
+                reference_documents="(omitted to fit token limit)",
+            )
+            try:
+                scenarios = await adapter.generate_scenarios(prompt)
+            except Exception as retry_exc:
+                logger.exception("Retry also failed")
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"AI generation failed after retry: {retry_exc}",
+                ) from retry_exc
+        else:
+            logger.exception("Scenario generation from scan failed")
+            raise HTTPException(
+                status_code=502,
+                detail=f"AI scenario generation failed: {exc}",
+            ) from exc
 
     if not scenarios:
         raise HTTPException(
             status_code=422, detail="AI generated no scenarios",
         )
+
+    # === DEBUG: Log generated scenarios FULL YAML ===
+    for sc in scenarios:
+        sc_dict = sc.model_dump(mode="json") if hasattr(sc, "model_dump") else sc
+        sc_yaml = yaml.safe_dump(sc_dict, default_flow_style=False, allow_unicode=True)
+        logger.debug(
+            "=== GENERATED SCENARIO ===\n%s", sc_yaml,
+        )
+
+    # === DEBUG: Log signup-related observation data ===
+    for obs in observations:
+        elem = obs.get("element", {})
+        elem_text = (elem.get("text") or "").lower()
+        if any(kw in elem_text for kw in ("가입", "signup", "register")):
+            change = obs.get("observed_change", {})
+            nav_fields = change.get("navigated_page_fields", [])
+            logger.debug(
+                "=== OBSERVATION DATA FOR SIGNUP ===\n"
+                "  element: text=%r, selector=%r, type=%r\n"
+                "  change_type: %s\n"
+                "  navigated_page_fields (%d):",
+                elem.get("text"), elem.get("selector"), elem.get("type"),
+                change.get("type"), len(nav_fields),
+            )
+            for f in nav_fields:
+                logger.debug(
+                    "    field: type=%s, label=%r, selector=%r, "
+                    "placeholder=%r, context=%r",
+                    f.get("type"), f.get("label"), f.get("selector"),
+                    f.get("placeholder"), f.get("context"),
+                )
+
+    # Fix form-submit-after-input: replace nav clicks with form submit buttons
+    logger.debug("=== FORM-SUBMIT FIX EXECUTING ===")
+    scenarios = fix_form_submit_steps(scenarios, observations)
 
     # Validate and retry if needed
     scenarios, validation = await validate_and_retry(
@@ -1530,6 +1782,19 @@ async def execute_scan_tests(
     # Compute validation summary
     verified = sum(1 for v in validation if v["status"] == "verified")
     total_v = len(validation)
+
+    # Check scenario name-vs-steps relevance
+    relevance = validate_scenario_relevance(scenarios, selected_details)
+    relevance_warnings: list[str] = []
+    for rel in relevance:
+        if not rel["relevant"]:
+            logger.warning(
+                "Scenario relevance mismatch (scan_id=%d): %s — %s",
+                scan_id, rel["test_name"], rel["reason"],
+            )
+            relevance_warnings.append(
+                f"⚠️ '{rel['test_name']}': {rel['reason']}"
+            )
 
     # Serialize to YAML
     scenario_dicts = [
@@ -1546,7 +1811,7 @@ async def execute_scan_tests(
     # Clean up stuck tests for this user before creating a new one
     from app.models import Test, TestStatus
 
-    stuck_cutoff = datetime.now(timezone.utc) - timedelta(
+    stuck_cutoff = datetime.now(UTC) - timedelta(
         minutes=settings.stuck_timeout_minutes
     )
     stuck_result = await db.execute(
@@ -1558,9 +1823,16 @@ async def execute_scan_tests(
     )
     for stuck_test in stuck_result.scalars().all():
         stuck_test.status = TestStatus.FAILED
-        stuck_test.error_message = f"Auto-cancelled: stuck {stuck_test.status.value} > {settings.stuck_timeout_minutes} min"
-        stuck_test.updated_at = datetime.now(timezone.utc)
-        logger.warning("Pre-exec cleanup: auto-failed stuck test %d for user %s", stuck_test.id, user.id)
+        stuck_test.error_message = (
+            f"Auto-cancelled: stuck {stuck_test.status.value}"
+            f" > {settings.stuck_timeout_minutes} min"
+        )
+        stuck_test.updated_at = datetime.now(UTC)
+        logger.warning(
+            "Pre-exec cleanup: auto-failed stuck test %d for user %s",
+            stuck_test.id,
+            user.id,
+        )
 
     # Create a Test record with the generated YAML
     test = Test(
@@ -1574,7 +1846,7 @@ async def execute_scan_tests(
     await db.commit()
     await db.refresh(test)
 
-    return {
+    result: dict[str, Any] = {
         "test_id": test.id,
         "scenario_yaml": scenario_yaml,
         "scenarios_count": len(scenarios),
@@ -1589,251 +1861,158 @@ async def execute_scan_tests(
             ),
         },
     }
+    if relevance_warnings:
+        result["relevance_warnings"] = relevance_warnings
+    return result
 
 
 # ---------------------------------------------------------------------------
-# Scenario validation — verify targets against observation data
+# Scenario name-vs-steps relevance validation
 # ---------------------------------------------------------------------------
 
+# Keyword families: test name keywords → expected URL/field/action patterns
+_RELEVANCE_KEYWORDS: dict[str, dict[str, list[str]]] = {
+    "회원가입": {
+        "urls": ["signup", "register", "join"],
+        "fields": ["이름", "name", "비밀번호 확인", "confirm", "가입"],
+        "actions": ["가입", "회원가입", "register", "sign up"],
+    },
+    "로그인": {
+        "urls": ["login", "signin", "sign-in"],
+        "fields": ["이메일", "email", "비밀번호", "password", "로그인"],
+        "actions": ["로그인", "login", "sign in"],
+    },
+    "signup": {
+        "urls": ["signup", "register", "join"],
+        "fields": ["name", "confirm", "signup"],
+        "actions": ["register", "sign up", "가입"],
+    },
+    "login": {
+        "urls": ["login", "signin", "sign-in"],
+        "fields": ["email", "password", "login"],
+        "actions": ["login", "sign in", "로그인"],
+    },
+    "검색": {
+        "urls": ["search"],
+        "fields": ["검색", "search", "query"],
+        "actions": ["검색", "search"],
+    },
+    "장바구니": {
+        "urls": ["cart", "basket"],
+        "fields": ["수량", "quantity"],
+        "actions": ["장바구니", "cart", "담기"],
+    },
+}
 
-def validate_scenarios(
+
+def validate_scenario_relevance(
     scenarios: list,
-    observations: list[dict],
-    page_data: list[dict] | None = None,
+    selected_tests: list[dict],
 ) -> list[dict]:
-    """Validate scenario step targets against observation/crawl data.
+    """Check if each scenario's steps match its test name intent.
 
-    Returns list of validation results per step:
-    [{"scenario_idx": 0, "step": 1, "status": "verified"|"unverified",
-      "target_text": "...", "closest_match": "..."|null}]
+    Returns list of {scenario_idx, test_name, relevant: bool, reason: str}.
     """
-    # Build lookup sets from observations and page data
-    observed_texts: set[str] = set()
-    observed_selectors: set[str] = set()
-    observed_urls: set[str] = set()
-    form_fields: set[str] = set()  # placeholder / label / name
-
-    for obs in observations:
-        elem = obs.get("element", {})
-        txt = (elem.get("text") or "").strip().lower()
-        sel = (elem.get("selector") or "").strip().lower()
-        if txt:
-            observed_texts.add(txt)
-        if sel:
-            observed_selectors.add(sel)
-        # Collect new_text from observations
-        for nt in obs.get("observed_change", {}).get("new_text", []):
-            nt_lower = nt.strip().lower()
-            if nt_lower:
-                observed_texts.add(nt_lower)
-        # URLs
-        for key in ("before", "after"):
-            u = obs.get(key, {}).get("url", "")
-            if u:
-                observed_urls.add(u.lower())
-
-    # From page data (nav, buttons, links, forms)
-    for pdata in (page_data or []):
-        for nav in pdata.get("nav_menus", []):
-            for item in nav.get("items", []):
-                txt = (item.get("text") or "").strip().lower()
-                if txt:
-                    observed_texts.add(txt)
-        for btn in pdata.get("buttons", []):
-            txt = (btn.get("text") or "").strip().lower()
-            if txt:
-                observed_texts.add(txt)
-        for link in pdata.get("links", []):
-            txt = (link.get("text") or "").strip().lower()
-            href = (link.get("href") or "").lower()
-            if txt:
-                observed_texts.add(txt)
-            if href:
-                observed_urls.add(href)
-        for form in pdata.get("forms", []):
-            for field in form.get("fields", []):
-                for key in ("name", "placeholder", "label", "aria_label"):
-                    val = (field.get(key) or "").strip().lower()
-                    if val:
-                        form_fields.add(val)
-                        observed_texts.add(val)
-                sel = (field.get("selector") or "").strip().lower()
-                if sel:
-                    observed_selectors.add(sel)
-
     results: list[dict] = []
 
     for si, scenario in enumerate(scenarios):
-        steps = []
-        if hasattr(scenario, "steps"):
-            steps = scenario.steps
-        elif isinstance(scenario, dict):
-            steps = scenario.get("steps", [])
+        sc_dict = scenario.model_dump(mode="json") if hasattr(scenario, "model_dump") else scenario
+        sc_name = (sc_dict.get("name") or "").lower()
+        steps = sc_dict.get("steps", [])
 
+        # Find matching selected test
+        test_name = sc_name
+        for t in selected_tests:
+            t_name = (t.get("name") or "").lower()
+            if t_name and (t_name in sc_name or sc_name in t_name):
+                test_name = t_name
+                break
+
+        # Collect all step content for matching
+        step_urls: list[str] = []
+        step_texts: list[str] = []
         for step in steps:
-            # Extract target info
-            if hasattr(step, "target"):
-                target_obj = step.target
-                action = step.action.value if hasattr(
-                    step.action, "value"
-                ) else str(step.action)
-                step_num = step.step
-                target_text = (
-                    target_obj.text if target_obj else None
-                )
-                value = step.value
-            else:
-                target_obj = step.get("target")
-                action = str(step.get("action", ""))
-                step_num = step.get("step", 0)
-                target_text = (
-                    target_obj.get("text") if target_obj else None
-                )
-                value = step.get("value")
+            action = step.get("action", "")
+            value = step.get("value", "")
+            target = step.get("target", {}) or {}
+            target_text = (target.get("text") or "").lower()
+            target_sel = (target.get("selector") or "").lower()
 
-            # Skip steps that don't need validation
-            if action in ("navigate", "wait", "screenshot"):
-                # For navigate, check if URL is known
-                if action == "navigate" and value:
-                    results.append({
-                        "scenario_idx": si,
-                        "step": step_num,
-                        "status": "verified",
-                        "target_text": value,
-                    })
-                continue
+            if action == "navigate" and value:
+                step_urls.append(value.lower())
+            if target_text:
+                step_texts.append(target_text)
+            if target_sel:
+                step_texts.append(target_sel)
+            if value:
+                step_texts.append(value.lower())
 
-            if not target_text:
-                continue
+        all_step_content = " ".join(step_urls + step_texts)
 
-            tt_lower = target_text.strip().lower()
+        # Check against keyword families
+        matched_family = None
+        for keyword, patterns in _RELEVANCE_KEYWORDS.items():
+            if keyword in test_name:
+                matched_family = (keyword, patterns)
+                break
 
-            # Check exact match
-            if tt_lower in observed_texts:
-                results.append({
-                    "scenario_idx": si,
-                    "step": step_num,
-                    "status": "verified",
-                    "target_text": target_text,
-                })
-                continue
-
-            # Check partial match (target text contained in
-            # observed text or vice versa)
-            partial = None
-            for ot in observed_texts:
-                if tt_lower in ot or ot in tt_lower:
-                    partial = ot
-                    break
-
-            if partial:
-                results.append({
-                    "scenario_idx": si,
-                    "step": step_num,
-                    "status": "verified",
-                    "target_text": target_text,
-                    "closest_match": partial,
-                })
-                continue
-
-            # Check form fields
-            if tt_lower in form_fields:
-                results.append({
-                    "scenario_idx": si,
-                    "step": step_num,
-                    "status": "verified",
-                    "target_text": target_text,
-                })
-                continue
-
-            # Not found — unverified
-            # Find closest match for hint
-            closest = _find_closest(tt_lower, observed_texts)
+        if not matched_family:
             results.append({
                 "scenario_idx": si,
-                "step": step_num,
-                "status": "unverified",
-                "target_text": target_text,
-                "closest_match": closest,
+                "test_name": test_name,
+                "relevant": True,
+                "reason": "no keyword family matched — skipping check",
+            })
+            continue
+
+        family_name, patterns = matched_family
+
+        # Check if ANY expected pattern appears in step content
+        found_url = any(
+            u in all_step_content for u in patterns["urls"]
+        )
+        found_field = any(
+            f in all_step_content for f in patterns["fields"]
+        )
+        found_action = any(
+            a in all_step_content for a in patterns["actions"]
+        )
+
+        relevant = found_url or found_field or found_action
+
+        if not relevant:
+            # Check for confusion with similar flows
+            confused_with = None
+            for other_kw, other_patterns in _RELEVANCE_KEYWORDS.items():
+                if other_kw == family_name:
+                    continue
+                other_match = any(
+                    u in all_step_content for u in other_patterns["urls"]
+                ) or any(
+                    a in all_step_content for a in other_patterns["actions"]
+                )
+                if other_match:
+                    confused_with = other_kw
+                    break
+
+            reason = f"'{family_name}' 테스트이지만 관련 스텝 없음"
+            if confused_with:
+                reason += f" ('{confused_with}' 흐름으로 대체된 것으로 보임)"
+            results.append({
+                "scenario_idx": si,
+                "test_name": test_name,
+                "relevant": False,
+                "reason": reason,
+            })
+        else:
+            results.append({
+                "scenario_idx": si,
+                "test_name": test_name,
+                "relevant": True,
+                "reason": "OK",
             })
 
     return results
-
-
-def _find_closest(
-    target: str, candidates: set[str],
-) -> str | None:
-    """Find the most similar string from candidates."""
-    if not candidates:
-        return None
-    best = None
-    best_score = 0
-    for c in candidates:
-        # Simple overlap scoring
-        common = sum(1 for ch in target if ch in c)
-        score = common / max(len(target), len(c), 1)
-        if score > best_score:
-            best_score = score
-            best = c
-    return best if best_score > 0.3 else None
-
-
-async def validate_and_retry(
-    scenarios: list,
-    observations: list[dict],
-    page_data: list[dict] | None,
-    adapter: Any,
-    prompt_context: str,
-) -> tuple[list, list[dict]]:
-    """Validate scenarios and retry once if too many unverified.
-
-    Returns (possibly_fixed_scenarios, validation_results).
-    """
-    results = validate_scenarios(scenarios, observations, page_data)
-    unverified = [r for r in results if r["status"] == "unverified"]
-    total_validated = len(results)
-
-    # If > 30% unverified and we have observations, retry once
-    if (
-        total_validated > 0
-        and len(unverified) / total_validated > 0.3
-        and observations
-    ):
-        logger.info(
-            "Validation: %d/%d unverified, retrying",
-            len(unverified), total_validated,
-        )
-        # Build retry prompt
-        retry_prompt = (
-            f"{prompt_context}\n\n"
-            "## VALIDATION FAILED — FIX REQUIRED\n"
-            "The following targets were NOT found in the "
-            "observation data:\n"
-        )
-        for uv in unverified:
-            closest = uv.get("closest_match")
-            hint = f" (closest: \"{closest}\")" if closest else ""
-            retry_prompt += (
-                f"- Step {uv['step']}: "
-                f"\"{uv['target_text']}\"{hint}\n"
-            )
-        retry_prompt += (
-            "\nFix these targets using ONLY elements from "
-            "the observation data. Return the complete "
-            "corrected scenario JSON array."
-        )
-
-        try:
-            fixed = await adapter.generate_scenarios(retry_prompt)
-            if fixed:
-                scenarios = fixed
-                results = validate_scenarios(
-                    scenarios, observations, page_data,
-                )
-        except Exception as exc:
-            logger.warning("Validation retry failed: %s", exc)
-
-    return scenarios, results
 
 
 # ---------------------------------------------------------------------------

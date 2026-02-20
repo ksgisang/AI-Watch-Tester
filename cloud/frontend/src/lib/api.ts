@@ -167,26 +167,38 @@ export interface ValidationSummary {
   percent: number;
 }
 
+export interface RelevanceValidation {
+  valid: boolean;
+  confidence: number;
+  reason: string;
+  feature_missing: boolean;
+  warnings: string[];
+}
+
 export interface ConvertScenarioResult {
   scenario_yaml: string;
   scenarios_count: number;
   steps_total: number;
   validation: ValidationItem[];
   validation_summary: ValidationSummary | null;
+  relevance: RelevanceValidation | null;
 }
 
 export async function convertScenario(
   targetUrl: string,
   userPrompt: string,
-  language: "ko" | "en" = "en"
+  language: "ko" | "en" = "en",
+  scanId?: number,
 ): Promise<ConvertScenarioResult> {
+  const payload: Record<string, unknown> = {
+    target_url: targetUrl,
+    user_prompt: userPrompt,
+    language,
+  };
+  if (scanId) payload.scan_id = scanId;
   const res = await authFetch("/api/tests/convert", {
     method: "POST",
-    body: JSON.stringify({
-      target_url: targetUrl,
-      user_prompt: userPrompt,
-      language,
-    }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) {
     const err = await res.json();

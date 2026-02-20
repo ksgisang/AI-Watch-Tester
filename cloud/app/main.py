@@ -5,11 +5,11 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-
 from sqlalchemy import text
 
 from app.config import settings
@@ -68,7 +68,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Log DB backend for debugging
     db_url = settings.database_url
     if db_url.startswith("sqlite"):
-        logger.warning("Using SQLite — data will be lost on Render restart! Set AWT_DATABASE_URL to PostgreSQL.")
+        logger.warning(
+            "Using SQLite — data will be lost on Render restart!"
+            " Set AWT_DATABASE_URL to PostgreSQL."
+        )
     else:
         logger.info("Database: %s", db_url.split("@")[-1] if "@" in db_url else "(configured)")
 
@@ -121,8 +124,6 @@ app.add_middleware(
 )
 
 # -- Static: screenshots --
-from pathlib import Path
-
 _ss_dir = Path(settings.screenshot_dir)
 _ss_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/screenshots", StaticFiles(directory=str(_ss_dir)), name="screenshots")
@@ -138,7 +139,9 @@ app.include_router(billing.router)
 
 # -- Rate limit response headers --
 @app.middleware("http")
-async def add_rate_limit_headers(request: Request, call_next) -> Response:  # type: ignore[no-untyped-def]
+async def add_rate_limit_headers(  # type: ignore[no-untyped-def]
+    request: Request, call_next
+) -> Response:
     """Inject X-RateLimit-* headers into responses."""
     response: Response = await call_next(request)
 

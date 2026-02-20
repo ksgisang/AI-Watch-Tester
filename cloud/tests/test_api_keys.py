@@ -62,6 +62,7 @@ async def test_delete_api_key(pro_client: AsyncClient) -> None:
 async def test_delete_other_user_key_404(pro_client: AsyncClient, db_session) -> None:
     """DELETE /api/keys/{id} returns 404 for another user's key."""
     import hashlib
+
     from app.models import ApiKey
 
     # Insert a key owned by a different user

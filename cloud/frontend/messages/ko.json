@@ -205,7 +205,9 @@
     "additionalGenerated": "추가 시나리오 {count}개 생성됨 ({steps}개 스텝)",
     "skipScan": "스캔 없이 직접 테스트 작성",
     "backToScan": "스캔으로 돌아가기",
-    "userRequestedTests": "사용자 요청 테스트"
+    "userRequestedTests": "사용자 요청 테스트",
+    "unverifiedScenario": "미검증",
+    "relevanceWarning": "요청하신 기능과 다른 테스트가 실행되었을 수 있습니다"
   },
   "tests": {
     "title": "테스트 기록",

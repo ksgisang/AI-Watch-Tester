@@ -9,7 +9,6 @@ from app.test_patterns import (
     match_elements_to_patterns,
 )
 
-
 # ---------------------------------------------------------------------------
 # ELEMENT_TEST_PATTERNS structure validation
 # ---------------------------------------------------------------------------
@@ -48,7 +47,8 @@ def test_match_form_fields() -> None:
             "selector": "#login-form",
             "fields": [
                 {"name": "email", "type": "email", "placeholder": "이메일", "selector": "#email"},
-                {"name": "password", "type": "password", "placeholder": "비밀번호", "selector": "#pw"},
+                {"name": "password", "type": "password",
+                 "placeholder": "비밀번호", "selector": "#pw"},
             ],
         }],
         "nav_menus": [],

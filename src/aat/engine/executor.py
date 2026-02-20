@@ -388,12 +388,22 @@ class StepExecutor:
         target: TargetSpec = step.target  # type: ignore[assignment]
 
         # Priority 0: CSS selector (from observation data)
+        # When both selector and text are provided, filter by text
+        # to avoid clicking the wrong element (e.g., "로그인" instead of "가입"
+        # when both share selector "button.MuiButtonBase-root")
         if target.selector and hasattr(self._engine, "page"):
             page = self._engine.page
-            # Try up to 3 times with short waits (handles modals still animating)
             for attempt in range(3):
                 try:
-                    loc = page.locator(target.selector).first
+                    base_loc = page.locator(target.selector)
+                    # Filter by text if available (critical for generic selectors)
+                    if target.text:
+                        loc = base_loc.filter(has_text=target.text).first
+                        # Fallback to unfiltered if text filter matches nothing
+                        if await loc.count() == 0:
+                            loc = base_loc.first
+                    else:
+                        loc = base_loc.first
                     if await loc.count() > 0:
                         with contextlib.suppress(Exception):
                             await loc.scroll_into_view_if_needed(timeout=2000)
@@ -405,7 +415,7 @@ class StepExecutor:
                 except Exception:
                     pass
                 if attempt < 2:
-                    await asyncio.sleep(0.5)  # wait for modal animation
+                    await asyncio.sleep(0.5)
 
         # Priority 0.5: Enhanced input finding for find_and_type
         if step.action == ActionType.FIND_AND_TYPE and hasattr(self._engine, "page"):

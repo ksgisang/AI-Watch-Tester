@@ -6,9 +6,10 @@ Single-process, no Celery. Tracks asyncio.Task references for proper cancellatio
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 
@@ -55,10 +56,8 @@ class Worker:
         self._running = False
         if self._task:
             self._task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
         # Cancel all active tasks
         for tid, task in list(self._tasks.items()):
             if not task.done():
@@ -121,14 +120,14 @@ class Worker:
             for test in stuck:
                 test.status = TestStatus.FAILED
                 test.error_message = "Test was interrupted by server restart"
-                test.updated_at = datetime.now(timezone.utc)
+                test.updated_at = datetime.now(UTC)
                 logger.warning("Startup: marked stuck test %d as FAILED", test.id)
             if stuck:
                 await db.commit()
 
     async def _fail_stuck_tests(self) -> None:
         """Periodically fail tests stuck in RUNNING or QUEUED beyond the timeout."""
-        cutoff = datetime.now(timezone.utc) - timedelta(
+        cutoff = datetime.now(UTC) - timedelta(
             minutes=settings.stuck_timeout_minutes
         )
         async with async_session() as db:
@@ -145,7 +144,7 @@ class Worker:
                 test.error_message = (
                     f"Test timed out ({old_status.value} > {settings.stuck_timeout_minutes} min)"
                 )
-                test.updated_at = datetime.now(timezone.utc)
+                test.updated_at = datetime.now(UTC)
                 logger.warning(
                     "Auto-failed stuck test %d (%s > %d min)",
                     test.id,
@@ -227,7 +226,7 @@ class Worker:
                 # Claim this test
                 original_status = test.status
                 test.status = TestStatus.RUNNING
-                test.updated_at = datetime.now(timezone.utc)
+                test.updated_at = datetime.now(UTC)
                 await db.commit()
                 logger.info(
                     "Claimed test %d (%s) for user %s (%d/%d running)",
@@ -262,7 +261,7 @@ class Worker:
                     test.status = TestStatus.FAILED
                     test.result_json = json.dumps({"error": str(exc)})
                     test.error_message = str(exc)
-                    test.updated_at = datetime.now(timezone.utc)
+                    test.updated_at = datetime.now(UTC)
                     await db.commit()
 
             await ws_manager.broadcast(
@@ -290,7 +289,7 @@ class Worker:
                 test.error_message = result["error"]
             else:
                 test.status = TestStatus.REVIEW
-            test.updated_at = datetime.now(timezone.utc)
+            test.updated_at = datetime.now(UTC)
             await db.commit()
 
         if result.get("error"):
@@ -319,7 +318,7 @@ class Worker:
             test.result_json = json.dumps(result, default=str)
             if result.get("error"):
                 test.error_message = result["error"]
-            test.updated_at = datetime.now(timezone.utc)
+            test.updated_at = datetime.now(UTC)
             await db.commit()
 
         await ws_manager.broadcast(

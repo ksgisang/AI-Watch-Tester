@@ -20,7 +20,9 @@ class WSManager:
     async def connect(self, test_id: int, ws: WebSocket) -> None:
         await ws.accept()
         self._connections[test_id].append(ws)
-        logger.debug("WS connected: test_id=%d (total=%d)", test_id, len(self._connections[test_id]))
+        logger.debug(
+            "WS connected: test_id=%d (total=%d)", test_id, len(self._connections[test_id])
+        )
 
     def disconnect(self, test_id: int, ws: WebSocket) -> None:
         conns = self._connections.get(test_id)
