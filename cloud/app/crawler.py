@@ -1613,7 +1613,10 @@ async def _observe_interactions(
                 "message": f"요소 관찰 중 [{idx + 1}/{len(clickable)}]: '{elem_text}' 클릭...",
             })
         try:
-            obs = await _observe_single_click(page, elem, original_url)
+            obs = await asyncio.wait_for(
+                _observe_single_click(page, elem, original_url),
+                timeout=20,
+            )
             if obs:
                 observations.append(obs)
                 change_type = obs["observed_change"]["type"]
