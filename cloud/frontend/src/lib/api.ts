@@ -245,6 +245,7 @@ export interface ScanItem {
   pages: Record<string, unknown>[] | null;
   broken_links: { url: string; status: number; error?: string }[] | null;
   detected_features: string[];
+  logs: { phase: string; message: string; level?: string }[];
   error_message: string | null;
   created_at: string;
   completed_at: string | null;

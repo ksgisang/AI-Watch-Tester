@@ -253,6 +253,7 @@ def _scan_to_response(scan: Scan) -> dict:
         "broken_links": _parse_json(scan.broken_links_json),
         "detected_features": _parse_json(scan.detected_features) or [],
         "observations": _parse_json(getattr(scan, "observations_json", None)) or [],
+        "logs": _parse_json(getattr(scan, "logs_json", None)) or [],
         "error_message": scan.error_message,
         "created_at": scan.created_at,
         "completed_at": scan.completed_at,
@@ -291,6 +292,21 @@ async def start_scan(
 
     # Run crawl in background
     async def _run_crawl() -> None:
+        # Wrap WSManager to collect scan_log messages for persistence
+        collected_logs: list[dict[str, Any]] = []
+
+        class _LogCollectingWS:
+            """Proxy that intercepts scan_log broadcasts."""
+
+            async def broadcast(self, sid: int, msg: dict) -> None:
+                await ws_manager.broadcast(sid, msg)
+                if msg.get("type") == "scan_log":
+                    collected_logs.append({
+                        "phase": msg.get("phase", ""),
+                        "message": msg.get("message", ""),
+                        "level": msg.get("level"),
+                    })
+
         try:
             result = await crawl_site(
                 str(body.target_url),
@@ -299,7 +315,7 @@ async def start_scan(
                 max_depth=max_depth,
                 total_timeout=float(tier_limits["timeout"]),
                 screenshot_limit=tier_limits["screenshots"],
-                ws=ws_manager,
+                ws=_LogCollectingWS(),
             )
 
             # Update DB with results FIRST, then broadcast
@@ -322,6 +338,9 @@ async def start_scan(
                     # Store observations if available
                     if result.get("observations"):
                         s.observations_json = json.dumps(result["observations"])
+                # Always persist collected scan logs
+                if collected_logs:
+                    s.logs_json = json.dumps(collected_logs)
                 s.completed_at = datetime.now(timezone.utc)
                 await session.commit()
 

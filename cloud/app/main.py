@@ -83,6 +83,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("Added observations_json column to scans table")
         except Exception:
             pass  # column already exists
+        try:
+            await conn.execute(text(
+                "ALTER TABLE scans ADD COLUMN logs_json TEXT"
+            ))
+            logger.info("Added logs_json column to scans table")
+        except Exception:
+            pass  # column already exists
 
     # Background worker
     from app.worker import worker

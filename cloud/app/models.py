@@ -115,6 +115,7 @@ class Scan(Base):
     detected_features: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
     plan_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     observations_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
+    logs_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array of scan logs
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -891,6 +891,37 @@ export default function DashboardPage() {
                     ) : (
                       <p className="text-xs text-gray-400">{ts("noFeatures")}</p>
                     )}
+                    {/* Scan detail log (persisted or from session) */}
+                    {(() => {
+                      const logs = activeScan.logs?.length ? activeScan.logs : scanLogs;
+                      if (!logs || logs.length === 0) return null;
+                      return (
+                        <details className="pt-1">
+                          <summary className="cursor-pointer text-[10px] font-medium text-gray-500 uppercase hover:text-gray-700">
+                            {ts("scanLogTitle")} ({logs.length})
+                          </summary>
+                          <div className="mt-1 max-h-48 overflow-y-auto rounded border border-gray-200 bg-white/60 px-3 py-2 text-[11px] font-mono leading-relaxed">
+                            {logs.map((log, i) => {
+                              const phaseIcons: Record<string, string> = {
+                                navigate: "\uD83C\uDF10", extract: "\uD83D\uDD0D",
+                                feature: "\u2699\uFE0F", observe: "\uD83D\uDC41",
+                                links: "\uD83D\uDD17", scroll: "\uD83D\uDCC4",
+                                accordion: "\uD83D\uDD3D",
+                              };
+                              const icon = phaseIcons[log.phase] || "\u25B6";
+                              const color = log.level === "error" ? "text-red-600"
+                                : log.level === "warn" ? "text-amber-600" : "text-gray-600";
+                              return (
+                                <div key={i} className={`${color} ${log.message.startsWith("  →") ? "ml-4" : ""}`}>
+                                  {!log.message.startsWith("  →") && <span className="mr-1">{icon}</span>}
+                                  {log.message}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </details>
+                      );
+                    })()}
                     {/* Free tier notice */}
                     {billing?.tier === "free" && (
                       <p className="text-[10px] text-amber-600">{ts("upgradeForMore")}</p>
