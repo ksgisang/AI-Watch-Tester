@@ -1548,19 +1548,42 @@ async def _observe_interactions(
     Prioritizes: nav items > buttons > visible links.
     Returns list of observation records with change classification.
     """
+    # File extensions that indicate a download (not a navigable page)
+    _FILE_EXTS = {
+        ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+        ".zip", ".rar", ".7z", ".tar", ".gz",
+        ".csv", ".hwp", ".hwpx",
+        ".mp3", ".mp4", ".avi", ".mov", ".wmv",
+        ".exe", ".dmg", ".apk", ".msi",
+    }
+
+    def _is_file_link(href: str) -> bool:
+        """Check if href points to a downloadable file."""
+        if not href:
+            return False
+        path = urlparse(href).path.lower()
+        return any(path.endswith(ext) for ext in _FILE_EXTS)
+
     clickable: list[dict[str, Any]] = []
+    file_downloads: list[dict[str, Any]] = []
 
     # 1. Nav menu items (highest priority)
     for nav in page_data.get("nav_menus", []):
         for item in nav.get("items", []):
             txt = (item.get("text") or "").strip()
             if txt and len(txt) < 50:
-                clickable.append({
-                    "text": txt,
-                    "href": item.get("href", ""),
-                    "selector": item.get("selector"),
-                    "type": "nav_item",
-                })
+                href = item.get("href", "")
+                if _is_file_link(href):
+                    file_downloads.append({
+                        "text": txt, "href": href,
+                        "selector": item.get("selector"),
+                    })
+                else:
+                    clickable.append({
+                        "text": txt, "href": href,
+                        "selector": item.get("selector"),
+                        "type": "nav_item",
+                    })
 
     # 2. Buttons (skip generic ones like hamburger icons)
     for btn in page_data.get("buttons", []):
@@ -1586,12 +1609,17 @@ async def _observe_interactions(
             href = link.get("href", "")
             # Skip external links, mailto, javascript
             if href and not href.startswith("javascript:") and not href.startswith("mailto:"):
-                clickable.append({
-                    "text": txt,
-                    "href": href,
-                    "selector": link.get("selector"),
-                    "type": "link",
-                })
+                if _is_file_link(href):
+                    file_downloads.append({
+                        "text": txt, "href": href,
+                        "selector": link.get("selector"),
+                    })
+                else:
+                    clickable.append({
+                        "text": txt, "href": href,
+                        "selector": link.get("selector"),
+                        "type": "link",
+                    })
 
     # Deduplicate by text
     seen_text: set[str] = set()
@@ -1604,6 +1632,39 @@ async def _observe_interactions(
     clickable = unique[:max_interactions]
 
     observations: list[dict[str, Any]] = []
+
+    # Record file download links as observations (no click, just record)
+    for dl in file_downloads:
+        dl_text = dl.get("text", "")
+        dl_href = dl.get("href", "")
+        if dl_text.lower() in seen_text:
+            continue
+        seen_text.add(dl_text.lower())
+        observations.append({
+            "element": {
+                "text": dl_text,
+                "selector": dl.get("selector"),
+                "type": "file_download",
+            },
+            "before": {"url": original_url},
+            "action": "none",
+            "after": {"url": original_url},
+            "observed_change": {
+                "type": "file_download",
+                "url_changed": False,
+                "new_elements": [],
+                "new_text": [],
+                "file_url": dl_href,
+                "screenshot_diff_percent": 0,
+            },
+            "access_path": f"file download: {dl_text!r} → {dl_href}",
+        })
+        if ws:
+            await ws.broadcast(scan_id, {
+                "type": "scan_log",
+                "phase": "observe",
+                "message": f"  → 파일 다운로드 링크 발견: '{dl_text}' ({dl_href.rsplit('/', 1)[-1]})",
+            })
     for idx, elem in enumerate(clickable):
         elem_text = elem.get("text", "")
         if ws:

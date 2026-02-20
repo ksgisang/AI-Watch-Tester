@@ -173,6 +173,16 @@ ELEMENT_TEST_PATTERNS: dict[str, dict[str, Any]] = {
             {"name": "이전 페이지", "action": "이전 버튼 클릭", "assert": "이전 콘텐츠 표시"},
         ],
     },
+    # -- File download --
+    "file_download": {
+        "tests": [
+            {
+                "name": "파일 다운로드 링크 확인",
+                "action": "HTTP HEAD 요청",
+                "assert": "200 OK 응답 (파일 존재)",
+            },
+        ],
+    },
 }
 
 
@@ -246,6 +256,8 @@ def match_elements_to_patterns(
             pattern_key = "accordion"
         elif change_type == "modal_opened":
             pattern_key = "modal_trigger"
+        elif elem_type == "file_download" or change_type == "file_download":
+            pattern_key = "file_download"
         else:
             continue
 
