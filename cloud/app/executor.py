@@ -11,6 +11,7 @@ import base64
 import json
 import logging
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -583,10 +584,11 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
 
                 completed += 1
 
-                # Update progress in DB
+                # Update progress in DB (+ heartbeat to prevent stuck-timeout)
                 async with async_session() as db:
                     t = (await db.execute(select(Test).where(Test.id == test_id))).scalar_one()
                     t.steps_completed = completed
+                    t.updated_at = datetime.now(UTC)
                     await db.commit()
 
             all_results.append({

@@ -541,29 +541,31 @@ class StepExecutor:
     async def _post_click_wait(self) -> None:
         """Wait for potential navigation or modal animation after click.
 
-        Detects URL change to distinguish navigation from in-page changes:
-        - URL changed → wait_for_load_state("networkidle") for full page load
-        - URL unchanged → short delay for modal/animation rendering
+        Lightweight: only waits if URL actually changes.
+        - URL changed → wait_for_load_state("domcontentloaded") (fast, max 3s)
+        - URL unchanged → minimal delay (300ms) for modal/animation start
         """
         if not hasattr(self._engine, "page"):
             return
-        page = self._engine.page
-        url_before = page.url
+        try:
+            page = self._engine.page
+            url_before = page.url
 
-        # Brief pause to let navigation or animation start
-        await asyncio.sleep(0.3)
+            # Minimal pause to let navigation start
+            await asyncio.sleep(0.15)
 
-        url_after = page.url
-        if url_after != url_before:
-            # Navigation detected — wait for page to finish loading
-            try:
-                await page.wait_for_load_state("networkidle", timeout=10000)
-            except Exception:
-                # Fallback: at least wait a bit for content to render
-                await asyncio.sleep(1.0)
-        else:
-            # No navigation — modal or in-page animation
-            await asyncio.sleep(0.8)
+            url_after = page.url
+            if url_after != url_before:
+                # Navigation detected — wait for DOM ready (fast, not networkidle)
+                try:
+                    await page.wait_for_load_state("domcontentloaded", timeout=3000)
+                except Exception:
+                    pass
+            else:
+                # No navigation — brief delay for modal/animation
+                await asyncio.sleep(0.3)
+        except Exception:
+            pass
 
     async def _save_screenshot(self, label: str) -> str:
         """Save screenshot and return file path.

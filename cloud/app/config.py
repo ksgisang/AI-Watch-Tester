@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # Worker
     max_concurrent: int = 2
     worker_poll_interval: float = 2.0  # seconds
-    stuck_timeout_minutes: int = 3  # auto-fail tests stuck in RUNNING/QUEUED
+    stuck_timeout_minutes: int = 5  # auto-fail tests stuck in RUNNING/QUEUED
 
     # AI provider for scenario generation
     # Accepts AWT_AI_PROVIDER or AWT_SERVICE_AI_PROVIDER (Render compatibility)
