@@ -640,7 +640,12 @@ async def crawl_site(
     except ImportError as exc:
         return {"error": f"AAT core not installed: {exc}"}
 
-    engine_config = EngineConfig(type="web", headless=settings.playwright_headless)
+    engine_config = EngineConfig(
+        type="web",
+        headless=settings.playwright_headless,
+        viewport_width=1920,
+        viewport_height=1080,
+    )
     engine = WebEngine(engine_config)
 
     start_time = time.monotonic()
