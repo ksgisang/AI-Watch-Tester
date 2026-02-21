@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import { connectTestWS } from "@/lib/api";
+import { connectTestWS, getTest } from "@/lib/api";
 
 interface WSEvent {
   type: string;
@@ -184,9 +184,43 @@ export default function TestProgress({ testId, onComplete, onScenariosReady }: P
 
     connectWS();
 
+    // Polling fallback: if WS misses events, detect completion via REST
+    const pollInterval = setInterval(async () => {
+      if (!mountedRef.current) return;
+      try {
+        const test = await getTest(testId);
+        const s = test.status;
+        // Update progress from REST data
+        if (test.steps_total > 0 && totalSteps === 0) {
+          setTotalSteps(test.steps_total);
+        }
+        if (test.steps_completed > 0) {
+          setCurrentStep((prev) => Math.max(prev, test.steps_completed));
+        }
+        // If test finished but UI still shows waiting/connecting/running
+        if (s === "done" || s === "failed") {
+          const passed = s === "done";
+          setStatus(passed ? "passed" : "failed");
+          setStepLabel(passed ? t("evtTestPassed") : t("evtTestFailed"));
+          setCurrentStep(test.steps_completed);
+          setTotalSteps(test.steps_total);
+          clearInterval(pollInterval);
+          onComplete?.(passed);
+        } else if (s === "running" && !testStartedRef.current) {
+          // Test is running but we missed test_start event
+          testStartedRef.current = true;
+          setStatus("running");
+          setStepLabel(t("startingTest"));
+        }
+      } catch {
+        // ignore polling errors
+      }
+    }, 3000);
+
     return () => {
       mountedRef.current = false;
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
+      clearInterval(pollInterval);
       wsRef.current?.close();
     };
   }, [testId]);
