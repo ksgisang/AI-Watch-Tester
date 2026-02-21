@@ -30,6 +30,10 @@ interface ScenarioResult {
 interface ConsoleLogEntry {
   level: string; // "error" | "warning" | "info"
   text: string;
+  url?: string;
+  step?: string;
+  step_num?: string;
+  timestamp?: string;
 }
 
 interface ResultJSON {
@@ -41,6 +45,34 @@ interface ResultJSON {
   initial_screenshot?: string;
   console_logs?: ConsoleLogEntry[];
 }
+
+const CONSOLE_PATTERNS: { pattern: RegExp; key: string; impact: "high" | "medium" | "low" }[] = [
+  { pattern: /status of 400/, key: "http400", impact: "medium" },
+  { pattern: /status of 401/, key: "http401", impact: "high" },
+  { pattern: /status of 403/, key: "http403", impact: "high" },
+  { pattern: /status of 404/, key: "http404", impact: "medium" },
+  { pattern: /status of 5\d\d/, key: "http5xx", impact: "high" },
+  { pattern: /CORS|cross-origin/i, key: "cors", impact: "medium" },
+  { pattern: /net::ERR_/i, key: "network", impact: "high" },
+  { pattern: /WebGL|GPU/i, key: "webgl", impact: "low" },
+  { pattern: /Mixed Content/i, key: "mixed", impact: "medium" },
+  { pattern: /Uncaught.*TypeError/i, key: "typeError", impact: "high" },
+  { pattern: /Uncaught.*ReferenceError/i, key: "refError", impact: "high" },
+  { pattern: /deprecated/i, key: "deprecated", impact: "low" },
+];
+
+function matchConsolePattern(text: string) {
+  for (const p of CONSOLE_PATTERNS) {
+    if (p.pattern.test(text)) return p;
+  }
+  return null;
+}
+
+const IMPACT_STYLES: Record<string, string> = {
+  high: "bg-red-100 text-red-700",
+  medium: "bg-yellow-100 text-yellow-700",
+  low: "bg-gray-100 text-gray-500",
+};
 
 const STATUS_BADGE: Record<string, string> = {
   passed: "bg-green-100 text-green-700",
@@ -149,6 +181,8 @@ export default function TestDetailPage() {
   const [showScenarios, setShowScenarios] = useState(false);
   const [modalImage, setModalImage] = useState<{ src: string; alt: string } | null>(null);
   const [showConsole, setShowConsole] = useState(false);
+  const [showWarnings, setShowWarnings] = useState(false);
+  const [expandedLogs, setExpandedLogs] = useState<Set<number>>(new Set());
 
   const testId = Number(params.id);
 
@@ -467,32 +501,138 @@ export default function TestDetailPage() {
             </svg>
           </button>
           {showConsole && (
-            <div className="border-t border-gray-100 max-h-64 overflow-y-auto">
-              {consoleLogs.map((log, i) => (
-                <div
-                  key={i}
-                  className={`flex items-start gap-2 px-4 py-1.5 text-xs ${
-                    log.level === "error"
-                      ? "bg-red-50"
-                      : log.level === "warning"
-                      ? "bg-orange-50"
-                      : "bg-white"
-                  }`}
-                >
-                  <ConsoleIcon level={log.level} />
-                  <span
-                    className={`font-mono break-all ${
-                      log.level === "error"
-                        ? "text-red-700"
-                        : log.level === "warning"
-                        ? "text-orange-700"
-                        : "text-gray-600"
-                    }`}
+            <div className="border-t border-gray-100">
+              {/* Summary bar */}
+              <div className="flex items-center justify-between bg-gray-50 px-4 py-2">
+                <span className="text-xs text-gray-600">
+                  {errorCount > 0 && warnCount > 0
+                    ? t("consoleSummary", { errors: errorCount, warnings: warnCount })
+                    : errorCount > 0
+                    ? t("consoleSummaryErrorOnly", { errors: errorCount })
+                    : t("consoleSummaryWarningOnly", { warnings: warnCount })}
+                </span>
+                {warnCount > 0 && (
+                  <button
+                    onClick={() => setShowWarnings(!showWarnings)}
+                    className="rounded px-2 py-0.5 text-[10px] font-medium text-gray-500 hover:bg-gray-200 transition-colors"
                   >
-                    {log.text}
-                  </span>
-                </div>
-              ))}
+                    {showWarnings ? t("consoleHideWarnings") : t("consoleShowWarnings")}
+                  </button>
+                )}
+              </div>
+
+              {/* Log entries */}
+              <div className="max-h-96 overflow-y-auto divide-y divide-gray-100">
+                {consoleLogs
+                  .filter((log) => log.level === "error" || showWarnings)
+                  .map((log, i) => {
+                    const pattern = matchConsolePattern(log.text);
+                    const isExpanded = expandedLogs.has(i);
+
+                    if (pattern) {
+                      return (
+                        <div
+                          key={i}
+                          className={`px-4 py-2.5 ${
+                            log.level === "error" ? "bg-red-50/50" : "bg-orange-50/50"
+                          }`}
+                        >
+                          {/* Header: title + impact badge */}
+                          <div className="flex items-center gap-2">
+                            <ConsoleIcon level={log.level} />
+                            <span className="text-xs font-medium text-gray-900">
+                              {t(`explain_${pattern.key}_title`)}
+                            </span>
+                            <span
+                              className={`rounded-full px-1.5 py-0.5 text-[9px] font-medium ${
+                                IMPACT_STYLES[pattern.impact]
+                              }`}
+                            >
+                              {t(`consoleImpact${pattern.impact.charAt(0).toUpperCase()}${pattern.impact.slice(1)}`)}
+                            </span>
+                            {log.timestamp && (
+                              <span className="ml-auto text-[10px] text-gray-400">
+                                {log.timestamp}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Location info */}
+                          {(log.step || log.url) && (
+                            <div className="mt-1 ml-6 flex flex-wrap gap-x-3 text-[10px] text-gray-400">
+                              {log.step && log.step_num && (
+                                <span>{t("consoleLocation", { step_num: log.step_num, step: log.step })}</span>
+                              )}
+                              {log.url && (
+                                <span className="truncate max-w-xs">{log.url}</span>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Explanation */}
+                          <p className="mt-1 ml-6 text-xs text-gray-600">
+                            {t(`explain_${pattern.key}_desc`)}
+                          </p>
+
+                          {/* Expand raw log */}
+                          <button
+                            onClick={() => {
+                              const next = new Set(expandedLogs);
+                              if (isExpanded) next.delete(i);
+                              else next.add(i);
+                              setExpandedLogs(next);
+                            }}
+                            className="mt-1 ml-6 text-[10px] text-gray-400 hover:text-gray-600"
+                          >
+                            {isExpanded ? "▾" : "▸"} {t("consoleRawLog")}
+                          </button>
+                          {isExpanded && (
+                            <pre className="mt-1 ml-6 rounded bg-gray-100 px-2 py-1 text-[10px] font-mono text-gray-600 whitespace-pre-wrap break-all">
+                              {log.text}
+                            </pre>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    /* Unmatched: simple row (same as before) */
+                    return (
+                      <div
+                        key={i}
+                        className={`flex items-start gap-2 px-4 py-1.5 text-xs ${
+                          log.level === "error"
+                            ? "bg-red-50"
+                            : log.level === "warning"
+                            ? "bg-orange-50"
+                            : "bg-white"
+                        }`}
+                      >
+                        <ConsoleIcon level={log.level} />
+                        <div className="min-w-0 flex-1">
+                          <span
+                            className={`font-mono break-all ${
+                              log.level === "error"
+                                ? "text-red-700"
+                                : log.level === "warning"
+                                ? "text-orange-700"
+                                : "text-gray-600"
+                            }`}
+                          >
+                            {log.text}
+                          </span>
+                          {(log.step || log.timestamp) && (
+                            <div className="mt-0.5 flex gap-x-3 text-[10px] text-gray-400">
+                              {log.step && log.step_num && (
+                                <span>{t("consoleLocation", { step_num: log.step_num, step: log.step })}</span>
+                              )}
+                              {log.timestamp && <span>{log.timestamp}</span>}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
             </div>
           )}
         </div>

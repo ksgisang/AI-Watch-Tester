@@ -512,6 +512,7 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
 
     # Console log collector
     console_logs: list[dict[str, str]] = []
+    _console_ctx: dict[str, str] = {"url": target_url, "step": "", "step_num": "0"}
 
     def _on_console(msg: Any) -> None:
         """Collect browser console messages."""
@@ -523,6 +524,10 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
                 console_logs.append({
                     "level": "warning" if level == "warn" else level,
                     "text": text[:500],  # truncate long messages
+                    "url": _console_ctx["url"],
+                    "step": _console_ctx["step"],
+                    "step_num": _console_ctx["step_num"],
+                    "timestamp": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
                 })
 
     def _on_page_error(error: Any) -> None:
@@ -530,6 +535,10 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
         console_logs.append({
             "level": "error",
             "text": f"Uncaught: {str(error)[:500]}",
+            "url": _console_ctx["url"],
+            "step": _console_ctx["step"],
+            "step_num": _console_ctx["step_num"],
+            "timestamp": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
         })
 
     try:
@@ -662,6 +671,12 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
 
             for i, step in enumerate(scenario.steps):
                 step_num = completed + 1
+
+                # Update console context for this step
+                _console_ctx["step"] = step.description or str(step.action)
+                _console_ctx["step_num"] = str(step_num)
+                with contextlib.suppress(Exception):
+                    _console_ctx["url"] = await engine.get_url() or target_url
 
                 if ws:
                     await ws.broadcast(test_id, {
