@@ -665,12 +665,16 @@ def fix_field_targets(
     )
 
     # 3) Fix each find_and_type step
+    # Track which types have been used per scenario to handle
+    # duplicate password → second one becomes confirm_password
     for scenario in scenarios:
         steps: list = []
         if hasattr(scenario, "steps"):
             steps = scenario.steps
         elif isinstance(scenario, dict):
             steps = scenario.get("steps", [])
+
+        used_types: dict[str, int] = {}  # type → count of usage
 
         for step in steps:
             action = ""
@@ -715,6 +719,21 @@ def fix_field_targets(
             intended_type = _classify_field_hint(target_text)
             if intended_type == "unknown":
                 continue
+
+            # KEY FIX: if this is the 2nd "password" step and we have
+            # a confirm_password field, reclassify it automatically
+            if intended_type == "password":
+                used_types["password"] = used_types.get("password", 0) + 1
+                if (
+                    used_types["password"] >= 2
+                    and classified.get("confirm_password")
+                ):
+                    intended_type = "confirm_password"
+                    logger.info(
+                        "FIELD-TARGET FIX: 2nd password step '%s' "
+                        "→ reclassified as confirm_password",
+                        target_text,
+                    )
 
             # Find matching observed field
             matches = classified.get(intended_type, [])

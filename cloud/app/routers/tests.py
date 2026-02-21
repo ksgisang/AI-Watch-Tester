@@ -563,6 +563,10 @@ async def convert_scenario(
 
     # Fallback: fresh page visit (no scan data)
     if pdata_raw is None:
+        logger.info(
+            "Convert: visiting %s (prompt: '%s')",
+            body.target_url, body.user_prompt[:60],
+        )
         engine_config = EngineConfig(
             type="web", headless=settings.playwright_headless,
             viewport_width=1920, viewport_height=1080,
@@ -572,6 +576,7 @@ async def convert_scenario(
         try:
             await engine.start()
             page = engine.page
+            logger.info("Convert: navigating to %s", body.target_url)
             await page.goto(
                 str(body.target_url),
                 wait_until="domcontentloaded",
@@ -583,6 +588,7 @@ async def convert_scenario(
                 )
 
             # Extract page data (single page, no full crawl)
+            logger.info("Convert: extracting page data...")
             pdata_raw = await _extract_page_data(
                 page, str(body.target_url), take_screenshot=False,
             )
@@ -590,12 +596,21 @@ async def convert_scenario(
             # Filter clickable elements by user keywords for
             # targeted observation (not full scan)
             keywords = _extract_keywords(body.user_prompt)
+            logger.info("Convert: keywords=%s", keywords)
             filtered_data = _filter_by_keywords(pdata_raw, keywords)
 
             # Observe only keyword-relevant elements
+            n_filtered = len(filtered_data.get("links", []))
+            logger.info(
+                "Convert: observing %d keyword-relevant elements...",
+                n_filtered,
+            )
             observations_raw = await _observe_interactions(
                 page, filtered_data, str(body.target_url),
                 max_interactions=10,
+            )
+            logger.info(
+                "Convert: collected %d observations", len(observations_raw),
             )
 
             # Serialize for prompt (strip screenshots)
@@ -642,6 +657,7 @@ async def convert_scenario(
             "relevance": relevance_pre,
         }
 
+    logger.info("Convert: generating scenarios via AI...")
     prompt = _CONVERT_PROMPT.format(
         url=body.target_url,
         user_prompt=body.user_prompt,
@@ -662,6 +678,27 @@ async def convert_scenario(
     if not scenarios:
         raise HTTPException(
             status_code=422, detail="AI generated no scenarios",
+        )
+
+    # Log AI-generated scenario summary (before fixes)
+    for sc in scenarios:
+        sc_name = sc.name if hasattr(sc, "name") else sc.get("name", "?")
+        sc_steps = sc.steps if hasattr(sc, "steps") else sc.get("steps", [])
+        step_lines = []
+        for s in sc_steps:
+            act = s.action.value if hasattr(s, "action") and hasattr(s.action, "value") else (
+                str(getattr(s, "action", "")) or s.get("action", "")
+                if isinstance(s, dict) else ""
+            )
+            tgt = ""
+            t = s.target if hasattr(s, "target") else (s.get("target") if isinstance(s, dict) else None)
+            if t:
+                tgt = t.text if hasattr(t, "text") else (t.get("text", "") if isinstance(t, dict) else str(t))
+            val = (s.value if hasattr(s, "value") else (s.get("value", "") if isinstance(s, dict) else "")) or ""
+            step_lines.append(f"  {act} target='{tgt}' value='{val[:30]}'")
+        logger.info(
+            "Convert: AI generated '%s' (%d steps):\n%s",
+            sc_name, len(sc_steps), "\n".join(step_lines),
         )
 
     # --- Post-generation: validate relevance ---
@@ -705,6 +742,25 @@ async def convert_scenario(
 
     # Ensure every form scenario has assert/wait after submit
     scenarios = ensure_post_submit_assert(scenarios)
+
+    # Log final scenario after all fixes
+    for sc in scenarios:
+        sc_steps = sc.steps if hasattr(sc, "steps") else sc.get("steps", [])
+        step_lines = []
+        for s in sc_steps:
+            act = s.action.value if hasattr(s, "action") and hasattr(s.action, "value") else ""
+            tgt = ""
+            t = s.target if hasattr(s, "target") else None
+            if t:
+                sel = t.selector if hasattr(t, "selector") else (t.get("selector", "") if isinstance(t, dict) else "")
+                txt = t.text if hasattr(t, "text") else (t.get("text", "") if isinstance(t, dict) else "")
+                tgt = f"sel='{sel}' txt='{txt}'"
+            val = (s.value if hasattr(s, "value") else "") or ""
+            step_lines.append(f"  {act} {tgt} value='{val[:30]}'")
+        logger.info(
+            "Convert: FINAL scenario (%d steps after fixes):\n%s",
+            len(sc_steps), "\n".join(step_lines),
+        )
 
     # Validate against observation data and retry if needed
     if page_list_for_validation is None:
