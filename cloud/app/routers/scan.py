@@ -23,6 +23,8 @@ from app.scenario_utils import (
 )
 from app.scenario_utils import (
     compress_observations_for_ai,
+    ensure_post_submit_assert,
+    fix_field_targets,
     fix_form_submit_steps,
     parse_json,
     validate_and_retry,
@@ -1436,6 +1438,14 @@ Generate AWT test scenario JSON for the selected tests below.
    → After filling email/password, click '다음' (SUBMIT[form]), NOT '가입' (SUBMIT[nav])
    - The nav link '가입' is for PAGE NAVIGATION (step b above), NOT for form submission
 
+11. **OUTCOME VERIFICATION — MANDATORY**:
+   Every scenario with form interaction MUST end with an assert step AFTER submit.
+   A test that clicks submit without verifying the result proves NOTHING.
+   After SUBMIT[form] click → add wait (1500ms) → assert ONE of:
+   a. url_contains: verify URL changed after submission
+   b. text_visible: verify new content appeared (success message, next step)
+   For confirm password fields, use the SAME value as the password: "TestPass123!"
+
 ## ========== END ABSOLUTE RULES ==========
 
 {extra_instructions}
@@ -1497,10 +1507,22 @@ Return ONLY a valid JSON array. Each object:
     }},
     {{
       "step": 5,
+      "action": "find_and_click",
+      "target": {{"selector": "button[type=submit]", "text": "로그인"}},
+      "description": "Click submit button (SUBMIT[form])"
+    }},
+    {{
+      "step": 6,
+      "action": "wait",
+      "value": "1500",
+      "description": "Wait for page transition after form submit"
+    }},
+    {{
+      "step": 7,
       "action": "assert",
       "assert_type": "text_visible",
       "value": "Welcome",
-      "description": "Verify welcome text from OBSERVED new_text",
+      "description": "Verify login success — text from OBSERVED new_text",
       "case_insensitive": true
     }}
   ]
@@ -1509,8 +1531,11 @@ Return ONLY a valid JSON array. Each object:
 Actions: navigate, find_and_click, find_and_type, assert, wait, scroll
 Target format: {{"selector": "CSS_FROM_OBSERVATION", "text": "VISIBLE_TEXT_FROM_OBSERVATION"}}
 
-FINAL CHECK before responding: For every assert value, verify it appears verbatim
-in the Observation Reference Table or Crawl Data. If not, REMOVE that assert step.
+FINAL CHECK before responding:
+1. For every assert value, verify it appears verbatim in the Observation Reference Table or Crawl Data.
+   If not, REMOVE that assert step.
+2. Does every form scenario end with assert AFTER submit? If last step is find_and_click (submit),
+   ADD wait + assert.
 
 Return ONLY valid JSON array.\
 """
@@ -1770,9 +1795,15 @@ async def execute_scan_tests(
                     f.get("placeholder"), f.get("context"),
                 )
 
+    # Fix AI-generated field targets to use actual observed data
+    scenarios = fix_field_targets(scenarios, observations)
+
     # Fix form-submit-after-input: replace nav clicks with form submit buttons
     logger.debug("=== FORM-SUBMIT FIX EXECUTING ===")
     scenarios = fix_form_submit_steps(scenarios, observations)
+
+    # Ensure every form scenario has assert/wait after submit
+    scenarios = ensure_post_submit_assert(scenarios)
 
     # Validate and retry if needed
     scenarios, validation = await validate_and_retry(

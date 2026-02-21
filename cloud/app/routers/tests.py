@@ -32,6 +32,8 @@ from app.scenario_utils import (
 )
 from app.scenario_utils import (
     compress_observations_for_ai,
+    ensure_post_submit_assert,
+    fix_field_targets,
     fix_form_submit_steps,
     validate_and_retry,
 )
@@ -384,8 +386,10 @@ If you generate tests for features the user did NOT ask for, your response is WR
    b. find_and_click the element that opens the form page/modal
    c. find_and_type into EACH form field (use selectors from Form Fields section)
    d. find_and_click the SUBMIT[form] button
-   e. assert the expected result
+   e. wait 1500ms (for page transition after submit)
+   f. assert the OUTCOME (see Rule 11 — this is MANDATORY, not optional)
    A scenario with ONLY navigation + assert (no find_and_type) is INCOMPLETE and WRONG.
+   A scenario that ends at the submit click WITHOUT a final assert is ALSO WRONG.
 
 3. **FORM SUBMIT BUTTON — CRITICAL**:
    After filling form fields, the NEXT click MUST be SUBMIT[form], NOT SUBMIT[nav].
@@ -416,6 +420,34 @@ If you generate tests for features the user did NOT ask for, your response is WR
 
 10. For form fields, use EXACT selectors/placeholders from the Form Fields section.
     For dummy data: email → "awttest@example.com", password → "TestPass123!"
+    For confirm password fields, use THE SAME value as the password: "TestPass123!"
+
+11. **OUTCOME VERIFICATION — MANDATORY (NEVER SKIP)**:
+    Every form-based scenario MUST end with an assert step AFTER the submit click.
+    A test that clicks submit and stops is MEANINGLESS — it only proves the button exists.
+    The assert verifies the RESULT of the submission:
+
+    After SUBMIT[form] click → wait 1500ms → assert ONE of:
+    a. url_contains: verify URL changed (e.g., "/step2", "/success", "/dashboard")
+    b. text_visible: verify NEW content appeared (success message, next step heading)
+    c. text_visible: verify the form page CHANGED (step 2 content replaced step 1)
+
+    Example for multi-step signup (step 1 → step 2):
+    step N:   find_and_click SUBMIT[form] '다음'
+    step N+1: wait 1500ms
+    step N+2: assert text_visible — text from the NEXT page/step
+              (use assert_texts from observation data, or a keyword like "완료", "인증")
+
+    Example for login:
+    step N:   find_and_click SUBMIT[form] '로그인'
+    step N+1: wait 1500ms
+    step N+2: assert url_contains "/dashboard" OR text_visible "환영합니다"
+
+    If you don't know the exact post-submit text, assert url_contains with the
+    form page path (e.g., the URL should NO LONGER be the same as before submit).
+
+    WRONG: scenario ends with find_and_click '다음' → NO assert → test "passes"
+    RIGHT: scenario ends with find_and_click '다음' → wait → assert text_visible "..."
 
 Return the scenarios as a JSON array. Each step target should include:
 - "selector": CSS selector from observation data (preferred)
@@ -425,6 +457,8 @@ FINAL CHECK: Before responding, verify:
 1. Does every scenario match the user's request? (NOT other features)
 2. Does every form-feature test include find_and_type steps?
 3. Does the submit click use SUBMIT[form], not SUBMIT[nav]?
+4. Does every form scenario have an assert step AFTER the submit click?
+   If the last step is find_and_click (submit) → ADD wait + assert.
 Remove any scenario that tests a feature the user did NOT request.\
 """
 
@@ -663,8 +697,14 @@ async def convert_scenario(
         except Exception as exc:
             logger.warning("Relevance retry failed: %s", exc)
 
+    # Fix AI-generated field targets to use actual observed data
+    scenarios = fix_field_targets(scenarios, observations_raw)
+
     # Fix form-submit-after-input: replace nav clicks with form submit buttons
     scenarios = fix_form_submit_steps(scenarios, observations_raw)
+
+    # Ensure every form scenario has assert/wait after submit
+    scenarios = ensure_post_submit_assert(scenarios)
 
     # Validate against observation data and retry if needed
     if page_list_for_validation is None:

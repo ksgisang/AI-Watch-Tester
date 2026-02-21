@@ -551,3 +551,272 @@ def fix_form_submit_steps(
             last_was_input = False
 
     return scenarios
+
+
+# ---------------------------------------------------------------------------
+# Fix generic/wrong field targets → observed field data
+# ---------------------------------------------------------------------------
+
+# Mapping from generic English keywords to field type for matching
+_FIELD_TYPE_HINTS: dict[str, list[str]] = {
+    "email": ["email", "mail", "이메일", "e-mail"],
+    "password": [
+        "password", "비밀번호", "패스워드", "pw", "passwd",
+    ],
+    "confirm_password": [
+        "confirm password", "password confirm", "비밀번호 확인",
+        "비밀번호확인", "패스워드 확인", "re-enter", "retype",
+        "confirm", "확인",
+    ],
+    "name": [
+        "name", "이름", "닉네임", "nickname", "username", "아이디",
+        "full name", "fullname",
+    ],
+    "phone": [
+        "phone", "전화", "휴대폰", "핸드폰", "tel", "연락처", "mobile",
+    ],
+}
+
+
+def _classify_field_hint(text: str) -> str:
+    """Classify a field target text into a type hint (email, password, etc.)."""
+    t = text.strip().lower()
+    # confirm_password must be checked BEFORE password
+    for hint_type in ("confirm_password", "email", "password", "name", "phone"):
+        for keyword in _FIELD_TYPE_HINTS[hint_type]:
+            if keyword in t:
+                return hint_type
+    return "unknown"
+
+
+def _classify_observed_field(field: dict) -> str:
+    """Classify an observed form field by its attributes."""
+    f_type = (field.get("type") or "").lower()
+    selector = (field.get("selector") or "").lower()
+    placeholder = (field.get("placeholder") or "").lower()
+    label = (field.get("label") or "").lower()
+    hint = f"{f_type} {selector} {placeholder} {label}"
+
+    # Check confirm password first (label/placeholder usually has "확인"/"confirm")
+    for kw in _FIELD_TYPE_HINTS["confirm_password"]:
+        if kw in hint:
+            return "confirm_password"
+
+    if f_type == "email" or any(kw in hint for kw in _FIELD_TYPE_HINTS["email"]):
+        return "email"
+    if f_type == "password" or any(
+        kw in hint for kw in _FIELD_TYPE_HINTS["password"]
+    ):
+        return "password"
+    if f_type == "tel" or any(kw in hint for kw in _FIELD_TYPE_HINTS["phone"]):
+        return "phone"
+    if any(kw in hint for kw in _FIELD_TYPE_HINTS["name"]):
+        return "name"
+
+    return "unknown"
+
+
+def fix_field_targets(
+    scenarios: list,
+    observations: list[dict],
+) -> list:
+    """Fix AI-generated find_and_type targets to use actual observed field data.
+
+    When the AI generates generic targets like {text: "Email"} instead of
+    actual observed selectors/placeholders, this maps them to real field data.
+    Critical for:
+    - Ensuring correct CSS selectors are used
+    - Distinguishing password vs confirm password fields
+    - Using Korean placeholders instead of English generic names
+    """
+    # 1) Collect all form fields from observations
+    observed_fields: list[dict] = []
+    for obs in observations:
+        change = obs.get("observed_change", {})
+        for fields_key in ("navigated_page_fields", "modal_form_fields"):
+            for f in change.get(fields_key, []):
+                if f.get("type") == "submit_button":
+                    continue
+                observed_fields.append(f)
+
+    if not observed_fields:
+        return scenarios
+
+    # 2) Classify each observed field
+    classified: dict[str, list[dict]] = {}
+    for f in observed_fields:
+        ftype = _classify_observed_field(f)
+        classified.setdefault(ftype, []).append(f)
+
+    # Track password field count for confirm password disambiguation
+    password_fields = classified.get("password", [])
+    confirm_fields = classified.get("confirm_password", [])
+
+    # If we have 2+ password-type fields but none classified as confirm,
+    # treat the second one as confirm password
+    if len(password_fields) >= 2 and not confirm_fields:
+        confirm_fields = [password_fields.pop()]
+        classified["confirm_password"] = confirm_fields
+        classified["password"] = password_fields
+
+    logger.debug(
+        "FIELD-TARGET FIX: observed fields classified: %s",
+        {k: len(v) for k, v in classified.items()},
+    )
+
+    # 3) Fix each find_and_type step
+    for scenario in scenarios:
+        steps: list = []
+        if hasattr(scenario, "steps"):
+            steps = scenario.steps
+        elif isinstance(scenario, dict):
+            steps = scenario.get("steps", [])
+
+        for step in steps:
+            action = ""
+            if hasattr(step, "action") and hasattr(step.action, "value"):
+                action = step.action.value
+            elif hasattr(step, "action"):
+                action = str(step.action)
+            elif isinstance(step, dict):
+                action = step.get("action", "")
+
+            if action != "find_and_type":
+                continue
+
+            # Get target
+            target = None
+            if hasattr(step, "target"):
+                target = step.target
+            elif isinstance(step, dict):
+                target = step.get("target")
+
+            if not target:
+                continue
+
+            # Get target text
+            target_text = ""
+            if hasattr(target, "text"):
+                target_text = target.text or ""
+            elif isinstance(target, dict):
+                target_text = target.get("text", "")
+
+            target_selector = ""
+            if hasattr(target, "selector"):
+                target_selector = target.selector or ""
+            elif isinstance(target, dict):
+                target_selector = target.get("selector", "")
+
+            # Already has a selector → likely correct from observation data
+            if target_selector:
+                continue
+
+            # Classify what the AI intended
+            intended_type = _classify_field_hint(target_text)
+            if intended_type == "unknown":
+                continue
+
+            # Find matching observed field
+            matches = classified.get(intended_type, [])
+            if not matches:
+                continue
+
+            observed = matches[0]
+            new_selector = observed.get("selector", "")
+            new_text = (
+                observed.get("placeholder")
+                or observed.get("label")
+                or target_text
+            )
+
+            if new_selector or new_text != target_text:
+                logger.warning(
+                    "FIELD-TARGET FIX: '%s' → selector='%s', text='%s' "
+                    "(type=%s)",
+                    target_text, new_selector, new_text, intended_type,
+                )
+                if hasattr(target, "text"):
+                    target.text = new_text
+                    if hasattr(target, "selector") and new_selector:
+                        target.selector = new_selector
+                elif isinstance(target, dict):
+                    target["text"] = new_text
+                    if new_selector:
+                        target["selector"] = new_selector
+
+    return scenarios
+
+
+def ensure_post_submit_assert(scenarios: list) -> list:
+    """Ensure every form scenario has wait+assert after the submit click.
+
+    If find_and_type steps are followed by a submit click with no subsequent
+    assert, insert a wait(1500) step so the post-submit page state is captured
+    in screenshots. Logs a warning when this safety net triggers.
+    """
+    for scenario in scenarios:
+        steps: list = []
+        if hasattr(scenario, "steps"):
+            steps = scenario.steps
+        elif isinstance(scenario, dict):
+            steps = scenario.get("steps", [])
+
+        if not steps:
+            continue
+
+        def _get_action(step: object) -> str:
+            if hasattr(step, "action") and hasattr(step.action, "value"):
+                return step.action.value
+            if hasattr(step, "action"):
+                return str(step.action)
+            if isinstance(step, dict):
+                return step.get("action", "")
+            return ""
+
+        # Find the last submit click after form input
+        has_type = False
+        last_submit_idx = -1
+        for i, step in enumerate(steps):
+            action = _get_action(step)
+            if action == "find_and_type":
+                has_type = True
+            elif action == "find_and_click" and has_type:
+                last_submit_idx = i
+
+        if last_submit_idx < 0:
+            continue
+
+        # Check if there's already an assert or wait after the submit
+        has_post_submit = False
+        for step in steps[last_submit_idx + 1:]:
+            action = _get_action(step)
+            if action in ("assert", "wait"):
+                has_post_submit = True
+                break
+
+        if has_post_submit:
+            continue
+
+        # Safety net: insert wait step after submit for screenshot capture
+        sc_name = ""
+        if hasattr(scenario, "name"):
+            sc_name = scenario.name
+        elif isinstance(scenario, dict):
+            sc_name = scenario.get("name", "")
+
+        logger.warning(
+            "POST-SUBMIT SAFETY: No assert after form submit in '%s' "
+            "— inserting wait(1500) for screenshot capture",
+            sc_name,
+        )
+
+        next_step_num = len(steps) + 1
+        wait_step = {
+            "step": next_step_num,
+            "action": "wait",
+            "value": "1500",
+            "description": "Wait for page transition after form submit",
+        }
+        steps.append(wait_step)
+
+    return scenarios

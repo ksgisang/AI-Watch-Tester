@@ -405,12 +405,18 @@ async def generate_scenarios_for_test(
 
         scenarios = await adapter.generate_scenarios(prompt, images=[screenshot])
 
-        # Apply form-submit fix
+        # Apply field target fix + form-submit fix + post-submit assert
         if scenarios:
-            from app.scenario_utils import fix_form_submit_steps
+            from app.scenario_utils import (
+                ensure_post_submit_assert,
+                fix_field_targets,
+                fix_form_submit_steps,
+            )
 
             fake_obs = _build_observation_from_quick(observed["fields"])
+            scenarios = fix_field_targets(scenarios, fake_obs)
             scenarios = fix_form_submit_steps(scenarios, fake_obs)
+            scenarios = ensure_post_submit_assert(scenarios)
 
         if not scenarios:
             return {"error": "AI generated no scenarios"}
@@ -577,12 +583,18 @@ async def execute_test(test_id: int, ws: WSManager | None = None) -> dict[str, A
             )
             scenarios = await adapter.generate_scenarios(prompt, images=[screenshot])
 
-            # Apply form-submit fix
+            # Apply field target fix + form-submit fix + post-submit assert
             if scenarios:
-                from app.scenario_utils import fix_form_submit_steps
+                from app.scenario_utils import (
+                    ensure_post_submit_assert,
+                    fix_field_targets,
+                    fix_form_submit_steps,
+                )
 
                 fake_obs = _build_observation_from_quick(observed["fields"])
+                scenarios = fix_field_targets(scenarios, fake_obs)
                 scenarios = fix_form_submit_steps(scenarios, fake_obs)
+                scenarios = ensure_post_submit_assert(scenarios)
 
         if not scenarios:
             return {
