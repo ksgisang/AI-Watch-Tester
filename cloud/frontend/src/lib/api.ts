@@ -189,6 +189,7 @@ export async function convertScenario(
   userPrompt: string,
   language: "ko" | "en" = "en",
   scanId?: number,
+  sessionId?: number,
 ): Promise<ConvertScenarioResult> {
   const payload: Record<string, unknown> = {
     target_url: targetUrl,
@@ -196,6 +197,7 @@ export async function convertScenario(
     language,
   };
   if (scanId) payload.scan_id = scanId;
+  if (sessionId) payload.session_id = sessionId;
   const res = await authFetch("/api/tests/convert", {
     method: "POST",
     body: JSON.stringify(payload),
@@ -216,6 +218,27 @@ export function connectTestWS(
 ): WebSocket {
   const wsUrl = API_URL.replace(/^http/, "ws");
   const ws = new WebSocket(`${wsUrl}/api/tests/${testId}/ws`);
+
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      onMessage(data);
+    } catch {
+      // ignore
+    }
+  };
+
+  ws.onclose = () => onClose?.();
+  return ws;
+}
+
+export function connectConvertWS(
+  sessionId: number,
+  onMessage: (data: Record<string, unknown>) => void,
+  onClose?: () => void
+): WebSocket {
+  const wsUrl = API_URL.replace(/^http/, "ws");
+  const ws = new WebSocket(`${wsUrl}/api/tests/convert/ws/${sessionId}`);
 
   ws.onmessage = (event) => {
     try {

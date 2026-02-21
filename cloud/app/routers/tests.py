@@ -518,6 +518,11 @@ async def convert_scenario(
     if body.scan_id:
         from app.models import Scan, ScanStatus
 
+        await _broadcast_convert(body.session_id, {
+            "type": "convert_progress", "phase": "extracting",
+            "message": "기존 스캔 데이터 사용 중...",
+        })
+
         scan_q = select(Scan).where(
             Scan.id == body.scan_id, Scan.user_id == user.id,
         )
@@ -556,6 +561,10 @@ async def convert_scenario(
             element_summary = _build_element_summary(
                 observations_raw, all_page_data,
             )
+            await _broadcast_convert(body.session_id, {
+                "type": "convert_progress", "phase": "observing",
+                "message": f"{len(observations_raw)}개 관찰 데이터, {len(pages)}개 페이지 로드 완료",
+            })
             logger.info(
                 "Convert: using scan %d data — %d observations, %d pages",
                 body.scan_id, len(observations_raw), len(pages),
@@ -563,6 +572,10 @@ async def convert_scenario(
 
     # Fallback: fresh page visit (no scan data)
     if pdata_raw is None:
+        await _broadcast_convert(body.session_id, {
+            "type": "convert_progress", "phase": "visiting",
+            "message": f"페이지 방문 중: {body.target_url}",
+        })
         logger.info(
             "Convert: visiting %s (prompt: '%s')",
             body.target_url, body.user_prompt[:60],
@@ -588,6 +601,10 @@ async def convert_scenario(
                 )
 
             # Extract page data (single page, no full crawl)
+            await _broadcast_convert(body.session_id, {
+                "type": "convert_progress", "phase": "extracting",
+                "message": "페이지 데이터 추출 중...",
+            })
             logger.info("Convert: extracting page data...")
             pdata_raw = await _extract_page_data(
                 page, str(body.target_url), take_screenshot=False,
@@ -596,11 +613,19 @@ async def convert_scenario(
             # Filter clickable elements by user keywords for
             # targeted observation (not full scan)
             keywords = _extract_keywords(body.user_prompt)
+            await _broadcast_convert(body.session_id, {
+                "type": "convert_progress", "phase": "extracting",
+                "message": f"키워드: {', '.join(keywords)}",
+            })
             logger.info("Convert: keywords=%s", keywords)
             filtered_data = _filter_by_keywords(pdata_raw, keywords)
 
             # Observe only keyword-relevant elements
             n_filtered = len(filtered_data.get("links", []))
+            await _broadcast_convert(body.session_id, {
+                "type": "convert_progress", "phase": "observing",
+                "message": f"{n_filtered}개 요소 관찰 중...",
+            })
             logger.info(
                 "Convert: observing %d keyword-relevant elements...",
                 n_filtered,
@@ -609,6 +634,10 @@ async def convert_scenario(
                 page, filtered_data, str(body.target_url),
                 max_interactions=10,
             )
+            await _broadcast_convert(body.session_id, {
+                "type": "convert_progress", "phase": "observing",
+                "message": f"{len(observations_raw)}개 관찰 데이터 수집 완료",
+            })
             logger.info(
                 "Convert: collected %d observations", len(observations_raw),
             )
@@ -626,6 +655,10 @@ async def convert_scenario(
                 observations_raw, pdata_raw,
             )
         except Exception as exc:
+            await _broadcast_convert(body.session_id, {
+                "type": "convert_error",
+                "message": f"페이지 방문 실패: {exc}",
+            })
             logger.warning(
                 "Page observation failed for convert: %s", exc,
             )
@@ -648,6 +681,10 @@ async def convert_scenario(
             "Convert: feature missing for request '%s'",
             body.user_prompt[:60],
         )
+        await _broadcast_convert(body.session_id, {
+            "type": "convert_error",
+            "message": relevance_pre.get("reason", "요청한 기능을 찾을 수 없습니다."),
+        })
         return {
             "scenario_yaml": "",
             "scenarios_count": 0,
@@ -657,6 +694,10 @@ async def convert_scenario(
             "relevance": relevance_pre,
         }
 
+    await _broadcast_convert(body.session_id, {
+        "type": "convert_progress", "phase": "generating",
+        "message": "AI 시나리오 생성 중...",
+    })
     logger.info("Convert: generating scenarios via AI...")
     prompt = _CONVERT_PROMPT.format(
         url=body.target_url,
@@ -671,11 +712,19 @@ async def convert_scenario(
         scenarios = await adapter.generate_scenarios(prompt)
     except Exception as exc:
         logger.exception("Scenario conversion failed")
+        await _broadcast_convert(body.session_id, {
+            "type": "convert_error",
+            "message": f"AI 생성 실패: {exc}",
+        })
         raise HTTPException(
             status_code=502, detail=f"AI generation failed: {exc}",
         ) from exc
 
     if not scenarios:
+        await _broadcast_convert(body.session_id, {
+            "type": "convert_error",
+            "message": "AI가 시나리오를 생성하지 못했습니다.",
+        })
         raise HTTPException(
             status_code=422, detail="AI generated no scenarios",
         )
@@ -734,6 +783,11 @@ async def convert_scenario(
         except Exception as exc:
             logger.warning("Relevance retry failed: %s", exc)
 
+    await _broadcast_convert(body.session_id, {
+        "type": "convert_progress", "phase": "fixing",
+        "message": f"{len(scenarios)}개 시나리오 생성됨, 검증 중...",
+    })
+
     # Fix AI-generated field targets to use actual observed data
     scenarios = fix_field_targets(scenarios, observations_raw)
 
@@ -762,6 +816,11 @@ async def convert_scenario(
             len(sc_steps), "\n".join(step_lines),
         )
 
+    await _broadcast_convert(body.session_id, {
+        "type": "convert_progress", "phase": "validating",
+        "message": "시나리오 검증 및 보정 중...",
+    })
+
     # Validate against observation data and retry if needed
     if page_list_for_validation is None:
         page_list_for_validation = [pdata_raw] if pdata_raw else None
@@ -784,6 +843,12 @@ async def convert_scenario(
         allow_unicode=True,
     )
     total_steps = sum(len(s.steps) for s in scenarios)
+
+    await _broadcast_convert(body.session_id, {
+        "type": "convert_complete",
+        "count": len(scenarios),
+        "steps_total": total_steps,
+    })
 
     return {
         "scenario_yaml": scenario_yaml,
@@ -1280,8 +1345,25 @@ def _filter_by_keywords(
 
 
 # ---------------------------------------------------------------------------
-# WebSocket — per-test live progress
+# WebSocket — live progress
 # ---------------------------------------------------------------------------
+
+
+async def _broadcast_convert(session_id: int | None, data: dict) -> None:
+    """Send progress data to convert WebSocket if session_id is set."""
+    if session_id is not None:
+        await ws_manager.broadcast(session_id, data)
+
+
+@router.websocket("/convert/ws/{session_id}")
+async def convert_websocket(websocket: WebSocket, session_id: int) -> None:
+    """WebSocket for live convert progress."""
+    await ws_manager.connect(session_id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(session_id, websocket)
 
 
 @router.websocket("/{test_id}/ws")

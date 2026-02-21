@@ -9,6 +9,7 @@ import ScenarioEditor from "@/components/ScenarioEditor";
 import {
   createTest, getTest, fetchBilling, convertScenario, cancelTest,
   startScan, getScan, generateScanPlan, executeScanTests, connectScanWS,
+  connectConvertWS,
   listDocuments, uploadUserDocument, deleteDocument,
   type TestItem, type BillingInfo, type ScanItem, type TestPlanCategory,
   type ValidationItem, type ValidationSummary, type DocumentItem,
@@ -76,6 +77,10 @@ export default function DashboardPage() {
   // Scan log state
   const [scanLogs, setScanLogs] = useState<{ phase: string; message: string; level?: string; ts: number }[]>([]);
   const scanLogRef = useRef<HTMLDivElement>(null);
+  // Convert progress state
+  const [convertLogs, setConvertLogs] = useState<{ phase: string; message: string; ts: number }[]>([]);
+  const convertWsRef = useRef<WebSocket | null>(null);
+  const convertLogRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll scan log
   useEffect(() => {
@@ -83,6 +88,13 @@ export default function DashboardPage() {
       scanLogRef.current.scrollTop = scanLogRef.current.scrollHeight;
     }
   }, [scanLogs]);
+
+  // Auto-scroll convert log
+  useEffect(() => {
+    if (convertLogRef.current) {
+      convertLogRef.current.scrollTop = convertLogRef.current.scrollHeight;
+    }
+  }, [convertLogs]);
 
   // Fetch billing info + documents
   useEffect(() => {
@@ -119,9 +131,28 @@ export default function DashboardPage() {
     setConvertedInfo(null);
     setConvertValidation([]);
     setConvertValidationSummary(null);
+    setConvertLogs([]);
+
+    const sessionId = Date.now();
+    const ws = connectConvertWS(sessionId, (data) => {
+      const type = data.type as string;
+      if (type === "convert_progress") {
+        setConvertLogs((prev) => [
+          ...prev,
+          { phase: data.phase as string, message: data.message as string, ts: Date.now() },
+        ]);
+      }
+    });
+    convertWsRef.current = ws;
+
+    // Wait for WS to be ready before sending HTTP request
+    await new Promise<void>((resolve) => {
+      ws.onopen = () => resolve();
+      setTimeout(resolve, 2000); // fallback if WS fails
+    });
 
     try {
-      const result = await convertScenario(url, customPrompt);
+      const result = await convertScenario(url, customPrompt, "en", undefined, sessionId);
       setConvertedYaml(result.scenario_yaml);
       setConvertedInfo({ count: result.scenarios_count, steps: result.steps_total });
       setConvertValidation(result.validation || []);
@@ -131,6 +162,8 @@ export default function DashboardPage() {
       setError(translateApiError(msg, te));
     } finally {
       setConverting(false);
+      ws.close();
+      convertWsRef.current = null;
     }
   };
 
@@ -140,9 +173,28 @@ export default function DashboardPage() {
     setAdditionalYaml("");
     setAdditionalInfo(null);
     setAdditionalRelevance(null);
+    setConvertLogs([]);
+
+    const sessionId = Date.now();
+    const ws = connectConvertWS(sessionId, (data) => {
+      const type = data.type as string;
+      if (type === "convert_progress") {
+        setConvertLogs((prev) => [
+          ...prev,
+          { phase: data.phase as string, message: data.message as string, ts: Date.now() },
+        ]);
+      }
+    });
+    convertWsRef.current = ws;
+
+    // Wait for WS to be ready before sending HTTP request
+    await new Promise<void>((resolve) => {
+      ws.onopen = () => resolve();
+      setTimeout(resolve, 2000);
+    });
 
     try {
-      const result = await convertScenario(url, additionalPrompt, "en", activeScan?.id);
+      const result = await convertScenario(url, additionalPrompt, "en", activeScan?.id, sessionId);
       setAdditionalYaml(result.scenario_yaml);
       setAdditionalInfo({ count: result.scenarios_count, steps: result.steps_total });
       if (result.relevance) {
@@ -153,6 +205,8 @@ export default function DashboardPage() {
       setError(translateApiError(msg, te));
     } finally {
       setAdditionalConverting(false);
+      ws.close();
+      convertWsRef.current = null;
     }
   };
 
@@ -695,6 +749,36 @@ export default function DashboardPage() {
               )}
             </div>
 
+            {/* Convert progress log */}
+            {converting && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+                  <span className="text-sm font-medium text-blue-800">{t("convertProgress")}</span>
+                </div>
+                {convertLogs.length > 0 && (
+                  <div
+                    ref={convertLogRef}
+                    className="max-h-32 overflow-y-auto rounded border border-blue-200 bg-white/60 px-3 py-2 text-[11px] font-mono leading-relaxed"
+                  >
+                    {convertLogs.map((log, i) => {
+                      const phaseIcons: Record<string, string> = {
+                        visiting: "\uD83C\uDF10", extracting: "\uD83D\uDD0D",
+                        observing: "\uD83D\uDC41", generating: "\uD83E\uDD16",
+                        fixing: "\uD83D\uDD27", validating: "\u2705",
+                      };
+                      const icon = phaseIcons[log.phase] || "\u25B6";
+                      return (
+                        <div key={i} className="text-gray-700">
+                          <span className="mr-1">{icon}</span>{log.message}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Converted YAML preview */}
             {convertedYaml && (
               <div className="space-y-3">
@@ -1108,6 +1192,35 @@ export default function DashboardPage() {
                             </span>
                           )}
                         </div>
+                        {/* Additional convert progress log */}
+                        {additionalConverting && (
+                          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+                              <span className="text-sm font-medium text-blue-800">{t("convertProgress")}</span>
+                            </div>
+                            {convertLogs.length > 0 && (
+                              <div
+                                ref={convertLogRef}
+                                className="max-h-32 overflow-y-auto rounded border border-blue-200 bg-white/60 px-3 py-2 text-[11px] font-mono leading-relaxed"
+                              >
+                                {convertLogs.map((log, i) => {
+                                  const phaseIcons: Record<string, string> = {
+                                    visiting: "\uD83C\uDF10", extracting: "\uD83D\uDD0D",
+                                    observing: "\uD83D\uDC41", generating: "\uD83E\uDD16",
+                                    fixing: "\uD83D\uDD27", validating: "\u2705",
+                                  };
+                                  const icon = phaseIcons[log.phase] || "\u25B6";
+                                  return (
+                                    <div key={i} className="text-gray-700">
+                                      <span className="mr-1">{icon}</span>{log.message}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
                         {/* Relevance validation warning */}
                         {additionalRelevance && !additionalRelevance.valid && (
                           <div className={`rounded-lg border p-3 text-sm space-y-1 ${

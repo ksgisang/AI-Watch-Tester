@@ -19,6 +19,7 @@ class ConvertScenarioRequest(BaseModel):
     user_prompt: str
     language: Literal["ko", "en"] = "en"
     scan_id: int | None = None  # If provided, use scan's observation data
+    session_id: int | None = None  # WS progress session (frontend-generated)
 
 
 class ValidationItem(BaseModel):
