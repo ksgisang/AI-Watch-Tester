@@ -452,6 +452,101 @@ class TestFindAndClearAction:
         mock_engine.press_key.assert_awaited_once_with("Delete")
 
 
+# ─── select_option ───────────────────────────────────────────
+
+
+def _page_with_select(accepts: str) -> tuple[MagicMock, MagicMock]:
+    """Build a Playwright-like page whose <select> answers to one kwarg only.
+
+    `accepts` is `label`, `value`, `index`, or `none` for an element that
+    refuses every form, which is what a wrong option name looks like.
+    """
+    locator = MagicMock()
+    locator.wait_for = AsyncMock()
+    locator.scroll_into_view_if_needed = AsyncMock()
+
+    async def select_option(**kwargs: object) -> None:
+        for key in ("label", "value", "index"):
+            if key in kwargs:
+                if key != accepts:
+                    msg = f"no option matching {key}"
+                    raise RuntimeError(msg)
+                return
+        msg = "nothing to select"
+        raise RuntimeError(msg)
+
+    locator.select_option = AsyncMock(side_effect=select_option)
+    page = MagicMock()
+    page.locator = MagicMock(return_value=MagicMock(first=locator))
+    return page, locator
+
+
+class TestSelectOptionAction:
+    @pytest.mark.asyncio
+    async def test_select_by_label(self, executor: StepExecutor, mock_engine: MagicMock) -> None:
+        page, locator = _page_with_select("label")
+        mock_engine.page = page
+        step = make_step(
+            ActionType.SELECT_OPTION, value="Grade 3", target=TargetSpec(selector="#grade")
+        )
+        result = await executor.execute_step(step)
+        assert result.status == StepStatus.PASSED
+        page.locator.assert_called_once_with("#grade")
+        locator.select_option.assert_awaited_once()
+        assert locator.select_option.await_args.kwargs["label"] == "Grade 3"
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_value(
+        self, executor: StepExecutor, mock_engine: MagicMock
+    ) -> None:
+        page, locator = _page_with_select("value")
+        mock_engine.page = page
+        step = make_step(
+            ActionType.SELECT_OPTION, value="g3", target=TargetSpec(selector="#grade")
+        )
+        result = await executor.execute_step(step)
+        assert result.status == StepStatus.PASSED
+        assert locator.select_option.await_count == 2
+        assert locator.select_option.await_args.kwargs["value"] == "g3"
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_index_when_numeric(
+        self, executor: StepExecutor, mock_engine: MagicMock
+    ) -> None:
+        page, locator = _page_with_select("index")
+        mock_engine.page = page
+        step = make_step(ActionType.SELECT_OPTION, value="2", target=TargetSpec(selector="#grade"))
+        result = await executor.execute_step(step)
+        assert result.status == StepStatus.PASSED
+        assert locator.select_option.await_count == 3
+        assert locator.select_option.await_args.kwargs["index"] == 2
+
+    @pytest.mark.asyncio
+    async def test_fails_when_no_form_matches(
+        self, executor: StepExecutor, mock_engine: MagicMock
+    ) -> None:
+        page, _ = _page_with_select("none")
+        mock_engine.page = page
+        step = make_step(
+            ActionType.SELECT_OPTION, value="Grade 9", target=TargetSpec(selector="#grade")
+        )
+        result = await executor.execute_step(step)
+        assert result.status == StepStatus.FAILED
+        assert "select_option failed" in (result.error_message or "")
+
+    @pytest.mark.asyncio
+    async def test_fails_without_a_playwright_page(
+        self, executor: StepExecutor, mock_engine: MagicMock
+    ) -> None:
+        del mock_engine.page
+        step = make_step(
+            ActionType.SELECT_OPTION, value="Grade 3", target=TargetSpec(selector="#grade")
+        )
+        result = await executor.execute_step(step)
+        assert result.status == StepStatus.FAILED
+        assert "Playwright page" in (result.error_message or "")
+
+
 # ─── Screenshots & Expected ─────────────────────────────────
 
 

@@ -49,7 +49,7 @@ class TestActionType:
         assert ActionType.SCREENSHOT == "screenshot"
 
     def test_all_members(self) -> None:
-        assert len(ActionType) == 26
+        assert len(ActionType) == 27
 
     def test_from_string(self) -> None:
         assert ActionType("navigate") is ActionType.NAVIGATE
@@ -326,6 +326,35 @@ class TestStepConfig:
             description="Type email",
         )
         assert step.value == "test@test.com"
+
+    def test_select_option_valid(self) -> None:
+        step = StepConfig(
+            step=4,
+            action=ActionType.SELECT_OPTION,
+            target=TargetSpec(selector="#grade"),
+            value="3학년",
+            description="Pick a grade",
+        )
+        assert step.value == "3학년"
+
+    def test_select_option_without_selector_fails(self) -> None:
+        with pytest.raises(ValidationError, match="target.selector"):
+            StepConfig(
+                step=4,
+                action=ActionType.SELECT_OPTION,
+                target=TargetSpec(text="Grade"),
+                value="3학년",
+                description="Text target is not enough for a native select",
+            )
+
+    def test_select_option_without_value_fails(self) -> None:
+        with pytest.raises(ValidationError, match="requires value"):
+            StepConfig(
+                step=4,
+                action=ActionType.SELECT_OPTION,
+                target=TargetSpec(selector="#grade"),
+                description="No option to pick",
+            )
 
     def test_wait_step(self) -> None:
         step = StepConfig(

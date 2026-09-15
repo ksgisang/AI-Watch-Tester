@@ -487,6 +487,9 @@ class StepExecutor:
             x, y, delta = _parse_scroll_params(step.value)
             await self._engine.scroll(x, y, delta)
 
+        elif step.action == ActionType.SELECT_OPTION:
+            await self._handle_select_option(step)
+
         elif step.action == ActionType.GO_BACK:
             await self._engine.go_back()
 
@@ -1454,6 +1457,69 @@ class StepExecutor:
                 )
 
         return None
+
+    async def _handle_select_option(self, step: StepConfig) -> None:
+        """Select an option in a native HTML <select> element.
+
+        Uses Playwright's page.select_option which handles native OS dropdowns
+        correctly — keyboard events alone cannot drive native <select>.
+
+        Tries label match first (most intuitive), falls back to value match.
+        """
+        if not step.target or not step.target.selector:
+            raise StepExecutionError(
+                "select_option requires target.selector",
+                step=step.step,
+                action="select_option",
+            )
+        if not hasattr(self._engine, "page"):
+            raise StepExecutionError(
+                "select_option requires a Playwright page engine",
+                step=step.step,
+                action="select_option",
+            )
+        page = self._engine.page  # type: ignore[attr-defined]
+        selector = step.target.selector
+        value = step.value or ""
+
+        loc = page.locator(selector).first
+        try:
+            await loc.wait_for(state="attached", timeout=5000)
+            with contextlib.suppress(Exception):
+                await loc.scroll_into_view_if_needed(timeout=2000)
+        except Exception as e:
+            raise StepExecutionError(
+                f"select_option: element not found ({selector}): {e}",
+                step=step.step,
+                action="select_option",
+            ) from e
+
+        # Try label first, then value, then index (if numeric)
+        last_err: Exception | None = None
+        for kwargs in ({"label": value}, {"value": value}):
+            try:
+                await loc.select_option(timeout=5000, **kwargs)
+                logger.info(
+                    "select_option: %s = %s (%s)",
+                    selector,
+                    value,
+                    list(kwargs.keys())[0],
+                )
+                return
+            except Exception as e:
+                last_err = e
+        if value.isdigit():
+            try:
+                await loc.select_option(index=int(value), timeout=5000)
+                logger.info("select_option: %s index=%s", selector, value)
+                return
+            except Exception as e:
+                last_err = e
+        raise StepExecutionError(
+            f"select_option failed for {selector}={value!r}: {last_err}",
+            step=step.step,
+            action="select_option",
+        ) from last_err
 
     async def _handle_get_text(self, step: StepConfig) -> None:
         """Get text content from element and save to runtime var."""

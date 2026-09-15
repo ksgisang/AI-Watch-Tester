@@ -155,6 +155,13 @@ _ACTIONS: dict[ActionType, ActionDoc] = {
         target="optional",
         value="optional",
     ),
+    ActionType.SELECT_OPTION: ActionDoc(
+        "Input",
+        "Pick an option in a native `<select>`; needs `target.selector`",
+        "Option label, then value, then index — first match wins",
+        target="required",
+        value="required",
+    ),
     ActionType.IF_VISIBLE: ActionDoc(
         "Control flow",
         "Run the `then` sub-steps only if the target is visible",
@@ -326,7 +333,9 @@ def _table(model: type[BaseModel]) -> str:
 
 
 _PROBE: dict[str, object] = {
-    "target": TargetSpec(text="probe"),
+    # The selector matters: validators that demand `target.selector` reject a
+    # text-only target first, which would hide whether `value` is required too.
+    "target": TargetSpec(text="probe", selector="#probe"),
     "value": "probe",
     "assert_type": AssertType.TEXT_VISIBLE,
     "name": "probe",

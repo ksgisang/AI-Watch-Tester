@@ -58,6 +58,8 @@ class ActionType(StrEnum):
     WAIT = "wait"
     SCREENSHOT = "screenshot"
     SCROLL = "scroll"
+    # Native HTML <select> via Playwright select_option API
+    SELECT_OPTION = "select_option"
 
 
 class ScreenRegion(StrEnum):
@@ -656,6 +658,13 @@ class StepConfig(BaseModel):
         if self.action == ActionType.INCLUDE and not (self.scenario or self.value):
             msg = "action=include requires scenario path"
             raise ValueError(msg)
+        if self.action == ActionType.SELECT_OPTION:
+            if self.target is None or not self.target.selector:
+                msg = "action=select_option requires target.selector"
+                raise ValueError(msg)
+            if not self.value:
+                msg = "action=select_option requires value (option label or value)"
+                raise ValueError(msg)
         return self
 
 
