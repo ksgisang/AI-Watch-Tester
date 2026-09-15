@@ -360,8 +360,12 @@ class TargetSpec(BaseModel):
     text: str | None = Field(default=None, description="OCR fallback text")
     selector: str | None = Field(default=None, description="CSS selector (highest priority)")
     icon: IconHint | None = Field(default=None, description="Icon hint (future)")
-    match_method: MatchMethod | None = Field(default=None)
-    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    match_method: MatchMethod | None = Field(
+        default=None, description="Force a specific matcher instead of the default chain"
+    )
+    confidence: float | None = Field(
+        default=None, ge=0.0, le=1.0, description="Override the match confidence threshold"
+    )
 
     @model_validator(mode="after")
     def at_least_one_target(self) -> TargetSpec:
@@ -374,10 +378,12 @@ class TargetSpec(BaseModel):
 class ExpectedResult(BaseModel):
     """Expected result assertion."""
 
-    type: AssertType
+    type: AssertType = Field(..., description="Kind of assertion to perform")
     value: str = Field(..., description="Comparison value")
-    tolerance: float = Field(default=0.0, ge=0.0, le=1.0)
-    case_insensitive: bool = Field(default=False)
+    tolerance: float = Field(
+        default=0.0, ge=0.0, le=1.0, description="Allowed deviation for image/screen comparisons"
+    )
+    case_insensitive: bool = Field(default=False, description="Ignore letter case when comparing")
 
 
 class FindMethod(StrEnum):
@@ -394,11 +400,19 @@ class StepConfig(BaseModel):
     """Individual test step within a scenario."""
 
     step: int = Field(..., ge=1, description="Step number (1-based)")
-    action: ActionType
-    target: TargetSpec | None = Field(default=None)
-    value: str | None = Field(default=None)
-    description: str = Field(..., min_length=1)
-    humanize: bool = Field(default=True)
+    action: ActionType = Field(..., description="What this step does")
+    target: TargetSpec | None = Field(
+        default=None, description="Element to act on; required by the find_and_* actions"
+    )
+    value: str | None = Field(
+        default=None, description="Action payload: URL, text to type, key name, coordinates"
+    )
+    description: str = Field(
+        ..., min_length=1, description="What this step is doing, in the tester's words"
+    )
+    humanize: bool = Field(
+        default=True, description="Move and type like a person instead of instantly"
+    )
     method: FindMethod = Field(
         default=FindMethod.AUTO,
         description="Matching method: auto (3-tier fallback), template, ocr, vision",
@@ -508,16 +522,24 @@ class StepConfig(BaseModel):
             return True
         return bool(v)
 
-    screenshot_before: bool = Field(default=False)
-    screenshot_after: bool = Field(default=False)
-    timeout_ms: int = Field(default=10000, ge=0, le=120000)
-    optional: bool = Field(default=False)
+    screenshot_before: bool = Field(default=False, description="Capture the screen before acting")
+    screenshot_after: bool = Field(default=False, description="Capture the screen after acting")
+    timeout_ms: int = Field(
+        default=10000, ge=0, le=120000, description="How long this step may take, in milliseconds"
+    )
+    optional: bool = Field(
+        default=False, description="Record a failure as skipped instead of failing the scenario"
+    )
     ai_verify: bool | None = Field(
         default=None,
         description="Vision AI step verification. None=follow global config, True/False=override",
     )
-    assert_type: AssertType | None = Field(default=None)
-    expected: list[ExpectedResult] = Field(default_factory=list)
+    assert_type: AssertType | None = Field(
+        default=None, description="Kind of assertion; required by action=assert"
+    )
+    expected: list[ExpectedResult] = Field(
+        default_factory=list, description="Assertions to check; required by action=assert"
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -651,8 +673,12 @@ class TeardownStep(BaseModel):
     # api_call fields
     method: str | None = Field(default=None, description="HTTP method: GET POST PUT DELETE PATCH")
     url: str | None = Field(default=None, description="Request URL (supports {{variables}})")
-    headers: dict[str, str] | None = Field(default=None)
-    body: dict[str, Any] | None = Field(default=None)
+    headers: dict[str, str] | None = Field(
+        default=None, description="HTTP headers for api_call teardown"
+    )
+    body: dict[str, Any] | None = Field(
+        default=None, description="JSON request body for api_call teardown"
+    )
     expected_status: int | None = Field(
         default=None,
         description="Expected HTTP status code; failure logged but does not stop teardown",
@@ -674,9 +700,9 @@ class Scenario(BaseModel):
     """Test scenario definition."""
 
     id: str = Field(..., pattern=r"^SC-\d{3,}$", description="Scenario ID: SC-001")
-    name: str = Field(..., min_length=1)
-    description: str = Field(default="")
-    tags: list[str] = Field(default_factory=list)
+    name: str = Field(..., min_length=1, description="Human-readable scenario name")
+    description: str = Field(default="", description="What this scenario verifies")
+    tags: list[str] = Field(default_factory=list, description="Tags for filtering runs")
     depends_on: list[str] = Field(
         default_factory=list,
         description="Scenario IDs that must pass before this one runs (e.g. ['SC-001'])",
@@ -685,7 +711,9 @@ class Scenario(BaseModel):
         default_factory=dict,
         description="Scenario-level variables (supports {{env.VAR}} references)",
     )
-    steps: list[StepConfig] = Field(..., min_length=1)
+    steps: list[StepConfig] = Field(
+        ..., min_length=1, description="Ordered steps; at least one is required"
+    )
     expect_login_redirect: bool = Field(
         default=False,
         description=(
@@ -730,8 +758,12 @@ class Scenario(BaseModel):
             return [str(x) for x in v if x is not None]
         return []
 
-    expected_result: list[ExpectedResult] = Field(default_factory=list)
-    variables: dict[str, str] = Field(default_factory=dict)
+    expected_result: list[ExpectedResult] = Field(
+        default_factory=list, description="Scenario-level assertions checked after the last step"
+    )
+    variables: dict[str, str] = Field(
+        default_factory=dict, description="Alias of vars, kept for older scenario files"
+    )
 
     @model_validator(mode="before")
     @classmethod
