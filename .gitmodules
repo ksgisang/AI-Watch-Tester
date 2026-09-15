@@ -1,0 +1,4 @@
+[submodule "awt-skill"]
+	path = awt-skill
+	url = https://github.com/ksgisang/awt-skill.git
+	branch = main
