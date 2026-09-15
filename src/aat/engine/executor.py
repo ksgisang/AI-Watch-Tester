@@ -1899,15 +1899,26 @@ class StepExecutor:
             selector,
         )
 
-    # Login/auth URL patterns — if we land here unexpectedly, session expired
+    # Login/auth URL patterns — if we land here unexpectedly, session expired.
+    # Single list for every hard stop; see _is_login_url.
+    # No bare "/auth": it also matches /api/auth/logout, /authors, /authorize,
+    # and "/auth/login" style paths are already caught by "/login".
     _LOGIN_URL_PATTERNS: tuple[str, ...] = (
         "nidlogin",
         "/login",
         "/signin",
         "account/login",
         "accounts/login",
-        "/auth",
     )
+
+    def _is_login_url(self, url: str) -> bool:
+        """Single source of truth for 'this URL is a login page'.
+
+        Every login-redirect hard stop asks this, so the three call sites
+        cannot drift apart again.
+        """
+        low = (url or "").lower()
+        return any(pattern in low for pattern in self._LOGIN_URL_PATTERNS)
 
     def _login_redirect_expected(self, step: StepConfig) -> bool:
         """True when landing on a login page is the expected outcome here.
@@ -1928,9 +1939,8 @@ class StepExecutor:
         if not hasattr(self._engine, "page"):
             return
 
-        target = (step.value or "").lower()
         # If this step intentionally navigates to a login page, mark it and skip redirect check
-        if any(p in target for p in self._LOGIN_URL_PATTERNS):
+        if self._is_login_url(step.value or ""):
             self._intentional_login_page = True
             return
         # Navigating away from login page — reset flag
@@ -1950,23 +1960,22 @@ class StepExecutor:
         except Exception:
             return
 
-        for pattern in self._LOGIN_URL_PATTERNS:
-            if pattern in current_url:
-                ss_path = self._screenshot_dir / f"redirect_step{step.step}.png"
-                ss_path.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    ss_bytes = await self._engine.screenshot()
-                    Path(str(ss_path)).write_bytes(ss_bytes)
-                except Exception:
-                    pass
-                raise StepExecutionError(
-                    f"Unexpected redirect to login page after navigate: "
-                    f"{current_url!r}. "
-                    "Session expired or authentication required. "
-                    f"Screenshot: {ss_path}",
-                    step=step.step,
-                    action="navigate",
-                )
+        if self._is_login_url(current_url):
+            ss_path = self._screenshot_dir / f"redirect_step{step.step}.png"
+            ss_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                ss_bytes = await self._engine.screenshot()
+                Path(str(ss_path)).write_bytes(ss_bytes)
+            except Exception:
+                pass
+            raise StepExecutionError(
+                f"Unexpected redirect to login page after navigate: "
+                f"{current_url!r}. "
+                "Session expired or authentication required. "
+                f"Screenshot: {ss_path}",
+                step=step.step,
+                action="navigate",
+            )
 
     async def _maybe_activate_flutter_semantics(self) -> None:
         """Auto-activate Flutter Semantics after navigation (if Flutter)."""
@@ -2419,21 +2428,17 @@ class StepExecutor:
         needs_ocr = step.critical or step.action == ActionType.IF_VISIBLE
         if not needs_ocr:
             # Still run URL-based login redirect check (no OCR needed)
-            if not self._login_redirect_expected(step):
-                on_login_page = any(
-                    kw in page_url for kw in ("nidlogin", "/login", "/signin", "account/login")
+            if not self._login_redirect_expected(step) and self._is_login_url(page_url):
+                ss_path = self._screenshot_dir / f"login_redirect_step{step.step}.png"
+                ss_path.parent.mkdir(parents=True, exist_ok=True)
+                Path(str(ss_path)).write_bytes(screenshot)
+                raise StepExecutionError(
+                    f"Login redirect detected after step {step.step}. "
+                    "Session expired or authentication required. "
+                    f"Screenshot: {ss_path}",
+                    step=step.step,
+                    action=step.action.value,
                 )
-                if on_login_page:
-                    ss_path = self._screenshot_dir / f"login_redirect_step{step.step}.png"
-                    ss_path.parent.mkdir(parents=True, exist_ok=True)
-                    Path(str(ss_path)).write_bytes(screenshot)
-                    raise StepExecutionError(
-                        f"Login redirect detected after step {step.step}. "
-                        "Session expired or authentication required. "
-                        f"Screenshot: {ss_path}",
-                        step=step.step,
-                        action=step.action.value,
-                    )
             await self._ai_verify_step(step, screenshot)
             return
 
@@ -2483,15 +2488,6 @@ class StepExecutor:
                 )
 
         # Check 2: Detect unexpected blocking elements — raise immediately
-        # Login-redirect patterns (session expired / auth required)
-        login_blockers = [
-            "로그인",
-            "sign in",
-            "log in",
-            "아이디",
-            "비밀번호",
-            "id/pw",
-        ]
         hard_blockers = [
             "오류가 발생",
             "에러가 발생",
@@ -2513,10 +2509,7 @@ class StepExecutor:
             if hasattr(self._engine, "page"):
                 with contextlib.suppress(Exception):
                     current_url = self._engine.page.url.lower()
-            on_login_page = any(
-                kw in current_url for kw in ("nidlogin", "/login", "/signin", "account/login")
-            )
-            if on_login_page:
+            if self._is_login_url(current_url):
                 ss_path = self._screenshot_dir / f"login_redirect_step{step.step}.png"
                 ss_path.parent.mkdir(parents=True, exist_ok=True)
                 Path(str(ss_path)).write_bytes(screenshot)
@@ -2527,12 +2520,6 @@ class StepExecutor:
                     step=step.step,
                     action=step.action.value,
                 )
-            # Also check OCR for login keywords (catches non-URL-based login pages)
-            if all(lb not in ocr_lower for lb in ("로그인 후 이용", "로그인하세요")):
-                pass  # no login text in OCR — fine
-            for lb in login_blockers:
-                if lb in ocr_lower and on_login_page:
-                    break  # already handled above
 
         for blocker in hard_blockers:
             if blocker in ocr_lower:

@@ -927,6 +927,39 @@ class TestWaitForLoadState:
 # ─── Login redirect detection ────────────────────────────────
 
 
+class TestIsLoginUrl:
+    """One pattern list behind every hard stop — see _is_login_url."""
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://app.test/login",
+            "https://app.test/login?next=%2Fexam",
+            "https://app.test/signin",
+            "https://nid.naver.com/nidlogin.login",
+            "https://app.test/account/login",
+            "https://app.test/accounts/login",
+            "https://APP.TEST/LOGIN",
+        ],
+    )
+    def test_login_urls(self, executor: StepExecutor, url: str) -> None:
+        assert executor._is_login_url(url) is True
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://app.test/",
+            "https://app.test/exam",
+            "https://app.test/api/auth/logout",  # the opposite of a login redirect
+            "https://app.test/authors/42",
+            "https://app.test/oauth/authorize",
+            "",
+        ],
+    )
+    def test_non_login_urls(self, executor: StepExecutor, url: str) -> None:
+        assert executor._is_login_url(url) is False
+
+
 class TestLoginRedirectExpected:
     """The only way past a login-redirect hard stop."""
 
@@ -988,5 +1021,12 @@ class TestPostNavigateRedirect:
         ex = self._executor(self._engine_on("https://app.test/login?next=%2F"), tmp_path)
         step = make_step(ActionType.NAVIGATE, value="https://app.test/")
         step.expect_login_redirect = True
+
+        await ex._check_post_navigate_redirect(step)  # must not raise
+
+    async def test_logout_url_is_not_a_login_redirect(self, tmp_path: Path) -> None:
+        """Bare '/auth' used to make /api/auth/logout look like a session expiry."""
+        ex = self._executor(self._engine_on("https://app.test/api/auth/logout"), tmp_path)
+        step = make_step(ActionType.NAVIGATE, value="https://app.test/")
 
         await ex._check_post_navigate_redirect(step)  # must not raise
