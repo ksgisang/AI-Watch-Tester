@@ -73,6 +73,12 @@ After the test completes, AWT generates a detailed report with:
 it reads `/dev/tty` directly rather than stdin, so piping input at it does
 nothing. An AI agent driving your terminal cannot answer it — you have to.
 
+The one exception is `--skill-mode`, which an AI tool passes when it runs AWT
+for you. It does not remove the gate, it relocates it: your approval of the
+tool call is what stands in for the keypress, so the agent has to show you the
+scenario and hear a real "yes" before it calls anything. The run is recorded as
+`approval_method: skill` in the audit log.
+
 ```bash
 aat run scenarios/SC-002_login.yaml
 ```
