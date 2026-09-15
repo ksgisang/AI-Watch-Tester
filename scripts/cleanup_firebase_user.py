@@ -40,8 +40,8 @@ def _delete_via_admin_sdk(email: str) -> None:
 
 def _delete_via_rest_api(email: str) -> None:
     """Requires FIREBASE_ADMIN_TOKEN (OAuth2 token with Firebase Admin scope)."""
-    import urllib.request
     import json
+    import urllib.request
 
     token = os.environ["FIREBASE_ADMIN_TOKEN"]
     project_id = os.environ.get("FIREBASE_PROJECT_ID", "clasring-dev")

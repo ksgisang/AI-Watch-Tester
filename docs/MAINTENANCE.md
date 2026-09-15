@@ -17,6 +17,9 @@ When code changes, the corresponding documentation must be updated in the same P
 | `cloud/BACKUP_RECOVERY.md` | Database and file backup/restore procedures |
 | `cloud/frontend/messages/en.json` | Frontend UI strings (English, source of truth) |
 | `cloud/frontend/messages/ko.json` | Frontend UI strings (Korean, must mirror en.json keys) |
+| `awt-skill/awt/SKILL.md` | Agent skill instructions — workflow, scenario rules (action table generated) |
+| `awt-skill/awt/references/scenario-schema.md` | **Generated** from `src/aat/core/models.py`; never edit by hand |
+| `mcp/README.md`, `mcp/server.py` docstrings | What the MCP tools promise to the calling AI |
 
 ---
 
@@ -38,6 +41,31 @@ When code changes, the corresponding documentation must be updated in the same P
 | Rate limit changed | `API_REFERENCE.md`, `FAQ.md`, `CI_CD_GUIDE.md` |
 | WebSocket event added | `API_REFERENCE.md` |
 | File upload limits changed | `API_REFERENCE.md`, `en.json` (fileUpload.formats) |
+| Scenario model / enum changed (`core/models.py`) | Run `python scripts/gen_scenario_schema.py` — see below |
+| DEVQA block fields changed (`core/diagnosis.py`) | `awt-skill/awt/references/cli-reference.md`, `awt-skill/awt/SKILL.md`, `mcp/server.py`, `mcp/README.md` |
+
+---
+
+## Scenario Schema Rules
+
+`src/aat/core/models.py` is the **source of truth** for what a scenario may
+contain. The agent skill's reference is generated from it:
+
+```bash
+python scripts/gen_scenario_schema.py          # regenerate
+python scripts/gen_scenario_schema.py --check  # fail if out of date
+```
+
+This writes `awt-skill/awt/references/scenario-schema.md` in full, and the
+action table inside `awt-skill/awt/SKILL.md` between the `BEGIN GENERATED` and
+`END GENERATED` markers. Everything else in `SKILL.md` stays hand-written.
+
+Only prose that has no home in the code — what an action is for, what its value
+looks like — lives in the generator. Adding an enum member without adding its
+row there makes generation fail, on purpose.
+
+`tests/test_docs_sync.py` runs the check in CI, and skips when the `awt-skill`
+submodule is not checked out.
 
 ---
 
@@ -63,3 +91,4 @@ bash docs/check_sync.sh
 This checks:
 - `en.json` and `ko.json` have identical key structures
 - Endpoints listed in `API_REFERENCE.md` exist in the actual router files
+- The agent skill's scenario docs match `src/aat/core/models.py`

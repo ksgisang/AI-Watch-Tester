@@ -21,6 +21,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # awt-skill holds the agent skill docs, which tests/test_docs_sync.py
+          # checks against src/aat/core/models.py. Without it that test skips.
+          submodules: true
 
       - name: Install system dependencies
         run: |
@@ -41,7 +45,7 @@ jobs:
           playwright install --with-deps chromium
 
       - name: Lint with Ruff
-        run: ruff check src/ tests/
+        run: ruff check src/ tests/ scripts/
 
       - name: Type check with Mypy
         run: mypy src/aat/

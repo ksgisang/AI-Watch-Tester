@@ -127,6 +127,27 @@ fi
 echo ""
 
 # -------------------------------------------------------------------
+# 3. Agent skill docs vs src/aat/core/models.py
+# -------------------------------------------------------------------
+GEN="$ROOT/scripts/gen_scenario_schema.py"
+
+if [[ -d "$ROOT/awt-skill/awt" ]]; then
+    if output=$(cd "$ROOT" && python3 "$GEN" --check 2>&1); then
+        echo "[PASS] scenario schema: skill docs match the models"
+        PASS=$((PASS + 1))
+    else
+        echo "$output" | sed 's/^/  /'
+        WARN=$((WARN + 1))
+    fi
+else
+    echo "[WARN] awt-skill is not checked out, skipping scenario schema check"
+    echo "       (git submodule update --init awt-skill)"
+    WARN=$((WARN + 1))
+fi
+
+echo ""
+
+# -------------------------------------------------------------------
 # Summary
 # -------------------------------------------------------------------
 echo "=== Summary ==="
