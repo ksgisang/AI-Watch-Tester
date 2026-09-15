@@ -147,6 +147,27 @@ ATTEMPTS: 1/5
 =======================
 ```
 
+치명(critical) 스텝이 실패하면 `ACTUAL_CAUSE` 줄이 함께 출력됩니다.
+
+```
+=== AWT SKILL DEVQA ===
+SCENARIO: scenarios/login.yaml
+FAILED_STEP: 5 - assert_url
+ERROR: 로그인 후에는 대시보드가 떠야 합니다
+ACTUAL_CAUSE: Bounced to the login page: https://app.example.com/login?next=/dashboard
+SCREENSHOT: .aat/screenshots/fail_step5.png
+POSSIBLE_CAUSE: Expected content not found on page
+RETRY_CMD: aat run --skill-mode scenarios/login.yaml
+ATTEMPTS: 1/5
+=======================
+```
+
+`ERROR`는 시나리오 작성자가 실행 이전에 적어 둔 기대 문구이고, `ACTUAL_CAUSE`는
+브라우저에서 실제로 벌어진 일입니다. 두 값이 다를 때만 `ACTUAL_CAUSE`가 출력되며,
+이 줄이 있으면 반드시 이쪽을 근거로 원인을 판단해야 합니다. 위 예시에서 `ERROR`만
+읽으면 "대시보드 화면이 깨졌다"라는 정반대 진단이 나오지만, 실제 원인은 세션이
+수립되지 않아 로그인 화면으로 되돌아간 것입니다.
+
 AI 도구가 이 블록을 파싱해서 시나리오를 수정하고 재실행하는 자동 루프를 수행합니다.
 
 ## 직접 테스트

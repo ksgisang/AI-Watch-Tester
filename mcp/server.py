@@ -194,11 +194,16 @@ async def aat_run_skill_mode(
     ⚠️ IMPORTANT: Only call this AFTER the user has approved the scenario.
 
     On failure, outputs a structured === AWT SKILL DEVQA === block with:
-    SCENARIO, FAILED_STEP, ERROR, SCREENSHOT path, POSSIBLE_CAUSE.
+    SCENARIO, FAILED_STEP, ERROR, ACTUAL_CAUSE, SCREENSHOT path, POSSIBLE_CAUSE.
+
+    ERROR is the step's own message — what the scenario author expected, written
+    before the run. ACTUAL_CAUSE is what actually happened, and appears only when
+    it differs from ERROR. Diagnose from ACTUAL_CAUSE whenever it is present;
+    reading ERROR as the cause can invert the diagnosis completely.
 
     On failure:
     1. Read the SCREENSHOT file to see browser state
-    2. Report the failure to the user with possible cause
+    2. Report the failure to the user, citing ACTUAL_CAUSE if present
     3. Ask: "Should I fix the scenario or the source code?"
     4. WAIT for user instruction — do NOT auto-fix
 
