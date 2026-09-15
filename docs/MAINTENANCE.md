@@ -10,7 +10,7 @@ When code changes, the corresponding documentation must be updated in the same P
 |------|------|
 | `README.md` | GitHub landing page — features, quick start, badges, links |
 | `CONTRIBUTING.md` | Developer onboarding — setup, code style, PR process, architecture |
-| `docs/QUICK_START.md` | End-user setup — install, AI provider config, CLI reference |
+| `docs/QUICK_START.md` | End-user setup — install, AI provider config, CLI approval gate, CLI reference |
 | `docs/API_REFERENCE.md` | Full REST API + WebSocket docs with schemas and curl examples |
 | `docs/FAQ.md` | Common questions — comparisons, pricing, self-hosting, licensing |
 | `cloud/docs/CI_CD_GUIDE.md` | CI/CD pipeline integration — GitHub Actions example, API key usage |
@@ -43,6 +43,7 @@ When code changes, the corresponding documentation must be updated in the same P
 | File upload limits changed | `API_REFERENCE.md`, `en.json` (fileUpload.formats) |
 | Scenario model / enum changed (`core/models.py`) | Run `python scripts/gen_scenario_schema.py` — see below |
 | DEVQA block fields changed (`core/diagnosis.py`) | `awt-skill/awt/references/cli-reference.md`, `awt-skill/awt/SKILL.md`, `mcp/server.py`, `mcp/README.md` |
+| Approval gate changed (`scenario_reviewer.py`, `approval_token.py`, `audit.py`) | `QUICK_START.md` (Running a Test from the CLI), `awt-skill/awt/references/cli-reference.md`, `CLAUDE.md` |
 
 ---
 

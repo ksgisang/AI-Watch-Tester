@@ -66,6 +66,90 @@ After the test completes, AWT generates a detailed report with:
 
 ---
 
+## Running a Test from the CLI
+
+`aat run` never opens a browser until a human says so. There is no
+`--auto-approve` and no `-y`: the approval prompt is the only way through, and
+it reads `/dev/tty` directly rather than stdin, so piping input at it does
+nothing. An AI agent driving your terminal cannot answer it — you have to.
+
+```bash
+aat run scenarios/SC-002_login.yaml
+```
+
+### 1. The review screen appears first
+
+Before anything is launched, AWT prints the scenario in readable form:
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Scenario Review  [SC-002 · 5 steps]
+ Login Flow
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. 🌐 navigate        https://example.com
+  2. ⌨  find_and_type   "Email" → "test@example.com"
+  3. ⌨  find_and_type   "Password" → "********"
+  4. 🖱  find_and_click  "Log in"  ⛔stop
+  5. ✅ assert_url      /dashboard  ⛔stop
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ [Enter] Run    [e] Edit YAML    [n] Cancel
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+▶
+```
+
+Fields that look like passwords are masked. `⛔stop` marks a step that halts the
+run on failure (`critical: true` or `on_fail: stop`). Point `aat run` at a
+directory and each scenario is reviewed separately, with a
+`(1/3 approved — next: SC-003)` line between them.
+
+### 2. Three ways out
+
+| Key | What happens |
+|---|---|
+| **Enter** (or `y`) | Approved — the run starts |
+| **`e`** | Opens the YAML in `$EDITOR` (`nano` if unset). Saving and quitting runs the **edited** scenario immediately — it does not ask again |
+| **`n`** | Cancelled. Nothing is launched; exit code 0 |
+| **Ctrl+C** | Same as `n` |
+
+### 3. The decision is recorded
+
+Every attempt appends one JSONL line to `.aat/audit.log`, approvals and
+cancellations alike:
+
+```json
+{"timestamp": "2026-09-15T13:40:02Z", "action": "run",
+ "approval_method": "interactive", "approved": true, "is_tty": true,
+ "scenarios": ["SC-002"], "token_prefix": null, "user": "you"}
+```
+
+`approval_method` says how it was approved: `interactive` (you pressed a key),
+`skill` (an AI tool called it through the MCP server, where approval happened at
+the tool-call level), or `token` (a one-time token issued by a parent `devqa` /
+`watch` process — forging the environment variable fails, because it is checked
+against a file on disk).
+
+### 4. Then the browser opens
+
+Chromium launches visibly — `headless: true` is not allowed — and the steps run
+in order, with screenshots per step and human-like mouse and typing. Add
+`--fast` to speed the movement up. Any `teardown:` steps run afterwards whether
+the test passed or failed, unless you pass `--skip-teardown`.
+
+### 5. Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | All steps passed — or you cancelled at the prompt |
+| `1` | A step failed |
+| `2` | A critical step failed and stopped the run |
+
+With `--skill-mode`, a failure also prints an `=== AWT SKILL DEVQA ===` block
+for an AI tool to read. Note that `ERROR` in that block is the scenario author's
+expected outcome, while `ACTUAL_CAUSE` — present only when the two differ — is
+what actually happened. Diagnose from `ACTUAL_CAUSE`.
+
+---
+
 ## Cloud Mode
 
 > Cloud mode is coming soon at [awt.dev](https://awt.dev).
