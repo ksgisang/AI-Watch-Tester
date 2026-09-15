@@ -452,6 +452,103 @@ class TestFindAndClearAction:
         mock_engine.press_key.assert_awaited_once_with("Delete")
 
 
+# ─── assert_text ─────────────────────────────────────────────
+
+
+def _page_with_text(*, count: int, inner: str = "", found_by_text: bool = False) -> MagicMock:
+    """Build a Playwright-like page for the DOM side of assert_text."""
+    locator = MagicMock()
+    locator.count = AsyncMock(return_value=count)
+    locator.inner_text = AsyncMock(return_value=inner)
+    by_text = MagicMock()
+    by_text.count = AsyncMock(return_value=1 if found_by_text else 0)
+    page = MagicMock()
+    page.locator = MagicMock(return_value=MagicMock(first=locator))
+    page.get_by_text = MagicMock(return_value=MagicMock(first=by_text))
+    return page
+
+
+class TestAssertTextAction:
+    @pytest.mark.asyncio
+    async def test_selector_match_skips_ocr(
+        self, executor: StepExecutor, mock_engine: MagicMock
+    ) -> None:
+        mock_engine.page = _page_with_text(count=1, inner="Saved successfully")
+        ocr = AsyncMock()
+        executor._verify_text_on_screen = ocr  # type: ignore[method-assign]
+        step = make_step(ActionType.ASSERT_TEXT, target=TargetSpec(selector="#msg", text="saved"))
+        result = await executor.execute_step(step)
+        assert result.status == StepStatus.PASSED
+        ocr.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_selector_holds_other_text_fails(
+        self, executor: StepExecutor, mock_engine: MagicMock
+    ) -> None:
+        mock_engine.page = _page_with_text(count=1, inner="Something went wrong")
+        executor._verify_text_on_screen = AsyncMock()  # type: ignore[method-assign]
+        step = make_step(ActionType.ASSERT_TEXT, target=TargetSpec(selector="#msg", text="Saved"))
+        result = await executor.execute_step(step)
+        assert result.status == StepStatus.FAILED
+        assert "Something went wrong" in (result.error_message or "")
+
+    @pytest.mark.asyncio
+    async def test_author_message_keeps_the_actual_cause(
+        self, executor: StepExecutor, mock_engine: MagicMock
+    ) -> None:
+        mock_engine.page = _page_with_text(count=1, inner="Something went wrong")
+        executor._verify_text_on_screen = AsyncMock()  # type: ignore[method-assign]
+        step = StepConfig(
+            step=7,
+            action=ActionType.ASSERT_TEXT,
+            description="Success banner is shown",
+            target=TargetSpec(selector="#msg", text="Saved"),
+            message="Save succeeded",
+        )
+        result = await executor.execute_step(step)
+        assert result.status == StepStatus.FAILED
+        error = result.error_message or ""
+        assert "Save succeeded" in error
+        assert "actual cause:" in error
+        assert "Something went wrong" in error
+
+    @pytest.mark.asyncio
+    async def test_missing_selector_falls_back_to_ocr(
+        self, executor: StepExecutor, mock_engine: MagicMock
+    ) -> None:
+        mock_engine.page = _page_with_text(count=0)
+        ocr = AsyncMock()
+        executor._verify_text_on_screen = ocr  # type: ignore[method-assign]
+        step = make_step(ActionType.ASSERT_TEXT, target=TargetSpec(selector="#msg", text="Saved"))
+        result = await executor.execute_step(step)
+        assert result.status == StepStatus.PASSED
+        ocr.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_without_selector_page_text_skips_ocr(
+        self, executor: StepExecutor, mock_engine: MagicMock
+    ) -> None:
+        mock_engine.page = _page_with_text(count=0, found_by_text=True)
+        ocr = AsyncMock()
+        executor._verify_text_on_screen = ocr  # type: ignore[method-assign]
+        step = make_step(ActionType.ASSERT_TEXT, target=TargetSpec(text="Saved"))
+        result = await executor.execute_step(step)
+        assert result.status == StepStatus.PASSED
+        ocr.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_without_selector_falls_back_to_ocr(
+        self, executor: StepExecutor, mock_engine: MagicMock
+    ) -> None:
+        mock_engine.page = _page_with_text(count=0, found_by_text=False)
+        ocr = AsyncMock()
+        executor._verify_text_on_screen = ocr  # type: ignore[method-assign]
+        step = make_step(ActionType.ASSERT_TEXT, target=TargetSpec(text="Saved"))
+        result = await executor.execute_step(step)
+        assert result.status == StepStatus.PASSED
+        ocr.assert_awaited_once()
+
+
 # ─── select_option ───────────────────────────────────────────
 
 

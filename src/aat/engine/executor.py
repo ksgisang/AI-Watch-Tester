@@ -444,7 +444,60 @@ class StepExecutor:
 
         elif step.action == ActionType.ASSERT_TEXT:
             target_text = (step.target.text if step.target else None) or step.value or ""
-            await self._verify_text_on_screen(target_text, step.region, step.message)
+            # DOM-first: when selector is provided, prefer reliable DOM match
+            # over OCR (which is disabled in --fast mode anyway).
+            selector = step.target.selector if step.target else None
+            if selector and hasattr(self._engine, "page"):
+                try:
+                    page = self._engine.page  # type: ignore[attr-defined]
+                    loc = page.locator(selector).first
+                    if await loc.count() > 0:
+                        inner = (await loc.inner_text()).strip()
+                        if target_text.strip().lower() in inner.lower():
+                            logger.info(
+                                "assert_text: '%s' found in selector %s",
+                                target_text,
+                                selector,
+                            )
+                        else:
+                            # Keep the author's message *and* what the DOM held:
+                            # dropping either one hides half the diagnosis.
+                            detail = (
+                                f"text {target_text!r} not in selector "
+                                f"{selector!r}: got {inner[:80]!r}"
+                            )
+                            raise StepExecutionError(
+                                f"{step.message}\n  ↳ actual cause: {detail}"
+                                if step.message
+                                else detail,
+                                step=step.step,
+                                action="assert_text",
+                            )
+                    else:
+                        # selector not found → fall through to OCR
+                        await self._verify_text_on_screen(target_text, step.region, step.message)
+                except StepExecutionError:
+                    raise
+                except Exception:
+                    # On unexpected error, fall back to OCR
+                    await self._verify_text_on_screen(target_text, step.region, step.message)
+            else:
+                # No selector: try page-level text match first (DOM), then OCR fallback
+                page_match = False
+                if hasattr(self._engine, "page"):
+                    try:
+                        page = self._engine.page  # type: ignore[attr-defined]
+                        loc = page.get_by_text(target_text, exact=False).first
+                        if await loc.count() > 0:
+                            page_match = True
+                            logger.info(
+                                "assert_text: '%s' found via page.get_by_text",
+                                target_text,
+                            )
+                    except Exception:
+                        page_match = False
+                if not page_match:
+                    await self._verify_text_on_screen(target_text, step.region, step.message)
 
         elif step.action == ActionType.ASSERT_SCREEN_CHANGED:
             await self._check_screen_changed(step.threshold, step.region, step.message)
