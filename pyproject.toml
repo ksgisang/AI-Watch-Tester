@@ -107,7 +107,9 @@ ignore = ["B008"]  # Depends() in FastAPI default args is idiomatic
 "cloud/app/routers/tests.py" = ["E501"]
 
 [tool.mypy]
-python_version = "3.11"
+# No python_version pin: mypy follows the running interpreter, so each CI job
+# checks the version it actually installed. Pinning 3.11 made the 3.12 job fail
+# to parse numpy's stubs, which use 3.12-only `type` statements.
 strict = true
 warn_return_any = true
 warn_unused_configs = true
