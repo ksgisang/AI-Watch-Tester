@@ -922,3 +922,71 @@ class TestWaitForLoadState:
         result = await executor.execute_step(step)
         # Timeout is swallowed — step still passes
         assert result.status == StepStatus.PASSED
+
+
+# ─── Login redirect detection ────────────────────────────────
+
+
+class TestLoginRedirectExpected:
+    """The only way past a login-redirect hard stop."""
+
+    def test_closed_by_default(self, executor: StepExecutor) -> None:
+        step = make_step(ActionType.NAVIGATE, value="https://app.test/")
+        assert step.expect_login_redirect is None
+        assert executor._login_redirect_expected(step) is False
+
+    def test_open_for_marked_step(self, executor: StepExecutor) -> None:
+        step = make_step(ActionType.NAVIGATE, value="https://app.test/")
+        step.expect_login_redirect = True
+        assert executor._login_redirect_expected(step) is True
+
+    def test_explicit_false_does_not_open_it(self, executor: StepExecutor) -> None:
+        step = make_step(ActionType.NAVIGATE, value="https://app.test/")
+        step.expect_login_redirect = False
+        assert executor._login_redirect_expected(step) is False
+
+    def test_open_after_deliberate_navigation_to_login(self, executor: StepExecutor) -> None:
+        executor._intentional_login_page = True
+        step = make_step(ActionType.ASSERT_URL, value="/login")
+        assert executor._login_redirect_expected(step) is True
+
+
+class TestPostNavigateRedirect:
+    """navigate hard stop (site 1 of 3)."""
+
+    @staticmethod
+    def _engine_on(url: str) -> MagicMock:
+        engine = MagicMock()
+        engine.navigate = AsyncMock()
+        engine.screenshot = AsyncMock(return_value=b"png")
+        engine.save_screenshot = AsyncMock()
+        page = MagicMock()
+        page.url = url
+        page.title = AsyncMock(return_value="Sign in")
+        engine.page = page
+        engine._config = MagicMock(fast_mode=False, speed="fast")
+        return engine
+
+    def _executor(self, engine: MagicMock, tmp_path: Path) -> StepExecutor:
+        return StepExecutor(
+            engine=engine,
+            matcher=MagicMock(find=AsyncMock(return_value=MatchResult(found=True, x=1, y=1))),
+            humanizer=MagicMock(move_to=AsyncMock(), type_text=AsyncMock()),
+            waiter=MagicMock(wait_until_stable=AsyncMock(return_value=True)),
+            comparator=MagicMock(check=AsyncMock(), check_assert=AsyncMock()),
+            screenshot_dir=tmp_path,
+        )
+
+    async def test_unexpected_redirect_raises(self, tmp_path: Path) -> None:
+        ex = self._executor(self._engine_on("https://app.test/login?next=%2F"), tmp_path)
+        step = make_step(ActionType.NAVIGATE, value="https://app.test/")
+
+        with pytest.raises(StepExecutionError, match="Unexpected redirect to login page"):
+            await ex._check_post_navigate_redirect(step)
+
+    async def test_expected_redirect_passes(self, tmp_path: Path) -> None:
+        ex = self._executor(self._engine_on("https://app.test/login?next=%2F"), tmp_path)
+        step = make_step(ActionType.NAVIGATE, value="https://app.test/")
+        step.expect_login_redirect = True
+
+        await ex._check_post_navigate_redirect(step)  # must not raise

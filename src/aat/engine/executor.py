@@ -1909,6 +1909,16 @@ class StepExecutor:
         "/auth",
     )
 
+    def _login_redirect_expected(self, step: StepConfig) -> bool:
+        """True when landing on a login page is the expected outcome here.
+
+        Single gate for every login-redirect hard stop. Two ways to open it:
+        the step navigated to a login page on purpose, or the step declares
+        ``expect_login_redirect: true`` (access-control tests, where being
+        bounced to /login IS the pass condition).
+        """
+        return self._intentional_login_page or bool(step.expect_login_redirect)
+
     async def _check_post_navigate_redirect(self, step: StepConfig) -> None:
         """After navigate, detect unexpected login/auth redirects.
 
@@ -1925,6 +1935,10 @@ class StepExecutor:
             return
         # Navigating away from login page — reset flag
         self._intentional_login_page = False
+
+        # Step declares the redirect as expected — nothing to stop for
+        if self._login_redirect_expected(step):
+            return
 
         try:
             url_val = self._engine.page.url
@@ -2405,7 +2419,7 @@ class StepExecutor:
         needs_ocr = step.critical or step.action == ActionType.IF_VISIBLE
         if not needs_ocr:
             # Still run URL-based login redirect check (no OCR needed)
-            if not self._intentional_login_page:
+            if not self._login_redirect_expected(step):
                 on_login_page = any(
                     kw in page_url for kw in ("nidlogin", "/login", "/signin", "account/login")
                 )
@@ -2493,8 +2507,8 @@ class StepExecutor:
             "권한이 없",
         ]
 
-        # Hard-stop for login redirect — skip if we intentionally navigated to a login page
-        if not self._intentional_login_page:
+        # Hard-stop for login redirect — skipped when the redirect is expected
+        if not self._login_redirect_expected(step):
             current_url = ""
             if hasattr(self._engine, "page"):
                 with contextlib.suppress(Exception):

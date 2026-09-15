@@ -60,6 +60,12 @@ def validate_command(
                 status += f" ({len(scenarios)} scenarios)"
             typer.echo(f"  {file.name}: {status}")
 
+            # Always-on safety notices (not gated behind --strict)
+            for sc in scenarios:
+                for w in _safety_check(sc):
+                    typer.echo(f"    {typer.style('⚠', fg=typer.colors.YELLOW)} {sc.id}: {w}")
+                    total_warnings += 1
+
             # Strict quality checks
             if strict:
                 for sc in scenarios:
@@ -80,12 +86,29 @@ def validate_command(
         f"Validated {total} file(s), {total_scenarios} scenario(s): "
         f"{passed} OK, {len(errors)} ERROR"
     )
-    if strict and total_warnings > 0:
+    if total_warnings > 0:
         summary += f", {total_warnings} warning(s)"
     typer.echo(summary)
 
     if errors:
         raise typer.Exit(code=1)
+
+
+def _safety_check(scenario: object) -> list[str]:
+    """Notices about settings that weaken failure detection. Always reported."""
+    warnings: list[str] = []
+
+    if getattr(scenario, "expect_login_redirect", False):
+        steps = getattr(scenario, "steps", [])
+        opted_out = sum(1 for s in steps if getattr(s, "expect_login_redirect", None) is False)
+        covered = len(steps) - opted_out
+        warnings.append(
+            f"scenario-level expect_login_redirect is on — login-redirect detection "
+            f"(session expiry / auth required) is disabled on {covered} of {len(steps)} step(s). "
+            "Set it per step instead unless the whole scenario tests access control."
+        )
+
+    return warnings
 
 
 def _strict_check(scenario: object, filename: str) -> list[str]:

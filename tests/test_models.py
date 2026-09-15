@@ -455,6 +455,75 @@ class TestScenario:
 # ── Result Model Tests ──
 
 
+class TestExpectLoginRedirect:
+    """Step-level mark, with scenario-level inheritance for steps that omit it."""
+
+    @staticmethod
+    def _step(num: int, **kwargs: object) -> StepConfig:
+        return StepConfig(
+            step=num,
+            action=ActionType.SCREENSHOT,
+            description=f"step {num}",
+            **kwargs,  # type: ignore[arg-type]
+        )
+
+    def test_default_is_none_not_false(self) -> None:
+        """None is what makes 'not written' distinguishable from 'turned off'."""
+        assert self._step(1).expect_login_redirect is None
+
+    def test_step_value_survives_yaml(self) -> None:
+        assert self._step(1, expect_login_redirect=True).expect_login_redirect is True
+        assert self._step(1, expect_login_redirect=False).expect_login_redirect is False
+
+    def test_scenario_level_propagates_to_unset_steps(self) -> None:
+        sc = Scenario(
+            id="SC-001",
+            name="Access control",
+            expect_login_redirect=True,
+            steps=[self._step(1), self._step(2)],
+        )
+        assert [s.expect_login_redirect for s in sc.steps] == [True, True]
+
+    def test_scenario_level_does_not_override_explicit_step_false(self) -> None:
+        sc = Scenario(
+            id="SC-001",
+            name="Access control",
+            expect_login_redirect=True,
+            steps=[self._step(1), self._step(2, expect_login_redirect=False)],
+        )
+        assert [s.expect_login_redirect for s in sc.steps] == [True, False]
+
+    def test_steps_untouched_when_scenario_flag_off(self) -> None:
+        sc = Scenario(
+            id="SC-001",
+            name="Normal",
+            steps=[self._step(1), self._step(2, expect_login_redirect=True)],
+        )
+        assert sc.expect_login_redirect is False
+        assert [s.expect_login_redirect for s in sc.steps] == [None, True]
+
+    def test_propagation_from_raw_dicts(self) -> None:
+        """The YAML path builds steps as dicts, not StepConfig objects."""
+        sc = Scenario.model_validate(
+            {
+                "id": "SC-001",
+                "name": "Access control",
+                "expect_login_redirect": True,
+                "steps": [
+                    {"step": 1, "action": "navigate", "value": "/", "description": "home"},
+                    {
+                        "step": 2,
+                        "action": "assert_url",
+                        "value": "/login",
+                        "description": "bounced",
+                        "expect_login_redirect": False,
+                    },
+                ],
+            }
+        )
+        assert [s.expect_login_redirect for s in sc.steps] == [True, False]
+
+
 class TestMatchResult:
     def test_found(self) -> None:
         mr = MatchResult(found=True, x=100, y=200, confidence=0.92)

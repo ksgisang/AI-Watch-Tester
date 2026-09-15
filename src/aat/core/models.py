@@ -449,6 +449,14 @@ class StepConfig(BaseModel):
         default="",
         description="Action on failure: 'stop' to halt test immediately",
     )
+    expect_login_redirect: bool | None = Field(
+        default=None,
+        description=(
+            "Landing on a login page is the expected outcome of this step "
+            "(e.g. access-control tests). Disables the login-redirect hard stop "
+            "for this step only. None = inherit the scenario-level setting."
+        ),
+    )
     file_path: str = Field(
         default="",
         description="File path for upload_file action",
@@ -678,6 +686,15 @@ class Scenario(BaseModel):
         description="Scenario-level variables (supports {{env.VAR}} references)",
     )
     steps: list[StepConfig] = Field(..., min_length=1)
+    expect_login_redirect: bool = Field(
+        default=False,
+        description=(
+            "Landing on a login page is expected throughout this scenario. "
+            "Inherited by every step that does not set expect_login_redirect itself. "
+            "Disables login-redirect detection for the whole file — prefer the "
+            "step-level field unless the entire scenario tests access control."
+        ),
+    )
     teardown: list[TeardownStep] = Field(
         default_factory=list,
         description="Cleanup steps executed after scenario completes (pass or fail)",
@@ -715,6 +732,32 @@ class Scenario(BaseModel):
 
     expected_result: list[ExpectedResult] = Field(default_factory=list)
     variables: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def inherit_expect_login_redirect(cls, data: Any) -> Any:
+        """Propagate scenario-level expect_login_redirect to steps that omit it.
+
+        Only steps whose value is None (field absent in YAML) inherit. A step
+        that spells out ``expect_login_redirect: false`` keeps its own answer.
+        """
+        if not isinstance(data, dict) or not data.get("expect_login_redirect"):
+            return data
+
+        steps = data.get("steps")
+        if not isinstance(steps, list):
+            return data
+
+        inherited: list[Any] = []
+        for step in steps:
+            if isinstance(step, dict):
+                if step.get("expect_login_redirect") is None:
+                    step = {**step, "expect_login_redirect": True}
+            elif getattr(step, "expect_login_redirect", False) is None:
+                step = step.model_copy(update={"expect_login_redirect": True})
+            inherited.append(step)
+
+        return {**data, "steps": inherited}
 
     @model_validator(mode="before")
     @classmethod
