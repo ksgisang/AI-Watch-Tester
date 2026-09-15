@@ -6,6 +6,7 @@ from aat.core.exceptions import (
     AATError,
     AdapterError,
     ConfigError,
+    CriticalStepError,
     EngineError,
     LearningError,
     LoopError,
@@ -58,4 +59,39 @@ class TestStepExecutionError:
 
     def test_is_aat_error(self) -> None:
         err = StepExecutionError("fail", step=1, action="click")
+        assert isinstance(err, AATError)
+
+
+class TestCriticalStepError:
+    """The step's own message must never replace the real reason it died."""
+
+    def test_reports_both_message_and_cause(self) -> None:
+        err = CriticalStepError(
+            "A signed-out visitor saw the home page (access-control defect)",
+            step=2,
+            action="assert_url",
+            cause="Step 2 (assert_url): Login redirect detected after step 2.",
+        )
+        text = str(err)
+        assert "CRITICAL Step 2 (assert_url):" in text
+        assert "access-control defect" in text
+        assert "↳ actual cause: Step 2 (assert_url): Login redirect detected" in text
+        assert err.cause.startswith("Step 2")
+
+    def test_single_line_when_cause_matches_message(self) -> None:
+        """A genuinely broken assertion says the same thing twice — so say it once."""
+        err = CriticalStepError("URL mismatch", step=1, action="assert_url", cause="URL mismatch")
+        assert str(err) == "CRITICAL Step 1 (assert_url): URL mismatch"
+        assert err.cause == ""
+
+    def test_single_line_without_cause(self) -> None:
+        err = CriticalStepError("boom", step=1, action="click")
+        assert str(err) == "CRITICAL Step 1 (click): boom"
+        assert err.detail == "boom"
+
+    def test_attributes(self) -> None:
+        err = CriticalStepError("msg", step=4, action="find_and_click", cause="real reason")
+        assert err.step == 4
+        assert err.action == "find_and_click"
+        assert err.message == "msg"
         assert isinstance(err, AATError)

@@ -92,16 +92,24 @@ async def collect_failure_context(
     step_result: StepResult,
     scenario_path: str,
     data_dir: str = ".aat",
+    actual_cause: str = "",
 ) -> dict[str, Any]:
     """Collect structured diagnostic data from the browser at failure point.
 
     This runs WITHOUT AI — pure data collection from Playwright.
+
+    Args:
+        actual_cause: Underlying error when ``error`` holds the scenario
+            author's interpretation (step.message). Classification keys off
+            this, so a step that died for an unrelated reason is not
+            diagnosed as a broken assertion.
     """
     context: dict[str, Any] = {
         "step": step_result.step,
         "action": step_result.action.value,
         "description": step_result.description,
         "error": step_result.error_message or "",
+        "actual_cause": actual_cause,
         "elapsed_ms": step_result.elapsed_ms,
     }
 
@@ -140,8 +148,10 @@ async def collect_failure_context(
     except Exception as e:
         logger.debug("Failed to collect some diagnostic data: %s", e)
 
-    # Classify
-    context["failure_type"] = classify_failure(context.get("error", ""))
+    # Classify — the real cause wins over the author's interpretation
+    context["failure_type"] = classify_failure(
+        context.get("actual_cause", "") or context.get("error", "")
+    )
     context["investigation"] = _INVESTIGATION_CHECKLISTS.get(
         context["failure_type"], _INVESTIGATION_CHECKLISTS["unknown"]
     )
@@ -165,6 +175,8 @@ def format_diagnosis(
     lines.append(f"  Step:     {context.get('step')} — {context.get('description', '')}")
     lines.append(f"  Action:   {context.get('action', '')}")
     lines.append(f"  Error:    {context.get('error', '')}")
+    if context.get("actual_cause"):
+        lines.append(f"    ↳ actual cause: {context['actual_cause']}")
 
     # Browser context
     if context.get("url"):
@@ -242,6 +254,12 @@ def format_skill_diagnosis(
         f"SCENARIO: {scenario_file}",
         f"FAILED_STEP: {context.get('step', '?')} - {context.get('action', '?')}",
         f"ERROR: {context.get('error', 'unknown')}",
+    ]
+    # The step's own message can be an interpretation of a broken assertion.
+    # When the step died for another reason, say so explicitly.
+    if context.get("actual_cause"):
+        lines.append(f"ACTUAL_CAUSE: {context['actual_cause']}")
+    lines += [
         f"SCREENSHOT: {context.get('screenshot', 'N/A')}",
         f"URL: {context.get('url', 'N/A')}",
         f"PAGE_TITLE: {context.get('page_title', 'N/A')}",

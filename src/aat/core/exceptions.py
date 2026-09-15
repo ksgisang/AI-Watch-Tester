@@ -47,12 +47,22 @@ class StepExecutionError(AATError):
 
 
 class CriticalStepError(AATError):
-    """Critical step failed — test must stop immediately."""
+    """Critical step failed — test must stop immediately.
 
-    def __init__(self, message: str, step: int, action: str) -> None:
+    ``message`` is usually the scenario author's interpretation (step.message):
+    what a broken assertion would *mean*. A step can die for reasons that have
+    nothing to do with that assertion, so ``cause`` carries the underlying
+    error and is reported alongside it — never in its place.
+    """
+
+    def __init__(self, message: str, step: int, action: str, cause: str = "") -> None:
         self.step = step
         self.action = action
-        super().__init__(f"CRITICAL Step {step} ({action}): {message}")
+        self.message = message
+        # Nothing to add when the interpretation already is the cause
+        self.cause = cause if cause and cause != message else ""
+        self.detail = f"{message}\n  ↳ actual cause: {self.cause}" if self.cause else message
+        super().__init__(f"CRITICAL Step {step} ({action}): {self.detail}")
 
 
 class LoopError(AATError):

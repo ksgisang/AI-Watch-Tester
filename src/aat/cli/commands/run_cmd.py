@@ -640,12 +640,15 @@ async def _run(
                         remaining = len(scenario.steps) - scenario.steps.index(step) - 1
                         total_skipped += remaining
 
+                        # .detail = author's message + the real cause underneath
+                        _crit_detail = getattr(_crit_err, "detail", "") or str(_crit_err)
+
                         if skill_mode:
                             typer.echo(
                                 f"[AWT] ❌ {step.step}/{total_scenario_steps} "
                                 f"{step.description} (critical)"
                             )
-                            typer.echo(f"[AWT] 🛑 Test stopped — {step.message or str(_crit_err)}")
+                            typer.echo(f"[AWT] 🛑 Test stopped — {_crit_detail}")
                         else:
                             typer.echo(
                                 typer.style(
@@ -654,7 +657,7 @@ async def _run(
                                     bold=True,
                                 )
                             )
-                            typer.echo(f"    {step.message or str(_crit_err)}")
+                            typer.echo(f"    {_crit_detail}")
                             typer.echo(f"    Skipping remaining {remaining} step(s)")
 
                         # Skill-mode: CRITICAL_FAILURE block
@@ -667,10 +670,14 @@ async def _run(
                                         action=step.action,
                                         status=StepStatus.FAILED,
                                         description=step.description,
-                                        error_message=str(_crit_err),
+                                        error_message=getattr(_crit_err, "message", "")
+                                        or str(_crit_err),
                                     ),
                                     str(path),
                                     config.data_dir,
+                                    # Classification must key off the real cause,
+                                    # not the author's reading of the assertion
+                                    actual_cause=getattr(_crit_err, "cause", ""),
                                 )
                                 diag["critical"] = True
                                 typer.echo(

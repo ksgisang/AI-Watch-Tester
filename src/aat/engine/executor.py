@@ -348,6 +348,7 @@ class StepExecutor:
                     step.message or str(e),
                     step=step.step,
                     action=step.action.value,
+                    cause=str(e),
                 ) from e
 
             return fail_result
@@ -362,6 +363,7 @@ class StepExecutor:
                     step.message or error_msg,
                     step=step.step,
                     action=step.action.value,
+                    cause=error_msg,
                 ) from e
 
             status = StepStatus.SKIPPED if step.optional else StepStatus.FAILED
@@ -1324,7 +1326,10 @@ class StepExecutor:
             current_url = await self._engine.get_url()
 
         if expected.lower() not in current_url.lower():
-            err = step.message or (f"URL does not contain '{expected}'. Current: {current_url}")
+            # Keep the observed URL even when the step carries its own message —
+            # the interpretation is not a substitute for the evidence
+            observed = f"URL does not contain '{expected}'. Current: {current_url}"
+            err = f"{step.message} ({observed})" if step.message else observed
             raise StepExecutionError(err, step=step.step, action="assert_url")
 
         logger.info("assert_url: '%s' found in %s", expected, current_url)
