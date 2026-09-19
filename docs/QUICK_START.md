@@ -148,6 +148,13 @@ the test passed or failed, unless you pass `--skip-teardown`.
 | `0` | All steps passed — or you cancelled at the prompt |
 | `1` | A step failed |
 | `2` | A critical step failed and stopped the run |
+| `3` | Every step ran, but at least one changed nothing on screen |
+
+Code `3` is the "it clicked, but nothing happened" case. The step is reported as
+`WARNING` rather than `PASSED`, because a click that moves no pixel has almost
+certainly missed its target, and the real failure would otherwise surface
+several steps later as if the product were broken. Check the screenshot for the
+warned step and the target it was given.
 
 With `--skill-mode`, a failure also prints an `=== AWT SKILL DEVQA ===` block
 for an AI tool to read. Note that `ERROR` in that block is the scenario author's

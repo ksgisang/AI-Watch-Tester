@@ -162,6 +162,11 @@ async def aat_run(
     If a test step fails, STOP and report to the user. Ask what to fix.
     Do NOT auto-retry or auto-fix without user permission.
 
+    Exit code 3 with STATUS: WARNINGS means every step ran but at least one
+    changed nothing on screen — a click that almost certainly missed its target.
+    Do NOT report such a run as passed: read the warned step's screenshot and
+    tell the user what you found.
+
     Args:
         scenario_file: Path to a YAML scenario file or directory containing scenarios.
         verbosity: 'concise' (skip wait/screenshot steps, faster) or
@@ -206,6 +211,10 @@ async def aat_run_skill_mode(
     2. Report the failure to the user, citing ACTUAL_CAUSE if present
     3. Ask: "Should I fix the scenario or the source code?"
     4. WAIT for user instruction — do NOT auto-fix
+
+    A run can also end with === AWT SKILL VERIFY === / STATUS: WARNINGS
+    (exit code 3): the steps ran, but a click moved nothing on screen. Treat it
+    like a failure to investigate, not like a pass.
 
     Args:
         scenario_file: Path to a YAML scenario file or directory.

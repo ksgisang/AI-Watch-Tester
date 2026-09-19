@@ -312,6 +312,17 @@ aat run --skill-mode --fast <scenario>
   - `run_cmd.py`, `devqa_cmd.py`, `watch_cmd.py` 통합
   - 17개 보안 테스트 통과 (test_approval_security.py)
 
+### Post-MVP: Coordinate Learning 신뢰성 (AAT-109)
+
+- [x] **AAT-109** 학습 좌표가 실패를 통과로 보고하던 결함 수정 — 완료 2026-09-19
+  - 배경: 하늘고 스터디 웹앱 아홉 대본 실행 중 확정 (`BUG_REPORT_learned_coords.md`)
+  - 명시 우선: 학습 좌표를 CSS selector **뒤**(Priority 0.4)로 이동 — 대본이 지목한 요소를 추측이 덮어쓰지 못한다
+  - 효과 검증 후 학습: `_pending_learn` → `_settle_pending_learn()`, 화면 변화가 없으면 저장하지 않고 기존 좌표는 신뢰도 차감(`penalize_coords`, 0.5 미만 삭제)
+  - `StepStatus.WARNING` 신설 — 헛클릭은 PASSED가 아니며 종료코드 3으로 파이프라인에 드러난다 (`_exit_code()`)
+  - 스위치: `aat run --no-learn`, 단계별 `learn: false`, `aat learn reset [이름] / --all`
+  - `load_session`: 세션 나이 로그 + `max_age_min` 상한, 진단문 `session_expired`를 `auth_error`에서 분리
+  - 검증: 실제 Chromium 통합 시험 12개(`tests/integration/test_learned_coords.py`) + 단위 시험, 네 가지 역변이(mutation)로 음성 시험이 실제로 잡는지 확인
+
 ---
 
 ## 협업 프로젝트 연동 (ClasRing + DSL)
@@ -359,8 +370,8 @@ aat run --skill-mode --fast <scenario>
 
 ## Current Status
 
-- **현재 단계**: 4-Layer Approval Security 완료 (AAT-108)
-- **완료**: Phase 1~6 (Ultra-MVP) + AAT-060~065 + AAT-070~076 + AAT-080~081 + AAT-090~092 + AAT-093~095 + AAT-100~108 (Post-MVP)
+- **현재 단계**: Coordinate Learning 신뢰성 수정 완료 (AAT-109)
+- **완료**: Phase 1~6 (Ultra-MVP) + AAT-060~065 + AAT-070~076 + AAT-080~081 + AAT-090~092 + AAT-093~095 + AAT-100~109 (Post-MVP)
 - **블로커**: 없음
 - **Python**: 3.12.12 (.venv), `source .venv/bin/activate`
 - **GitHub**: https://github.com/ksgisang/AI-Watch-Tester (public)

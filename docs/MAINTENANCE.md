@@ -44,6 +44,8 @@ When code changes, the corresponding documentation must be updated in the same P
 | Scenario model / enum changed (`core/models.py`) | Run `python scripts/gen_scenario_schema.py` — see below |
 | DEVQA block fields changed (`core/diagnosis.py`) | `awt-skill/awt/references/cli-reference.md`, `awt-skill/awt/SKILL.md`, `mcp/server.py`, `mcp/README.md` |
 | Approval gate changed (`scenario_reviewer.py`, `approval_token.py`, `audit.py`) | `QUICK_START.md` (Running a Test from the CLI), `awt-skill/awt/references/cli-reference.md`, `CLAUDE.md` |
+| Step status or exit code changed (`core/models.py` `StepStatus`, `cli/commands/run_cmd.py` `_exit_code`) | `QUICK_START.md` (Exit codes), `awt-skill/awt/references/cli-reference.md`, `mcp/server.py` |
+| Coordinate learning changed (`engine/executor.py`, `learning/store.py`) | `awt-skill/awt/references/cli-reference.md` (`aat run --no-learn`, `aat learn reset`), `awt-skill/awt/SKILL.md` (when to write `learn: false`) |
 
 ---
 
