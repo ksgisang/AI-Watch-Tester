@@ -105,17 +105,21 @@ gh run list --limit 1 --workflow publish.yml
 - 새 MCP 도구 추가 시
 - 지원 플랫폼/도구 변경 시
 
-### 현재 README에 반영 필요한 기능들 (2026-04-04 기준)
+### README 반영 현황 (2026-09-19 기준)
 
 | 기능 | README 반영 여부 |
 |---|---|
-| `aat snapshot` / `aat diff` / `aat baseline` | ❌ 미반영 |
-| `aat watch` | ❌ 미반영 |
-| `--responsive` / `--viewport` | ❌ 미반영 |
-| `--console` / `--console-fail` | ❌ 미반영 |
-| `--open` | ❌ 미반영 |
-| MCP 도구: `aat_snapshot`, `aat_diff`, `aat_watch` | ❌ 미반영 |
-| GitHub Action: visual-regression.yml | ❌ 미반영 |
+| `aat snapshot` / `aat diff` / `aat baseline` | ✅ 반영 |
+| `aat watch` | ✅ 반영 |
+| `--responsive` / `--viewport` | ✅ 반영 |
+| `--console` / `--console-fail` | ✅ 반영 |
+| `--open` | ✅ 반영 |
+| MCP 도구: `aat_snapshot`, `aat_diff`, `aat_watch` | ✅ 반영 |
+| GitHub Action: visual-regression.yml | ✅ 반영 |
+| `--report pdf` / MCP `report` 인자 | ✅ 반영 |
+
+> 이 표는 배포할 때마다 실제 README를 확인해 갱신합니다. 오래된 ❌ 목록은
+> 이미 끝난 일을 남은 일처럼 보이게 만들어, 다음 배포에서 헛일을 부릅니다.
 
 ### README 업데이트 절차
 
@@ -224,7 +228,9 @@ gh pr comment 3766 --repo modelcontextprotocol/servers \
 
 | 버전 | 날짜 | 주요 변경 |
 |---|---|---|
-| 1.6.1 | 현재 | visual regression, watch mode, responsive/console/open |
+| 1.7.0 | 2026-09-19 | PDF 리포트 (`aat run --report pdf`, MCP `report` 인자), 학습 좌표 신뢰성 수정(AAT-109) |
+| 1.6.2 | — | MCP Registry 등록, 승인 우회 방지 4계층 |
+| 1.6.1 | — | visual regression, watch mode, responsive/console/open |
 | (이전) | — | Phase 1~6, Post-MVP features |
 
 > 이 문서는 기능이 추가되거나 배포 방식이 변경될 때 업데이트합니다.

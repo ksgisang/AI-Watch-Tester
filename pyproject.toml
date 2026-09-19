@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aat-devqa"
-version = "1.6.2"
+version = "1.7.0"
 description = "AWT (AI Watch Tester) — AI-powered E2E testing with self-healing DevQA loop"
 readme = "README.md"
 license = "AGPL-3.0-only"
