@@ -148,6 +148,23 @@ aat_run_skill_mode("scenarios/login.yaml", report="markdown")
 파일 위치를 그대로 알려줄 수 있습니다. 리포트 작성이 실패하더라도 종료코드는
 바뀌지 않습니다. 종료코드는 시험 결과를 말해야 하기 때문입니다.
 
+#### report_screenshots — 어느 단계의 화면을 실을지 고르기
+
+```
+aat_run("scenarios/login.yaml", report="pdf", report_screenshots="all")
+```
+
+| report_screenshots | 설명 |
+|--------------------|------|
+| `failures` | 실패·경고 단계의 화면만 싣습니다 (기본값) |
+| `all` | 스크린샷이 있는 모든 단계를 싣습니다 — 잘 돌아간 화면을 보여드릴 때 |
+| `none` | 화면을 싣지 않고 파일을 가볍게 유지합니다 |
+
+기본값에서는 모든 단계가 통과한 실행의 리포트에 사진이 한 장도 들어가지
+않습니다. 그래서 인수인계나 시연 기록처럼 "제대로 동작한다"를 보여드려야 하는
+상황이라면 `all`을 지정해야 합니다. `markdown` 리포트는 화면을 파일 안에 넣지
+않고 링크로 걸기 때문에 이 옵션의 영향을 받지 않습니다.
+
 ### DevQA Loop (스킬 모드)
 
 `aat_run_skill_mode`는 실패 시 구조화된 블록을 반환합니다:

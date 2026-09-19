@@ -168,6 +168,17 @@ long it took, and the screenshots of failed and warned steps are embedded in the
 file itself, so the PDF explains itself away from your terminal. Use
 `--report markdown` for the plain-text version instead.
 
+By default only the failed and warned steps bring their screenshots, which means
+a report of a clean run carries no pictures at all. When the point is to show
+that the product works — a hand-off, a demo, a record for someone who was not
+there — ask for all of them:
+
+```bash
+aat run scenarios/ --report pdf --report-screenshots all
+```
+
+`--report-screenshots none` goes the other way and keeps the file small.
+
 The cover follows the same rule as the exit codes: a run whose steps all passed
 but produced a warning is titled `PASS WITH WARNINGS`, never `PASS`. Printing
 uses the Chromium that Playwright already installed, so there is nothing further

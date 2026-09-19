@@ -334,6 +334,13 @@ aat run --skill-mode --fast <scenario>
   - 스킬·MCP 동일 노출: `SKILL.md`(CLI Commands·Key Flags)와 `cli-reference.md`에 `--report` 기재, MCP `aat_run`·`aat_run_skill_mode`에 `report` 인자 추가(`_run_command()` 공용 조립기)
   - 시험: HTML 단위 13개(`tests/test_reporters/test_pdf.py`), 실제 Chromium 통합 3개(`tests/integration/test_pdf_report.py`), CLI 배선 시험, MCP 명령 조립 시험 4개(`tests/test_mcp_server.py`, MCP SDK 없으면 건너뜀)
 
+- [x] **AAT-111** 리포트 실사용 결함 두 가지 수정 (대표님 시험 보고) — 완료 2026-09-19
+  - 상대 경로에서 PDF가 조용히 실패하던 문제: `Path.as_uri()`는 상대 경로를 변환하지 않고 예외를 냅니다. `reports_dir`의 **기본값이 상대 경로 `"reports"`**(`core/models.py`)이므로 절대 경로를 따로 적어 두지 않은 모든 사용자가 HTML만 받고 PDF를 받지 못했습니다. `html_path.resolve().as_uri()`로 수정
+  - 통과한 단계의 화면을 보여줄 방법이 없던 문제: `--report-screenshots failures|all|none` 신설. 리포터에는 이미 정책이 구현되어 있었으나 명령줄로 통하는 길이 없었습니다
+  - `build_reporter()`(`reporters/__init__.py`) 신설 — `run`과 `loop`이 같은 조립기를 쓰므로 형식이 옵션을 얻을 때 한쪽만 갱신되는 일이 없습니다. 형식·정책 모두 브라우저를 열기 전에 검증
+  - 세 표면 동시 반영: CLI(`aat run`·`aat loop`), 스킬(`SKILL.md`·`cli-reference.md`), MCP(`aat_run`·`aat_run_skill_mode`의 `report_screenshots` 인자)
+  - 시험: 상대 경로 통합 시험(역변이로 결함 재현 확인), `build_reporter` 단위 5개(`tests/test_reporters/test_registry.py`), CLI 정책 전달·거부 시험, MCP 조립 시험 2개 추가
+
 ---
 
 ## 협업 프로젝트 연동 (ClasRing + DSL)
@@ -381,8 +388,8 @@ aat run --skill-mode --fast <scenario>
 
 ## Current Status
 
-- **현재 단계**: PDF 리포트 기능 완료 (AAT-110)
-- **완료**: Phase 1~6 (Ultra-MVP) + AAT-060~065 + AAT-070~076 + AAT-080~081 + AAT-090~092 + AAT-093~095 + AAT-100~110 (Post-MVP)
+- **현재 단계**: PDF 리포트 기능 완료 + 실사용 결함 수정 (AAT-110~111)
+- **완료**: Phase 1~6 (Ultra-MVP) + AAT-060~065 + AAT-070~076 + AAT-080~081 + AAT-090~092 + AAT-093~095 + AAT-100~111 (Post-MVP)
 - **블로커**: 없음
 - **Python**: 3.12.12 (.venv), `source .venv/bin/activate`
 - **GitHub**: https://github.com/ksgisang/AI-Watch-Tester (public)
