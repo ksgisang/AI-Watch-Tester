@@ -131,6 +131,23 @@ aat_devqa("회원가입 테스트", url="http://localhost:3000", screenshots="be
 | `all` | 매 스텝마다 저장 |
 | `on-failure` | 실패 시에만 저장 (CI/CD 최적) |
 
+### report 옵션 — 남겨서 전달할 수 있는 리포트
+
+```
+aat_run("scenarios/login.yaml", report="pdf")
+aat_run_skill_mode("scenarios/login.yaml", report="markdown")
+```
+
+| report | 설명 |
+|--------|------|
+| `""` | 리포트를 쓰지 않음 (기본값) |
+| `pdf` | `reports/<시나리오 id>/report.pdf` — 실패·경고 단계의 스크린샷이 파일 안에 포함됨 |
+| `markdown` | 같은 위치에 `report.md` |
+
+작성된 경로는 표준 출력에 `Report: ...`로 찍히므로, 호출한 AI가 사용자에게
+파일 위치를 그대로 알려줄 수 있습니다. 리포트 작성이 실패하더라도 종료코드는
+바뀌지 않습니다. 종료코드는 시험 결과를 말해야 하기 때문입니다.
+
 ### DevQA Loop (스킬 모드)
 
 `aat_run_skill_mode`는 실패 시 구조화된 블록을 반환합니다:

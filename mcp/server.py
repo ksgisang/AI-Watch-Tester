@@ -118,6 +118,29 @@ def _format_result(result: dict[str, str | int]) -> str:
     return "\n".join(parts) if parts else "(no output)"
 
 
+def _run_command(
+    scenario_file: str,
+    verbosity: str,
+    screenshots: str,
+    report: str,
+) -> list[str]:
+    """Build the `aat run` command the two run tools share.
+
+    An empty report is left off the command line entirely: `aat run` treats the
+    absence of the flag as "write nothing", and passing an empty value would be
+    rejected as an unknown format instead.
+    """
+    cmd = [
+        "aat", "run", "--skill-mode", "--fast", "--learn",
+        f"--verbosity={verbosity}",
+        f"--screenshots={screenshots}",
+    ]
+    if report:
+        cmd.append(f"--report={report}")
+    cmd.append(scenario_file)
+    return cmd
+
+
 # ---------------------------------------------------------------------------
 # MCP Tools
 # ---------------------------------------------------------------------------
@@ -151,6 +174,7 @@ async def aat_run(
     scenario_file: str,
     verbosity: str = "concise",
     screenshots: str = "before-after",
+    report: str = "",
 ) -> str:
     """STEP 3: Run AWT test scenarios (requires prior user approval).
 
@@ -173,14 +197,13 @@ async def aat_run(
                    'detailed' (all steps including screenshots and waits). Default: 'concise'.
         screenshots: 'all' (every step), 'before-after' (action boundaries only, ~70% fewer files),
                      'on-failure' (only on failure, best for CI/CD). Default: 'before-after'.
+        report: '' (none, default), 'pdf', or 'markdown'. Writes one report per
+                scenario under reports/<scenario id>/ and prints its path. Ask for
+                'pdf' when the user wants a file to keep or to send to someone:
+                the screenshots of failed and warned steps are embedded in it.
     """
     result = await _run_cmd(
-        [
-            "aat", "run", "--skill-mode", "--fast", "--learn",
-            f"--verbosity={verbosity}",
-            f"--screenshots={screenshots}",
-            scenario_file,
-        ],
+        _run_command(scenario_file, verbosity, screenshots, report),
         timeout=180,
     )
     return _format_result(result)
@@ -191,6 +214,7 @@ async def aat_run_skill_mode(
     scenario_file: str,
     verbosity: str = "concise",
     screenshots: str = "before-after",
+    report: str = "",
 ) -> str:
     """STEP 3 (alternative): Run AWT in skill mode with structured failure diagnosis.
 
@@ -220,14 +244,13 @@ async def aat_run_skill_mode(
         scenario_file: Path to a YAML scenario file or directory.
         verbosity: 'concise' (faster) or 'detailed' (all steps). Default: 'concise'.
         screenshots: 'all', 'before-after', or 'on-failure'. Default: 'before-after'.
+        report: '' (none, default), 'pdf', or 'markdown'. Writes one report per
+                scenario under reports/<scenario id>/ and prints its path. A 'pdf'
+                report embeds the screenshots of failed and warned steps, so it
+                explains itself to someone who was not at the terminal.
     """
     result = await _run_cmd(
-        [
-            "aat", "run", "--skill-mode", "--fast", "--learn",
-            f"--verbosity={verbosity}",
-            f"--screenshots={screenshots}",
-            scenario_file,
-        ],
+        _run_command(scenario_file, verbosity, screenshots, report),
         timeout=180,
     )
     return _format_result(result)
