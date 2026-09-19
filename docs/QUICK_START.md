@@ -156,6 +156,24 @@ certainly missed its target, and the real failure would otherwise surface
 several steps later as if the product were broken. Check the screenshot for the
 warned step and the target it was given.
 
+### 6. A report you can send to someone
+
+```bash
+aat run scenarios/ --report pdf
+```
+
+This writes `reports/<scenario id>/report.pdf` after the run, alongside the
+`report.html` it was printed from. Every step is listed with its status and how
+long it took, and the screenshots of failed and warned steps are embedded in the
+file itself, so the PDF explains itself away from your terminal. Use
+`--report markdown` for the plain-text version instead.
+
+The cover follows the same rule as the exit codes: a run whose steps all passed
+but produced a warning is titled `PASS WITH WARNINGS`, never `PASS`. Printing
+uses the Chromium that Playwright already installed, so there is nothing further
+to install. `aat loop --report-format pdf` does the same for a healing loop,
+including each iteration's analysis and fix.
+
 With `--skill-mode`, a failure also prints an `=== AWT SKILL DEVQA ===` block
 for an AI tool to read. Note that `ERROR` in that block is the scenario author's
 expected outcome, while `ACTUAL_CAUSE` — present only when the two differ — is

@@ -323,6 +323,17 @@ aat run --skill-mode --fast <scenario>
   - `load_session`: 세션 나이 로그 + `max_age_min` 상한, 진단문 `session_expired`를 `auth_error`에서 분리
   - 검증: 실제 Chromium 통합 시험 12개(`tests/integration/test_learned_coords.py`) + 단위 시험, 네 가지 역변이(mutation)로 음성 시험이 실제로 잡는지 확인
 
+### Post-MVP: PDF 리포트 (AAT-110)
+
+- [x] **AAT-110** 테스트 결과를 PDF로 보고하는 기능 — 완료 2026-09-19
+  - `PDFReporter` (`src/aat/reporters/pdf.py`): Jinja2로 HTML을 렌더링한 뒤 Playwright의 `page.pdf()`로 인쇄 — 새 의존성 없음 (이미 설치된 Chromium 사용)
+  - 실패·경고 단계의 스크린샷을 base64 `data:` URI로 파일 안에 넣어, 리포트 한 장만 전달해도 내용이 설명됨 (`screenshots="failures" | "all" | "none"`)
+  - 경고가 있는 실행은 표지에 `PASS WITH WARNINGS`로 표기 — AAT-109의 원칙(헛클릭은 통과가 아니다)을 리포트 표면에서도 유지
+  - `aat run --report pdf|markdown` (시나리오별 `reports/<id>/`), `aat loop --report-format pdf|markdown`
+  - 알 수 없는 형식은 브라우저를 열기 전에 거부하고, 리포트 작성 실패는 종료코드에 영향을 주지 않음
+  - 스킬·MCP 동일 노출: `SKILL.md`(CLI Commands·Key Flags)와 `cli-reference.md`에 `--report` 기재, MCP `aat_run`·`aat_run_skill_mode`에 `report` 인자 추가(`_run_command()` 공용 조립기)
+  - 시험: HTML 단위 13개(`tests/test_reporters/test_pdf.py`), 실제 Chromium 통합 3개(`tests/integration/test_pdf_report.py`), CLI 배선 시험, MCP 명령 조립 시험 4개(`tests/test_mcp_server.py`, MCP SDK 없으면 건너뜀)
+
 ---
 
 ## 협업 프로젝트 연동 (ClasRing + DSL)
@@ -370,8 +381,8 @@ aat run --skill-mode --fast <scenario>
 
 ## Current Status
 
-- **현재 단계**: Coordinate Learning 신뢰성 수정 완료 (AAT-109)
-- **완료**: Phase 1~6 (Ultra-MVP) + AAT-060~065 + AAT-070~076 + AAT-080~081 + AAT-090~092 + AAT-093~095 + AAT-100~109 (Post-MVP)
+- **현재 단계**: PDF 리포트 기능 완료 (AAT-110)
+- **완료**: Phase 1~6 (Ultra-MVP) + AAT-060~065 + AAT-070~076 + AAT-080~081 + AAT-090~092 + AAT-093~095 + AAT-100~110 (Post-MVP)
 - **블로커**: 없음
 - **Python**: 3.12.12 (.venv), `source .venv/bin/activate`
 - **GitHub**: https://github.com/ksgisang/AI-Watch-Tester (public)

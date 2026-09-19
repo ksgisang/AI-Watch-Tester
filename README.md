@@ -291,6 +291,21 @@ aat diff scenarios/ --format=json
 
 A `.github/workflows/visual-regression.yml` template is included — drop it into your repo and every PR gets automatic visual regression comments.
 
+### PDF Reports — Something You Can Send to Someone
+
+```bash
+aat run scenarios/ --report pdf
+# → reports/<scenario id>/report.pdf  (+ the report.html it was printed from)
+
+aat loop scenarios/ --report-format pdf   # each iteration's analysis and fix too
+```
+
+Every step with its status and timing, and the screenshots of failed and warned
+steps embedded in the file — so the report explains itself outside your
+terminal. A run whose steps all passed but produced a warning is titled
+**PASS WITH WARNINGS**, never PASS. Printing uses the Chromium that Playwright
+already installed; there is no PDF library to add.
+
 ---
 
 ## What AWT Is Great At
@@ -310,6 +325,7 @@ A `.github/workflows/visual-regression.yml` template is included — drop it int
 | 📱 | **Responsive testing** | Test mobile/tablet/desktop viewports in one command (`--responsive`) |
 | 🖥️ | **Watch mode** | Auto-run tests on file save — instant feedback loop |
 | 🔍 | **Console error capture** | Catch hidden JS errors that pass visual checks (`--console`) |
+| 🧾 | **PDF reports** | `--report pdf` — every step, with failure screenshots embedded, in one file |
 
 ---
 
