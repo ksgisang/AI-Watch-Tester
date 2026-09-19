@@ -47,7 +47,20 @@ class TestRunCommand:
         cmd = server._run_command("scenarios/login.yaml", "concise", "before-after", "pdf")
 
         assert "--report=pdf" in cmd
+        assert "--report-screenshots=failures" in cmd
         assert cmd[-1] == "scenarios/login.yaml"
+
+    def test_the_screenshot_policy_is_passed_through(self, server: ModuleType) -> None:
+        """Asking through MCP for the passing steps must reach the CLI too."""
+        cmd = server._run_command("scenarios/login.yaml", "concise", "before-after", "pdf", "all")
+
+        assert "--report-screenshots=all" in cmd
+
+    def test_the_policy_stays_off_when_no_report_is_wanted(self, server: ModuleType) -> None:
+        """Without a report there is nothing to illustrate, so nothing is said."""
+        cmd = server._run_command("scenarios/login.yaml", "concise", "before-after", "", "all")
+
+        assert not any(part.startswith("--report") for part in cmd)
 
     def test_the_approval_gate_is_still_there(self, server: ModuleType) -> None:
         """--skill-mode moves approval to the tool call; it never removes it.

@@ -11,7 +11,7 @@ import typer
 from aat.adapters import ADAPTER_REGISTRY
 from aat.core.config import load_config
 from aat.core.cost import load_cost_log
-from aat.core.exceptions import AATError
+from aat.core.exceptions import AATError, ReporterError
 from aat.core.git_ops import GitOps
 from aat.core.loop import DevQALoop
 from aat.core.models import ApprovalMode, StepStatus
@@ -23,7 +23,7 @@ from aat.engine.humanizer import Humanizer
 from aat.engine.waiter import Waiter
 from aat.matchers import MATCHER_REGISTRY
 from aat.matchers.hybrid import HybridMatcher
-from aat.reporters import REPORTER_REGISTRY
+from aat.reporters import build_reporter
 
 if TYPE_CHECKING:
     from aat.core.models import (
@@ -272,10 +272,28 @@ def loop_command(
         "--report-format",
         help="Report format: markdown | pdf (printable, screenshots embedded).",
     ),
+    report_screenshots: str = typer.Option(
+        "failures",
+        "--report-screenshots",
+        help=(
+            "Which steps the PDF report illustrates: 'failures' (failed and "
+            "warned steps), 'all' (every step that has a screenshot — use this "
+            "to show what worked), or 'none'."
+        ),
+    ),
 ) -> None:
     """Run the DevQA Loop: test -> analyze -> fix -> re-test."""
     try:
-        asyncio.run(_loop(scenarios_path, config_path, max_loops, approval_mode, report_format))
+        asyncio.run(
+            _loop(
+                scenarios_path,
+                config_path,
+                max_loops,
+                approval_mode,
+                report_format,
+                report_screenshots,
+            )
+        )
     except AATError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1) from None
@@ -287,6 +305,7 @@ async def _loop(
     max_loops: int | None,
     approval_mode_str: str,
     report_format: str = "markdown",
+    report_screenshots: str = "failures",
 ) -> None:
     """Execute the DevQA Loop asynchronously."""
     # Validate approval mode
@@ -368,12 +387,10 @@ async def _loop(
     adapter = adapter_cls(config.ai)
 
     # Assemble reporter
-    reporter_cls = REPORTER_REGISTRY.get(report_format)
-    if reporter_cls is None:
-        known = ", ".join(sorted(REPORTER_REGISTRY))
-        msg = f"Unknown report format '{report_format}'. Available: {known}"
-        raise AATError(msg)
-    reporter = reporter_cls()
+    try:
+        reporter = build_reporter(report_format, report_screenshots)
+    except ReporterError as exc:
+        raise AATError(str(exc)) from exc
 
     # GitOps for branch mode
     git_ops: GitOps | None = None

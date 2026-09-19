@@ -19,6 +19,7 @@ from aat.core.models import (
     StepStatus,
     TestResult,
 )
+from aat.reporters.markdown import MarkdownReporter
 
 runner = CliRunner()
 
@@ -70,6 +71,23 @@ def test_unknown_report_format_stops_before_the_browser_opens() -> None:
     assert result.exit_code == 1
     assert "powerpoint" in result.output
     assert "pdf" in result.output
+
+
+def test_both_commands_offer_the_screenshot_policy() -> None:
+    """Showing what worked is a request the report has to be able to answer."""
+    assert "--report-screenshots" in _flags("run")
+    assert "--report-screenshots" in _flags("loop")
+
+
+def test_unknown_screenshot_policy_stops_before_the_browser_opens() -> None:
+    """A misspelt policy is caught with the format, not after the run."""
+    result = runner.invoke(
+        app,
+        ["run", "/nonexistent/scenarios", "--report", "pdf", "--report-screenshots", "everything"],
+    )
+    assert result.exit_code == 1
+    assert "everything" in result.output
+    assert "failures" in result.output
 
 
 class TestBuildTestResult:
@@ -163,6 +181,26 @@ class TestWriteReports:
 
         assert (tmp_path / "SC-002" / "report.md").exists()
         assert "SC-001" in capsys.readouterr().err
+
+    async def test_the_screenshot_policy_reaches_the_reporter(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Asked for every screenshot, the run must not quietly report failures only.
+
+        Checked here rather than on the PDF itself because the policy travels
+        through the command, and it is the command that used to drop it.
+        """
+        asked: list[tuple[str, str]] = []
+
+        def _record(report_format: str, screenshots: str = "failures") -> Any:
+            asked.append((report_format, screenshots))
+            return MarkdownReporter()
+
+        monkeypatch.setattr("aat.cli.commands.run_cmd.build_reporter", _record)
+
+        await _write_reports("pdf", [self._result("SC-001")], tmp_path, "all")
+
+        assert asked == [("pdf", "all")]
 
 
 class TestExitCode:

@@ -17,7 +17,7 @@ from aat.core.diagnosis import (
     format_diagnosis,
     format_skill_diagnosis,
 )
-from aat.core.exceptions import AATError
+from aat.core.exceptions import AATError, ReporterError
 from aat.core.models import FIND_ACTIONS, Scenario, StepResult, StepStatus, TestResult
 from aat.core.platform_detect import detect_platform, format_platform_info
 from aat.core.scenario_loader import load_scenarios
@@ -28,7 +28,7 @@ from aat.engine.humanizer import Humanizer
 from aat.engine.waiter import Waiter
 from aat.matchers import MATCHER_REGISTRY
 from aat.matchers.hybrid import HybridMatcher
-from aat.reporters import REPORTER_REGISTRY
+from aat.reporters import build_reporter
 
 # -- Browser overlay JS ---------------------------------------------------
 
@@ -282,6 +282,15 @@ def run_command(
             "'markdown'. Omit for no report."
         ),
     ),
+    report_screenshots: str = typer.Option(
+        "failures",
+        "--report-screenshots",
+        help=(
+            "Which steps the PDF report illustrates: 'failures' (failed and "
+            "warned steps), 'all' (every step that has a screenshot — use this "
+            "to show what worked), or 'none'."
+        ),
+    ),
 ) -> None:
     """Run test scenarios."""
     try:
@@ -301,6 +310,7 @@ def run_command(
                 screenshots,
                 not no_learn,
                 report,
+                report_screenshots,
             )
         )
     except AATError as e:
@@ -336,17 +346,18 @@ async def _write_reports(
     report_format: str,
     results: list[TestResult],
     reports_dir: Path,
+    screenshots: str = "failures",
 ) -> None:
     """Write one report per scenario under reports_dir/<scenario id>/.
 
     A report never decides the run: if one cannot be written, that is said out
     loud and the exit code still reflects the test rather than the paperwork.
     """
-    reporter_cls = REPORTER_REGISTRY.get(report_format)
-    if reporter_cls is None:  # validated before the run; kept as a guard
+    try:
+        reporter = build_reporter(report_format, screenshots)
+    except ReporterError:  # validated before the run; kept as a guard
         return
 
-    reporter = reporter_cls()
     for result in results:
         try:
             written = await reporter.generate(result, reports_dir / result.scenario_id)
@@ -403,6 +414,7 @@ async def _run(
     screenshots_override: str | None = None,
     learn_coords: bool = True,
     report_format: str | None = None,
+    report_screenshots: str = "failures",
 ) -> None:
     # Internal approval bypass: validated via one-time token from parent process.
     # Parent (devqa/watch) generates a token, stores it on disk, passes via env var.
@@ -462,12 +474,14 @@ async def _run(
         else:
             config.engine.screenshot_mode = screenshots_override
 
-    # Reject an unknown report format before the browser opens, not after the
-    # run — the report is the reason the person asked for it.
-    if report_format is not None and report_format not in REPORTER_REGISTRY:
-        known = ", ".join(sorted(REPORTER_REGISTRY))
-        msg = f"Unknown report format '{report_format}'. Available: {known}"
-        raise AATError(msg)
+    # Reject an unusable report request before the browser opens, not after the
+    # run — the report is the reason the person asked for it. Building the
+    # reporter now is what checks both the format and the screenshot policy.
+    if report_format is not None:
+        try:
+            build_reporter(report_format, report_screenshots)
+        except ReporterError as exc:
+            raise AATError(str(exc)) from exc
 
     # Apply slow_mo: CLI override > config > auto (100 for headed, 0 for headless)
     # None means "not set" — auto-apply 100 for headed mode.
@@ -1066,7 +1080,9 @@ async def _run(
 
     # -- Reports --------------------------------------------------------------
     if report_format and test_results:
-        await _write_reports(report_format, test_results, Path(config.reports_dir))
+        await _write_reports(
+            report_format, test_results, Path(config.reports_dir), report_screenshots
+        )
 
     # -- Learn mode: compare with previous run --------------------------------
     run_data = _save_run_result(config.data_dir, scenarios_path, all_results)

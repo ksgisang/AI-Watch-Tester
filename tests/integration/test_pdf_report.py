@@ -59,6 +59,22 @@ async def test_generate_writes_a_real_pdf(tmp_path: Path) -> None:
     assert "Click 채점" in html
 
 
+async def test_a_relative_output_directory_still_prints(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The shape the product ships with: reports_dir defaults to "reports".
+
+    Every other test here passes an absolute tmp_path, which is how a relative
+    path reaching `Path.as_uri()` — where it raises rather than converting —
+    went unnoticed: the HTML was written and only the printing failed.
+    """
+    monkeypatch.chdir(tmp_path)
+
+    written = await PDFReporter().generate(_result(), Path("reports") / "SC-001")
+
+    assert written.read_bytes().startswith(b"%PDF-")
+
+
 async def test_a_directory_that_does_not_exist_yet_is_created(tmp_path: Path) -> None:
     written = await PDFReporter().generate(_result(), tmp_path / "reports" / "SC-001")
     assert written.exists()

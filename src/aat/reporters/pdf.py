@@ -442,7 +442,11 @@ class PDFReporter(BaseReporter):
                 browser = await pw.chromium.launch(headless=True)
                 try:
                     page = await browser.new_page()
-                    await page.goto(html_path.as_uri(), wait_until="load")
+                    # Resolve before asking for a URI: a relative path raises
+                    # rather than converting, and reports_dir defaults to the
+                    # relative "reports", so the default configuration would
+                    # write the HTML and then fail to print it.
+                    await page.goto(html_path.resolve().as_uri(), wait_until="load")
                     await page.pdf(
                         path=str(pdf_path),
                         format="A4",
