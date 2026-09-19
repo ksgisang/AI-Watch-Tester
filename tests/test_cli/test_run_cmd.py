@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from typing import cast
+
+import click
+import typer.main
 from typer.testing import CliRunner
 
 from aat.cli.commands.run_cmd import _exit_code
@@ -24,11 +28,18 @@ def test_run_command_exists() -> None:
     assert "scenarios" in result.output.lower() or "SCENARIOS_PATH" in result.output
 
 
-def test_run_help_shows_no_learn() -> None:
-    """The switch that turns remembered coordinates off is discoverable."""
-    result = runner.invoke(app, ["run", "--help"])
-    assert result.exit_code == 0
-    assert "--no-learn" in result.output
+def test_run_offers_no_learn() -> None:
+    """The switch that turns remembered coordinates off is on the command.
+
+    Read off the command rather than out of --help: the rendered help box is
+    laid out for whatever terminal width the suite happens to run at, so a
+    narrow one wraps or clips the option column and the switch vanishes from
+    the text while still being perfectly usable.
+    """
+    group = cast(click.Group, typer.main.get_command(app))
+    run_cmd = group.commands["run"]
+    flags = {name for param in run_cmd.params for name in param.opts}
+    assert "--no-learn" in flags
 
 
 class TestExitCode:
