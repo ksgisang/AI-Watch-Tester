@@ -221,6 +221,14 @@ def run_command(
         "--learn",
         help="Learn from fixes: record previously failed steps that now pass.",
     ),
+    no_learn: bool = typer.Option(
+        False,
+        "--no-learn",
+        help=(
+            "Do not read or write remembered coordinates for this run "
+            "(every target is found from scratch)."
+        ),
+    ),
     skill_mode: bool = typer.Option(
         False,
         "--skill-mode",
@@ -281,11 +289,38 @@ def run_command(
                 speed,
                 verbosity,
                 screenshots,
+                not no_learn,
             )
         )
     except AATError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1) from None
+
+
+def _exit_code(
+    *,
+    had_critical: bool,
+    total_failed: int,
+    total_skipped: int,
+    total_warned: int,
+    strict_mode: bool,
+) -> int:
+    """Decide what the process tells the pipeline that called it.
+
+    2 critical, 1 failed, 3 warnings, 0 clean. A warning outranks a clean exit
+    on purpose: a step that changed nothing on screen is the one case that used
+    to be reported as passed, which is how a real failure reached a person as
+    "the product is broken" instead of "the click missed".
+
+    Skips only count as a failure under --strict.
+    """
+    if had_critical:
+        return 2
+    if total_failed > 0 or (total_skipped > 0 and strict_mode):
+        return 1
+    if total_warned > 0:
+        return 3
+    return 0
 
 
 async def _run(
@@ -301,6 +336,7 @@ async def _run(
     speed_override: str | None = None,
     verbosity_override: str | None = None,
     screenshots_override: str | None = None,
+    learn_coords: bool = True,
 ) -> None:
     # Internal approval bypass: validated via one-time token from parent process.
     # Parent (devqa/watch) generates a token, stores it on disk, passes via env var.
@@ -495,7 +531,10 @@ async def _run(
         ai_adapter=ai_adapter,
         ai_verify_steps=config.ai.step_verify,
         ai_verify_critical_only=config.ai.step_verify_critical_only,
+        learn_coords=learn_coords,
     )
+    if not learn_coords:
+        typer.echo("  (--no-learn: remembered coordinates are neither used nor updated)")
 
     # Skill-mode attempt tracking
     skill_attempt = 1
@@ -518,6 +557,8 @@ async def _run(
     total_failed = 0
     total_steps = 0
     total_skipped = 0
+    total_warned = 0
+    warnings: list[str] = []  # steps that ran but changed nothing
     had_critical = False
     passed_scenarios: set[str] = set()
     failed_scenarios: set[str] = set()
@@ -745,6 +786,15 @@ async def _run(
                 elif result.status == StepStatus.SKIPPED:
                     total_skipped += 1
                     status_str = typer.style("SKIPPED", fg=typer.colors.YELLOW)
+                elif result.status == StepStatus.WARNING:
+                    # The action ran without error but nothing on screen moved.
+                    # Not a pass: report it, and let the exit code carry it.
+                    total_warned += 1
+                    warnings.append(
+                        f"{scenario.id} step {result.step} "
+                        f"({result.action.value}): {result.error_message}"
+                    )
+                    status_str = typer.style("WARNING", fg=typer.colors.YELLOW)
                 else:
                     total_failed += 1
                     scenario_failed = True
@@ -772,6 +822,8 @@ async def _run(
                         icon = "✅"
                     elif result.status == StepStatus.SKIPPED:
                         icon = "⏭️"
+                    elif result.status == StepStatus.WARNING:
+                        icon = "⚠️"
                     else:
                         icon = "❌"
                     typer.echo(
@@ -905,10 +957,26 @@ async def _run(
     if had_critical:
         fail_label += " (critical)"
     parts = [f"{total_passed} passed", fail_label]
+    if total_warned > 0:
+        parts.append(f"{total_warned} warning")
     if total_skipped > 0:
         parts.append(f"{total_skipped} skipped")
     parts.append(f"{total_steps} steps total")
     typer.echo(f"\nSummary: {', '.join(parts)}")
+
+    if warnings:
+        typer.echo(
+            typer.style(
+                "\nWarnings — these steps ran but changed nothing on screen:",
+                fg=typer.colors.YELLOW,
+            )
+        )
+        for w in warnings:
+            typer.echo(typer.style(f"  ⚠ {w}", fg=typer.colors.YELLOW))
+        typer.echo(
+            "  A click that moves nothing usually means it missed its target. "
+            "Check the screenshots for those steps."
+        )
 
     # -- Learn mode: compare with previous run --------------------------------
     run_data = _save_run_result(config.data_dir, scenarios_path, all_results)
@@ -919,14 +987,36 @@ async def _run(
     if skill_mode:
         _save_skill_attempt(config.data_dir, scenarios_path, skill_attempt, total_failed)
 
-    # Exit code: critical → 2, failed → 1, skipped → 0 (unless --strict)
-    has_failure = total_failed > 0
-    has_skip = total_skipped > 0
-    if had_critical:
-        raise typer.Exit(code=2)
-    if has_failure or (has_skip and strict_mode):
-        raise typer.Exit(code=1)
-    elif skill_mode:
+    code = _exit_code(
+        had_critical=had_critical,
+        total_failed=total_failed,
+        total_skipped=total_skipped,
+        total_warned=total_warned,
+        strict_mode=strict_mode,
+    )
+    if code in (1, 2):
+        raise typer.Exit(code=code)
+    if code == 3:
+        if skill_mode:
+            warn_lines = [
+                "",
+                "=== AWT SKILL VERIFY ===",
+                f"STATUS: WARNINGS ({total_warned} of {total_steps} steps changed nothing)",
+                f"SCENARIO: {scenarios_path}",
+            ]
+            if final_screenshot_path:
+                warn_lines.append(f"FINAL_SCREENSHOT: {final_screenshot_path}")
+            warn_lines += [f"WARNING: {w}" for w in warnings]
+            warn_lines += [
+                "ACTION: Do not report this run as passed. A step that changed "
+                "nothing usually clicked the wrong place — check its screenshot "
+                "and the target it was given.",
+                "========================",
+                "",
+            ]
+            typer.echo("\n".join(warn_lines))
+        raise typer.Exit(code=3)
+    if skill_mode:
         # All passed — output verification block + reset counter
         _save_skill_attempt(config.data_dir, scenarios_path, 0, 0)
         verify_lines = [

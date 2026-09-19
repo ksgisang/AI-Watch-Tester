@@ -19,6 +19,85 @@ learn_app = typer.Typer(
 )
 
 
+def _reset_coords(target: str | None, config_path: str | None) -> None:
+    """Delete remembered coordinates, by target name or all of them."""
+    try:
+        cfg = load_config(config_path=Path(config_path) if config_path else None)
+        data_dir = cfg.data_dir
+    except Exception:
+        data_dir = ".aat"
+
+    db_path = Path(data_dir) / "learned.db"
+    if not db_path.exists():
+        typer.echo("Nothing to reset — no learning database yet.")
+        return
+
+    from aat.learning.store import LearnedStore
+
+    store = LearnedStore(db_path)
+    deleted = store.forget_coords(target)
+    scope = f"'{target}'" if target else "every target"
+    if deleted:
+        typer.echo(
+            typer.style(
+                f"  ✓ Forgot {deleted} remembered coordinate(s) for {scope}.",
+                fg=typer.colors.GREEN,
+            )
+        )
+    else:
+        typer.echo(f"  No remembered coordinates for {scope}.")
+
+
+@learn_app.callback(invoke_without_command=True)
+def learn_main(
+    ctx: typer.Context,
+    reset: str | None = typer.Option(
+        None,
+        "--reset",
+        help="Forget the remembered coordinates of one target (by name or selector).",
+    ),
+    reset_all: bool = typer.Option(
+        False,
+        "--reset-all",
+        help="Forget every remembered coordinate.",
+    ),
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Config file path."),
+) -> None:
+    """Learning data management."""
+    if ctx.invoked_subcommand is not None:
+        return
+    if reset is not None or reset_all:
+        _reset_coords(None if reset_all else reset, config_path)
+        return
+    typer.echo(ctx.get_help())
+
+
+@learn_app.command("reset")
+def learn_reset(
+    target: str | None = typer.Argument(
+        None,
+        help="Target name or selector to forget. Omit with --all to forget everything.",
+    ),
+    all_targets: bool = typer.Option(False, "--all", help="Forget every remembered coordinate."),
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Config file path."),
+) -> None:
+    """Forget coordinates AWT remembered for a target.
+
+    Positions learned from an earlier run are only a fallback, but a stale one
+    keeps a step clicking an empty spot. Reset it after the UI moves.
+    """
+    if target is None and not all_targets:
+        typer.echo(
+            typer.style(
+                "Give a target name, or --all to forget every remembered coordinate.",
+                fg=typer.colors.RED,
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    _reset_coords(None if all_targets else target, config_path)
+
+
 def _collect_images(path: Path) -> list[Path]:
     """Collect image files from a path (file or directory).
 

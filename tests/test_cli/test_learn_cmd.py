@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path  # noqa: TC003
 from unittest.mock import MagicMock, patch
 
-from typer.testing import CliRunner
+from typer.testing import CliRunner, Result
 
 from aat.cli.main import app
 
@@ -166,3 +166,77 @@ def test_learn_add_with_store(tmp_path: Path) -> None:
         result = runner.invoke(app, ["learn", "add", str(img_file)])
         assert result.exit_code == 0
         assert mock_save.called
+
+
+class TestLearnReset:
+    """Forgetting a remembered position without opening the database by hand."""
+
+    def _store_with_coords(self, tmp_path: Path) -> Path:
+        from aat.learning.store import LearnedStore
+
+        data_dir = tmp_path / ".aat"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        store = LearnedStore(data_dir / "learned.db")
+        store.save_state_coords("채점", "modal", 300, 660)
+        store.save_state_coords("로그인", "normal", 120, 240)
+        return data_dir
+
+    def _invoke(self, data_dir: Path, args: list[str]) -> Result:
+        with patch("aat.cli.commands.learn_cmd.load_config") as mock_config:
+            mock_config.return_value = MagicMock(data_dir=str(data_dir))
+            return runner.invoke(app, args)
+
+    def test_reset_by_name_forgets_only_that_target(self, tmp_path: Path) -> None:
+        from aat.learning.store import LearnedStore
+
+        data_dir = self._store_with_coords(tmp_path)
+
+        result = self._invoke(data_dir, ["learn", "reset", "채점"])
+
+        assert result.exit_code == 0
+        store = LearnedStore(data_dir / "learned.db")
+        assert store.find_state_coords("채점", "modal") is None
+        assert store.find_state_coords("로그인", "normal") is not None
+
+    def test_reset_all_forgets_everything(self, tmp_path: Path) -> None:
+        from aat.learning.store import LearnedStore
+
+        data_dir = self._store_with_coords(tmp_path)
+
+        result = self._invoke(data_dir, ["learn", "reset", "--all"])
+
+        assert result.exit_code == 0
+        store = LearnedStore(data_dir / "learned.db")
+        assert store.list_state_coords() == []
+
+    def test_reset_without_a_target_refuses(self, tmp_path: Path) -> None:
+        """Deleting everything has to be asked for, not fallen into."""
+        from aat.learning.store import LearnedStore
+
+        data_dir = self._store_with_coords(tmp_path)
+
+        result = self._invoke(data_dir, ["learn", "reset"])
+
+        assert result.exit_code == 1
+        store = LearnedStore(data_dir / "learned.db")
+        assert len(store.list_state_coords()) == 2
+
+    def test_reset_option_on_the_group_works_too(self, tmp_path: Path) -> None:
+        """`aat learn --reset <name>`, the spelling the bug report asked for."""
+        from aat.learning.store import LearnedStore
+
+        data_dir = self._store_with_coords(tmp_path)
+
+        result = self._invoke(data_dir, ["learn", "--reset", "채점"])
+
+        assert result.exit_code == 0
+        store = LearnedStore(data_dir / "learned.db")
+        assert store.find_state_coords("채점", "modal") is None
+
+    def test_unknown_target_says_so_without_failing(self, tmp_path: Path) -> None:
+        data_dir = self._store_with_coords(tmp_path)
+
+        result = self._invoke(data_dir, ["learn", "reset", "없는버튼"])
+
+        assert result.exit_code == 0
+        assert "No remembered coordinates" in result.output
