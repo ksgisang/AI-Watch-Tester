@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Any
 
-import click
 import typer.main
 from typer.testing import CliRunner
 
@@ -36,7 +35,7 @@ def test_run_offers_no_learn() -> None:
     narrow one wraps or clips the option column and the switch vanishes from
     the text while still being perfectly usable.
     """
-    group = cast(click.Group, typer.main.get_command(app))
+    group: Any = typer.main.get_command(app)
     run_cmd = group.commands["run"]
     flags = {name for param in run_cmd.params for name in param.opts}
     assert "--no-learn" in flags
