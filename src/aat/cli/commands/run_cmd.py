@@ -18,7 +18,7 @@ from aat.core.diagnosis import (
     format_skill_diagnosis,
 )
 from aat.core.exceptions import AATError
-from aat.core.models import FIND_ACTIONS, Scenario, StepResult, StepStatus
+from aat.core.models import FIND_ACTIONS, Scenario, StepResult, StepStatus, TestResult
 from aat.core.platform_detect import detect_platform, format_platform_info
 from aat.core.scenario_loader import load_scenarios
 from aat.engine import ENGINE_REGISTRY
@@ -28,6 +28,7 @@ from aat.engine.humanizer import Humanizer
 from aat.engine.waiter import Waiter
 from aat.matchers import MATCHER_REGISTRY
 from aat.matchers.hybrid import HybridMatcher
+from aat.reporters import REPORTER_REGISTRY
 
 # -- Browser overlay JS ---------------------------------------------------
 
@@ -272,6 +273,15 @@ def run_command(
             "'on-failure' (failure steps only, CI/CD optimized)."
         ),
     ),
+    report: str | None = typer.Option(
+        None,
+        "--report",
+        help=(
+            "Write a report per scenario under the reports directory: "
+            "'pdf' (printable, screenshots of failed steps embedded) or "
+            "'markdown'. Omit for no report."
+        ),
+    ),
 ) -> None:
     """Run test scenarios."""
     try:
@@ -290,11 +300,66 @@ def run_command(
                 verbosity,
                 screenshots,
                 not no_learn,
+                report,
             )
         )
     except AATError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1) from None
+
+
+def _build_test_result(
+    scenario: Scenario,
+    steps: list[StepResult],
+    elapsed_ms: float,
+) -> TestResult:
+    """Collect what a scenario did into the shape a reporter reads.
+
+    Warned steps are counted neither as passed nor as failed here; the report
+    shows them on their own, because that is the whole point of the status.
+    """
+    passed = sum(1 for s in steps if s.status == StepStatus.PASSED)
+    failed = sum(1 for s in steps if s.status in (StepStatus.FAILED, StepStatus.ERROR))
+    return TestResult(
+        scenario_id=scenario.id,
+        scenario_name=scenario.name,
+        passed=failed == 0,
+        steps=steps,
+        total_steps=len(steps),
+        passed_steps=passed,
+        failed_steps=failed,
+        duration_ms=elapsed_ms,
+    )
+
+
+async def _write_reports(
+    report_format: str,
+    results: list[TestResult],
+    reports_dir: Path,
+) -> None:
+    """Write one report per scenario under reports_dir/<scenario id>/.
+
+    A report never decides the run: if one cannot be written, that is said out
+    loud and the exit code still reflects the test rather than the paperwork.
+    """
+    reporter_cls = REPORTER_REGISTRY.get(report_format)
+    if reporter_cls is None:  # validated before the run; kept as a guard
+        return
+
+    reporter = reporter_cls()
+    for result in results:
+        try:
+            written = await reporter.generate(result, reports_dir / result.scenario_id)
+        except Exception as exc:
+            typer.echo(
+                typer.style(
+                    f"  Report not written for {result.scenario_id}: {exc}",
+                    fg=typer.colors.YELLOW,
+                ),
+                err=True,
+            )
+            continue
+        typer.echo(f"  Report: {written}")
 
 
 def _exit_code(
@@ -337,6 +402,7 @@ async def _run(
     verbosity_override: str | None = None,
     screenshots_override: str | None = None,
     learn_coords: bool = True,
+    report_format: str | None = None,
 ) -> None:
     # Internal approval bypass: validated via one-time token from parent process.
     # Parent (devqa/watch) generates a token, stores it on disk, passes via env var.
@@ -395,6 +461,13 @@ async def _run(
             )
         else:
             config.engine.screenshot_mode = screenshots_override
+
+    # Reject an unknown report format before the browser opens, not after the
+    # run — the report is the reason the person asked for it.
+    if report_format is not None and report_format not in REPORTER_REGISTRY:
+        known = ", ".join(sorted(REPORTER_REGISTRY))
+        msg = f"Unknown report format '{report_format}'. Available: {known}"
+        raise AATError(msg)
 
     # Apply slow_mo: CLI override > config > auto (100 for headed, 0 for headless)
     # None means "not set" — auto-apply 100 for headed mode.
@@ -563,6 +636,7 @@ async def _run(
     passed_scenarios: set[str] = set()
     failed_scenarios: set[str] = set()
     all_results: list[dict[str, str]] = []  # step-level results for learning
+    test_results: list[TestResult] = []  # per-scenario results, for --report
     nav_warnings: list[str] = []  # nav-zone click warnings for skill-mode
     platform_detected = False
     try:
@@ -638,6 +712,7 @@ async def _run(
             scenario_start = time.monotonic()
             scenario_failed = False
             critical_failure = False
+            scenario_steps: list[StepResult] = []  # kept for the report
 
             # Resolve scenario-level vars at execution time (handles env refs set after load)
             if scenario.vars:
@@ -684,6 +759,17 @@ async def _run(
                         # .detail = author's message + the real cause underneath
                         _crit_detail = getattr(_crit_err, "detail", "") or str(_crit_err)
 
+                        # A step that stopped the run belongs in the report too,
+                        # and it is the one the reader opens the report for.
+                        _crit_result = StepResult(
+                            step=step.step,
+                            action=step.action,
+                            status=StepStatus.FAILED,
+                            description=step.description,
+                            error_message=getattr(_crit_err, "message", "") or str(_crit_err),
+                        )
+                        scenario_steps.append(_crit_result)
+
                         if skill_mode:
                             typer.echo(
                                 f"[AWT] ❌ {step.step}/{total_scenario_steps} "
@@ -706,14 +792,7 @@ async def _run(
                             try:
                                 diag = await collect_failure_context(
                                     engine,
-                                    StepResult(
-                                        step=step.step,
-                                        action=step.action,
-                                        status=StepStatus.FAILED,
-                                        description=step.description,
-                                        error_message=getattr(_crit_err, "message", "")
-                                        or str(_crit_err),
-                                    ),
+                                    _crit_result,
                                     str(path),
                                     config.data_dir,
                                     # Classification must key off the real cause,
@@ -755,6 +834,8 @@ async def _run(
                                 pass
                     except Exception:
                         pass
+
+                scenario_steps.append(result)
 
                 # Track for learning
                 all_results.append(
@@ -913,6 +994,11 @@ async def _run(
             scenario_elapsed = (time.monotonic() - scenario_start) * 1000
             typer.echo(f"  Scenario completed in {scenario_elapsed:.0f}ms")
 
+            if report_format:
+                test_results.append(
+                    _build_test_result(scenario, scenario_steps, scenario_elapsed)
+                )
+
             if scenario_failed:
                 failed_scenarios.add(scenario.id)
                 if critical_failure:
@@ -977,6 +1063,10 @@ async def _run(
             "  A click that moves nothing usually means it missed its target. "
             "Check the screenshots for those steps."
         )
+
+    # -- Reports --------------------------------------------------------------
+    if report_format and test_results:
+        await _write_reports(report_format, test_results, Path(config.reports_dir))
 
     # -- Learn mode: compare with previous run --------------------------------
     run_data = _save_run_result(config.data_dir, scenarios_path, all_results)

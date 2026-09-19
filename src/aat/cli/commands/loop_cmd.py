@@ -267,10 +267,15 @@ def loop_command(
         "-a",
         help="Approval mode: manual | branch | auto.",
     ),
+    report_format: str = typer.Option(
+        "markdown",
+        "--report-format",
+        help="Report format: markdown | pdf (printable, screenshots embedded).",
+    ),
 ) -> None:
     """Run the DevQA Loop: test -> analyze -> fix -> re-test."""
     try:
-        asyncio.run(_loop(scenarios_path, config_path, max_loops, approval_mode))
+        asyncio.run(_loop(scenarios_path, config_path, max_loops, approval_mode, report_format))
     except AATError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1) from None
@@ -281,6 +286,7 @@ async def _loop(
     config_path: str | None,
     max_loops: int | None,
     approval_mode_str: str,
+    report_format: str = "markdown",
 ) -> None:
     """Execute the DevQA Loop asynchronously."""
     # Validate approval mode
@@ -362,9 +368,10 @@ async def _loop(
     adapter = adapter_cls(config.ai)
 
     # Assemble reporter
-    reporter_cls = REPORTER_REGISTRY.get("markdown")
+    reporter_cls = REPORTER_REGISTRY.get(report_format)
     if reporter_cls is None:
-        msg = "Markdown reporter not found"
+        known = ", ".join(sorted(REPORTER_REGISTRY))
+        msg = f"Unknown report format '{report_format}'. Available: {known}"
         raise AATError(msg)
     reporter = reporter_cls()
 
