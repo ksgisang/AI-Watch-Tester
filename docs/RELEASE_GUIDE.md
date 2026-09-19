@@ -11,7 +11,7 @@
 | 2 | **PyPI** (aat-devqa) | 반자동 | `git tag v*` → push → CI가 빌드+업로드 |
 | 3 | **README.md** | 수동 | 기능 추가 시 직접 수정 후 커밋 |
 | 4 | **Anthropic Skills PR** | 수동 | PR 업데이트 또는 새 PR 생성 |
-| 5 | **MCP Servers PR** | 수동 | PR 업데이트 또는 새 PR 생성 |
+| 5 | **MCP Registry** | 수동 | `awt-skill/server.json` 버전 올림 → `mcp-publisher publish` |
 
 ---
 
@@ -181,25 +181,39 @@ gh pr comment 822 --repo anthropics/skills --body "Updated to match AWT v1.X.X"
 
 ---
 
-## 5. MCP Servers PR 업데이트
+## 5. MCP Registry 갱신 (기존 "MCP Servers PR"을 대체)
 
 ### 현황
-- 저장소: `modelcontextprotocol/servers`
-- PR: #3766
-- 상태: 리뷰 대기 중 (2026-04-04 기준)
+- `modelcontextprotocol/servers` PR #3766은 **2026-04-14에 닫혔습니다.**
+  그 저장소가 서드파티 서버 목록을 README에서 폐지하고 MCP Registry로
+  일원화했기 때문입니다(해당 저장소 이슈 #3950). **PR을 갱신할 대상이 더는
+  없으므로, 그쪽에 커밋하거나 코멘트를 달 필요가 없습니다.**
+- 대신 AWT는 Registry에 `io.github.ksgisang/awt`로 등록되어 있습니다.
+- 매니페스트 위치: `awt-skill/server.json` (**하위 모듈**입니다)
 
 ### 절차
 
 ```bash
-# 1. 해당 포크에서 수정
-# mcp/server.py 도구 정의 동기화
+# 1. PyPI 배포가 끝난 뒤에 진행합니다.
+#    매니페스트가 PyPI 패키지 버전을 가리키므로, 없는 버전을 가리키면 안 됩니다.
 
-# 2. 커밋 & 푸시 → PR 자동 업데이트
+# 2. awt-skill/server.json의 두 곳을 모두 새 버전으로 올립니다.
+#    - 최상위 "version"
+#    - packages[0]."version"  ← 빠뜨리기 쉬움
 
-# 3. PR에 코멘트
-gh pr comment 3766 --repo modelcontextprotocol/servers \
-  --body "Updated: added responsive/console/open parameters"
+# 3. 하위 모듈에서 먼저 커밋·푸시한 뒤, 부모의 포인터를 올립니다.
+git -C awt-skill add server.json && git -C awt-skill commit && git -C awt-skill push
+git add awt-skill && git commit -m "chore: move the skill pointer to ..." && git push
+
+# 4. 게시 (토큰은 만료됩니다 — 401이 나오면 다시 로그인)
+./mcp-publisher login github
+./mcp-publisher publish
 ```
+
+### ⚠️ 주의
+- `mcp-publisher login github`은 브라우저 인증이 필요한 **대화형** 절차입니다.
+  AI 에이전트가 대신 수행할 수 없으니, 사용자가 직접 실행해야 합니다.
+- `mcp-publisher` 실행 파일은 저장소에 커밋되어 있지 않습니다(19MB 바이너리).
 
 ---
 
@@ -219,7 +233,7 @@ gh pr comment 3766 --repo modelcontextprotocol/servers \
 - [ ] lee-to-kim summary 업데이트 (협업 시)
 - [ ] PyPI 버전 범프 + 태그 (배포 조건 충족 시)
 - [ ] Anthropic Skills PR 동기화 (MCP 변경 시)
-- [ ] MCP Servers PR 동기화 (MCP 변경 시)
+- [ ] MCP Registry 갱신 (MCP 변경 시, PyPI 배포 이후)
 ```
 
 ---
