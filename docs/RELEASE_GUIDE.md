@@ -11,7 +11,7 @@
 | 2 | **PyPI** (aat-devqa) | 반자동 | `git tag v*` → push → CI가 빌드+업로드 |
 | 3 | **README.md** | 수동 | 기능 추가 시 직접 수정 후 커밋 |
 | 4 | **Anthropic Skills PR** | 수동 | PR 업데이트 또는 새 PR 생성 |
-| 5 | **MCP Registry** | 수동 | `awt-skill/server.json` 버전 올림 → `mcp-publisher publish` |
+| 5 | **MCP Registry** | 자동 | `awt-skill/server.json` 버전 올려 푸시 → OIDC 워크플로가 게시 |
 
 ---
 
@@ -193,27 +193,39 @@ gh pr comment 822 --repo anthropics/skills --body "Updated to match AWT v1.X.X"
 
 ### 절차
 
+**게시는 자동입니다.** `awt-skill/.github/workflows/publish-mcp.yml`이
+`server.json` 변경이 main에 푸시되면 게시합니다. 인증은 GitHub Actions의 OIDC라
+저장할 비밀값도, 만료되는 로그인도 없습니다. 사람이 할 일은 버전을 올리는 것뿐입니다.
+
 ```bash
 # 1. PyPI 배포가 끝난 뒤에 진행합니다.
 #    매니페스트가 PyPI 패키지 버전을 가리키므로, 없는 버전을 가리키면 안 됩니다.
+#    (워크플로가 이 조건을 검사해서 어기면 게시를 막습니다.)
 
 # 2. awt-skill/server.json의 두 곳을 모두 새 버전으로 올립니다.
 #    - 최상위 "version"
-#    - packages[0]."version"  ← 빠뜨리기 쉬움
+#    - packages[0]."version"  ← 빠뜨리기 쉬움 (워크플로가 불일치를 잡습니다)
 
-# 3. 하위 모듈에서 먼저 커밋·푸시한 뒤, 부모의 포인터를 올립니다.
+# 3. 하위 모듈에서 커밋·푸시하면 워크플로가 게시합니다.
 git -C awt-skill add server.json && git -C awt-skill commit && git -C awt-skill push
+
+# 4. 부모의 하위 모듈 포인터를 올립니다.
 git add awt-skill && git commit -m "chore: move the skill pointer to ..." && git push
 
-# 4. 게시 (토큰은 만료됩니다 — 401이 나오면 다시 로그인)
-./mcp-publisher login github
-./mcp-publisher publish
+# 5. 결과 확인
+gh run list --repo ksgisang/awt-skill --workflow publish-mcp.yml --limit 1
+curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.ksgisang/awt"
 ```
 
 ### ⚠️ 주의
-- `mcp-publisher login github`은 브라우저 인증이 필요한 **대화형** 절차입니다.
-  AI 에이전트가 대신 수행할 수 없으니, 사용자가 직접 실행해야 합니다.
-- `mcp-publisher` 실행 파일은 저장소에 커밋되어 있지 않습니다(19MB 바이너리).
+- 워크플로가 실패했을 때만 `gh workflow run publish-mcp.yml --repo ksgisang/awt-skill`로
+  다시 돌립니다.
+- 로컬 `mcp-publisher` 바이너리는 더 이상 필요하지 않습니다(저장소에 커밋되어
+  있지도 않습니다). `login github`은 브라우저 인증이라 AI 에이전트가 대신 할 수
+  없었고, 토큰이 만료되어 게시를 건너뛰는 일이 실제로 있었습니다. 그래서
+  자동화했습니다.
+- 과거에 `1.6.3` 항목이 PyPI `1.6.2`를 가리킨 채 등록된 적이 있습니다. 워크플로의
+  두 검사(버전 일치·PyPI 존재)는 정확히 그 사고를 막기 위한 것입니다.
 
 ---
 
