@@ -5,9 +5,15 @@ Uses mock dependencies to test all ActionType dispatching.
 
 from __future__ import annotations
 
+import itertools
+import logging
+import os
+import time
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
+import cv2
+import numpy as np
 import pytest
 
 from aat.core.exceptions import StepExecutionError
@@ -23,10 +29,26 @@ from aat.core.models import (
 from aat.engine.executor import _SYNONYMS, StepExecutor, _parse_coordinates, _parse_scroll_params
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 
 # ─── Fixtures ────────────────────────────────────────────────
+
+
+def _png(shade: int) -> bytes:
+    """A real PNG the executor's change detection can decode."""
+    return bytes(cv2.imencode(".png", np.full((40, 40), shade, dtype=np.uint8))[1])
+
+
+def _screen_that_reacts() -> Callable[[], bytes]:
+    """Screenshots that differ from one call to the next.
+
+    The executor now judges a click by whether the screen moved, so a mock that
+    returns one frozen image is claiming every click did nothing.
+    """
+    shades = itertools.cycle((0, 255))
+    return lambda: _png(next(shades))
 
 
 @pytest.fixture
@@ -42,7 +64,7 @@ def mock_engine() -> MagicMock:
     engine.scroll = AsyncMock()
     engine.go_back = AsyncMock()
     engine.refresh = AsyncMock()
-    engine.screenshot = AsyncMock(return_value=b"png_data")
+    engine.screenshot = AsyncMock(side_effect=_screen_that_reacts())
     engine.save_screenshot = AsyncMock()
     engine.get_page_text = AsyncMock(return_value="Page text")
     engine.get_url = AsyncMock(return_value="https://example.com/page")
@@ -348,7 +370,7 @@ class TestFindAndClickScreenCoords:
         engine = MagicMock()
         engine.find_on_screen = AsyncMock(return_value=(500, 300))
         engine.click_on_screen = AsyncMock()
-        engine.screenshot = AsyncMock(return_value=b"png")
+        engine.screenshot = AsyncMock(side_effect=_screen_that_reacts())
         engine.save_screenshot = AsyncMock()
         engine.find_text_position = AsyncMock(return_value=None)
         executor = StepExecutor(
@@ -384,7 +406,7 @@ class TestFindAndClickScreenCoords:
         engine = MagicMock()
         engine.find_on_screen = AsyncMock(return_value=None)
         engine.click = AsyncMock()
-        engine.screenshot = AsyncMock(return_value=b"png")
+        engine.screenshot = AsyncMock(side_effect=_screen_that_reacts())
         engine.save_screenshot = AsyncMock()
         engine.find_text_position = AsyncMock(return_value=None)
         engine._config = MagicMock(fast_mode=False)
@@ -754,7 +776,7 @@ class TestSynonymFallback:
         engine.find_text_position = AsyncMock(side_effect=[None, (150, 250)])
         engine.click = AsyncMock()
         engine.type_text = AsyncMock()
-        engine.screenshot = AsyncMock(return_value=b"png")
+        engine.screenshot = AsyncMock(side_effect=_screen_that_reacts())
         engine.save_screenshot = AsyncMock()
         del engine.find_on_screen
 
@@ -815,7 +837,7 @@ class TestScrollToTopFallback:
         engine.find_text_position = AsyncMock(side_effect=[None, None, None, None, (200, 300)])
         engine.scroll_to_top = AsyncMock()
         engine.click = AsyncMock()
-        engine.screenshot = AsyncMock(return_value=b"png")
+        engine.screenshot = AsyncMock(side_effect=_screen_that_reacts())
         engine.save_screenshot = AsyncMock()
         del engine.find_on_screen
         del engine.force_click_by_text
@@ -853,7 +875,7 @@ class TestForceClickFallback:
         engine.scroll_to_top = AsyncMock()
         engine.force_click_by_text = AsyncMock(return_value=True)
         engine.type_text = AsyncMock()
-        engine.screenshot = AsyncMock(return_value=b"png")
+        engine.screenshot = AsyncMock(side_effect=_screen_that_reacts())
         engine.save_screenshot = AsyncMock()
         del engine.find_on_screen
 
@@ -889,7 +911,7 @@ class TestForceClickFallback:
         engine.scroll_to_top = AsyncMock()
         engine.force_click_by_text = AsyncMock(return_value=True)
         engine.type_text = AsyncMock()
-        engine.screenshot = AsyncMock(return_value=b"png")
+        engine.screenshot = AsyncMock(side_effect=_screen_that_reacts())
         engine.save_screenshot = AsyncMock()
         del engine.find_on_screen
 
@@ -932,7 +954,7 @@ class TestWaitForLoadState:
 
         engine = MagicMock()
         engine.navigate = AsyncMock()
-        engine.screenshot = AsyncMock(return_value=b"png")
+        engine.screenshot = AsyncMock(side_effect=_screen_that_reacts())
         engine.save_screenshot = AsyncMock()
         engine.page = page
 
@@ -972,7 +994,7 @@ class TestWaitForLoadState:
 
         engine = MagicMock()
         engine.navigate = AsyncMock()
-        engine.screenshot = AsyncMock(return_value=b"png")
+        engine.screenshot = AsyncMock(side_effect=_screen_that_reacts())
         engine.save_screenshot = AsyncMock()
         engine.page = page
 
@@ -1011,7 +1033,7 @@ class TestWaitForLoadState:
 
         engine = MagicMock()
         engine.navigate = AsyncMock()
-        engine.screenshot = AsyncMock(return_value=b"png")
+        engine.screenshot = AsyncMock(side_effect=_screen_that_reacts())
         engine.save_screenshot = AsyncMock()
         engine.page = page
 
@@ -1049,7 +1071,7 @@ class TestWaitForLoadState:
 
         engine = MagicMock()
         engine.navigate = AsyncMock()
-        engine.screenshot = AsyncMock(return_value=b"png")
+        engine.screenshot = AsyncMock(side_effect=_screen_that_reacts())
         engine.save_screenshot = AsyncMock()
         engine.page = page
 
@@ -1091,7 +1113,7 @@ class TestWaitForLoadState:
 
         engine = MagicMock()
         engine.navigate = AsyncMock()
-        engine.screenshot = AsyncMock(return_value=b"png")
+        engine.screenshot = AsyncMock(side_effect=_screen_that_reacts())
         engine.save_screenshot = AsyncMock()
         engine.page = page
 
@@ -1183,7 +1205,7 @@ class TestPostNavigateRedirect:
     def _engine_on(url: str) -> MagicMock:
         engine = MagicMock()
         engine.navigate = AsyncMock()
-        engine.screenshot = AsyncMock(return_value=b"png")
+        engine.screenshot = AsyncMock(side_effect=_screen_that_reacts())
         engine.save_screenshot = AsyncMock()
         page = MagicMock()
         page.url = url
@@ -1222,3 +1244,101 @@ class TestPostNavigateRedirect:
         step = make_step(ActionType.NAVIGATE, value="https://app.test/")
 
         await ex._check_post_navigate_redirect(step)  # must not raise
+
+
+class TestLoadSessionAge:
+    """load_session: how old the reused session is, and when that is too old.
+
+    A saved session that the server has already ended looks exactly like a
+    wrong password from the outside, which is why the age has to be said out
+    loud and why a step can put a ceiling on it.
+    """
+
+    def _executor(self, engine: MagicMock, tmp_path: Path) -> StepExecutor:
+        return StepExecutor(
+            engine=engine,
+            matcher=MagicMock(find=AsyncMock(return_value=MatchResult(found=True, x=1, y=1))),
+            humanizer=MagicMock(move_to=AsyncMock(), type_text=AsyncMock()),
+            waiter=MagicMock(wait_until_stable=AsyncMock(return_value=True)),
+            comparator=MagicMock(check=AsyncMock(), check_assert=AsyncMock()),
+            screenshot_dir=tmp_path / "screenshots",
+        )
+
+    def _session_file(self, tmp_path: Path, *, age_min: float) -> Path:
+        path = tmp_path / "sessions" / "haneul.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"cookies": []}')
+        stamp = time.time() - age_min * 60
+        os.utime(path, (stamp, stamp))
+        return path
+
+    def _step(self, max_age_min: int | None = None) -> StepConfig:
+        return StepConfig(
+            step=1,
+            action=ActionType.LOAD_SESSION,
+            name="haneul",
+            description="Reuse the signed-in session",
+            max_age_min=max_age_min,
+        )
+
+    @pytest.mark.asyncio
+    async def test_age_is_reported_when_the_session_loads(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        self._session_file(tmp_path, age_min=21)
+        engine = MagicMock(load_session=AsyncMock())
+        executor = self._executor(engine, tmp_path)
+
+        with caplog.at_level(logging.INFO, logger="aat.engine.executor"):
+            await executor._handle_load_session(self._step())
+
+        engine.load_session.assert_awaited_once()
+        assert "21 minutes ago" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_session_past_the_cap_fails_at_that_step(self, tmp_path: Path) -> None:
+        session = self._session_file(tmp_path, age_min=40)
+        engine = MagicMock(load_session=AsyncMock())
+        executor = self._executor(engine, tmp_path)
+
+        with pytest.raises(StepExecutionError) as exc:
+            await executor._handle_load_session(self._step(max_age_min=15))
+
+        message = str(exc.value)
+        assert "too old" in message
+        assert "40 minutes ago" in message
+        assert str(session) in message  # says which file to stop reusing
+        engine.load_session.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_session_within_the_cap_still_loads(self, tmp_path: Path) -> None:
+        self._session_file(tmp_path, age_min=5)
+        engine = MagicMock(load_session=AsyncMock())
+        executor = self._executor(engine, tmp_path)
+
+        await executor._handle_load_session(self._step(max_age_min=15))
+
+        engine.load_session.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_no_cap_leaves_an_old_session_alone(self, tmp_path: Path) -> None:
+        """Without max_age_min the old 24h rule is all that applies."""
+        self._session_file(tmp_path, age_min=200)
+        engine = MagicMock(load_session=AsyncMock())
+        executor = self._executor(engine, tmp_path)
+
+        await executor._handle_load_session(self._step())
+
+        engine.load_session.assert_awaited_once()
+
+    def test_the_failure_does_not_point_at_the_credentials(self, tmp_path: Path) -> None:
+        """The message has to route to the session, not to the password."""
+        from aat.core.diagnosis import classify_failure
+
+        session = self._session_file(tmp_path, age_min=40)
+        message = (
+            f"saved session 'haneul' is too old: saved 40 minutes ago, max_age_min=15. "
+            f"The service has probably ended it — log in again instead of reusing {session}."
+        )
+
+        assert classify_failure(message) == "session_expired"

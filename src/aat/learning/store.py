@@ -14,6 +14,12 @@ from aat.core.models import LearnedElement
 
 logger = logging.getLogger(__name__)
 
+# A remembered coordinate is only reused while it is still trusted. Each click
+# that turns out to do nothing knocks COORD_PENALTY off; below this floor the
+# row is deleted rather than tried again.
+MIN_COORD_CONFIDENCE = 0.5
+COORD_PENALTY = 0.3
+
 _CREATE_TABLE = """\
 CREATE TABLE IF NOT EXISTS learned_elements (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -773,6 +779,9 @@ class LearnedStore:
     ) -> tuple[int, int, float] | None:
         """Find coordinates for target in given page state.
 
+        Rows whose confidence has decayed below MIN_COORD_CONFIDENCE are
+        ignored: a coordinate that stopped working must not keep being tried.
+
         Returns (x, y, confidence) or None.
         """
         try:
@@ -780,11 +789,11 @@ class LearnedStore:
                 """\
                 SELECT correct_x, correct_y, confidence
                 FROM state_coords
-                WHERE target_name=? AND page_state=?
+                WHERE target_name=? AND page_state=? AND confidence>=?
                 ORDER BY use_count DESC
                 LIMIT 1
                 """,
-                (target_name, page_state),
+                (target_name, page_state, MIN_COORD_CONFIDENCE),
             ).fetchone()
             if row:
                 return row["correct_x"], row["correct_y"], row["confidence"]
@@ -833,6 +842,104 @@ class LearnedStore:
             self._conn.commit()
         except sqlite3.Error:
             pass
+
+    def penalize_coords(
+        self,
+        target_name: str,
+        page_state: str | None = None,
+        penalty: float = COORD_PENALTY,
+    ) -> int:
+        """Lower the confidence of remembered coordinates that did not work.
+
+        Called when a click on a remembered position produced no screen change.
+        Rows falling below MIN_COORD_CONFIDENCE are deleted, so the next run
+        searches for the element again instead of repeating the same mistake.
+
+        Args:
+            target_name: Target whose memory is suspect.
+            page_state: Restrict to one page state, or None for every state.
+            penalty: Confidence subtracted from each matching row.
+
+        Returns:
+            Number of rows deleted.
+        """
+        now = datetime.now(UTC).isoformat()
+        try:
+            if page_state is None:
+                self._conn.execute(
+                    "UPDATE state_coords SET confidence=confidence-?, updated_at=? "
+                    "WHERE target_name=?",
+                    (penalty, now, target_name),
+                )
+            else:
+                self._conn.execute(
+                    "UPDATE state_coords SET confidence=confidence-?, updated_at=? "
+                    "WHERE target_name=? AND page_state=?",
+                    (penalty, now, target_name, page_state),
+                )
+            cursor = self._conn.execute(
+                "DELETE FROM state_coords WHERE target_name=? AND confidence<?",
+                (target_name, MIN_COORD_CONFIDENCE),
+            )
+            deleted = cursor.rowcount or 0
+            self._conn.execute(
+                "UPDATE learned_elements SET confidence=confidence-? WHERE target_name=?",
+                (penalty, target_name),
+            )
+            cursor = self._conn.execute(
+                "DELETE FROM learned_elements WHERE target_name=? AND confidence<?",
+                (target_name, MIN_COORD_CONFIDENCE),
+            )
+            deleted += cursor.rowcount or 0
+            self._conn.commit()
+        except sqlite3.Error as exc:
+            logger.warning("penalize_coords failed: %s", exc)
+            return 0
+        return deleted
+
+    def list_state_coords(self) -> list[dict[str, Any]]:
+        """List every remembered coordinate, most-used first."""
+        try:
+            cursor = self._conn.execute(
+                "SELECT target_name, page_state, correct_x, correct_y, "
+                "confidence, use_count, updated_at FROM state_coords "
+                "ORDER BY use_count DESC, target_name"
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        except sqlite3.Error as exc:
+            logger.warning("list_state_coords failed: %s", exc)
+            return []
+
+    def forget_coords(self, target_name: str | None = None) -> int:
+        """Delete remembered coordinates by target name (all of them if None).
+
+        Returns:
+            Number of rows deleted across state_coords and learned_elements.
+        """
+        try:
+            if target_name is None:
+                deleted = self._conn.execute("DELETE FROM state_coords").rowcount or 0
+                deleted += self._conn.execute("DELETE FROM learned_elements").rowcount or 0
+            else:
+                deleted = (
+                    self._conn.execute(
+                        "DELETE FROM state_coords WHERE target_name=?",
+                        (target_name,),
+                    ).rowcount
+                    or 0
+                )
+                deleted += (
+                    self._conn.execute(
+                        "DELETE FROM learned_elements WHERE target_name=?",
+                        (target_name,),
+                    ).rowcount
+                    or 0
+                )
+            self._conn.commit()
+        except sqlite3.Error as exc:
+            msg = f"forget_coords failed: {exc}"
+            raise LearningError(msg) from exc
+        return deleted
 
     # -- Test strategies --------------------------------------------------------
 

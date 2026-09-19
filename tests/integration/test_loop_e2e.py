@@ -7,10 +7,13 @@ mocking only external dependencies (Playwright, Claude API).
 
 from __future__ import annotations
 
+import itertools
 import os
 from pathlib import Path
 from unittest.mock import AsyncMock
 
+import cv2
+import numpy as np
 import pytest
 import yaml
 from typer.testing import CliRunner
@@ -226,6 +229,16 @@ class TestScenarioLoading:
 # ── StepExecutor E2E ─────────────────────────────────────────────────────────
 
 
+def _reacting_screen() -> object:
+    """Screenshots that differ between calls.
+
+    A click is now judged by whether the screen moved, so a mock returning one
+    frozen frame would be asserting that every click did nothing.
+    """
+    shades = itertools.cycle((0, 255))
+    return lambda: bytes(cv2.imencode(".png", np.full((40, 40), next(shades), dtype=np.uint8))[1])
+
+
 class TestStepExecutorE2E:
     """Test StepExecutor with mock engine/matcher but real comparator/waiter."""
 
@@ -234,7 +247,7 @@ class TestStepExecutorE2E:
         from unittest.mock import MagicMock
 
         engine = AsyncMock()
-        engine.screenshot = AsyncMock(return_value=b"\x89PNG_fake_screenshot")
+        engine.screenshot = AsyncMock(side_effect=_reacting_screen())
         engine.click = AsyncMock()
         engine.type_text = AsyncMock()
         engine.navigate = AsyncMock()

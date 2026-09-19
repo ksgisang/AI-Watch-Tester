@@ -128,6 +128,7 @@ class StepStatus(StrEnum):
     PENDING = "pending"
     RUNNING = "running"
     PASSED = "passed"
+    WARNING = "warning"
     FAILED = "failed"
     SKIPPED = "skipped"
     ERROR = "error"
@@ -419,9 +420,14 @@ class StepConfig(BaseModel):
         default=FindMethod.AUTO,
         description="Matching method: auto (3-tier fallback), template, ocr, vision",
     )
-    learn: bool = Field(
-        default=True,
-        description="Save successful match to pattern DB for future runs",
+    learn: bool | None = Field(
+        default=None,
+        description=(
+            "Remember this target (matched position and method) for future runs. "
+            "Set false for targets whose position follows the content — modal "
+            "buttons, choice overlays on images, list rows. "
+            "None = inherit the run-level setting (`aat run --no-learn` turns it off)."
+        ),
     )
     fallback: bool = Field(
         default=True,
@@ -513,6 +519,14 @@ class StepConfig(BaseModel):
             "Wait for page load state after action: "
             "'networkidle' | 'load' | 'domcontentloaded'. "
             "networkidle waits until no network requests for 500ms."
+        ),
+    )
+    max_age_min: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "For load_session: fail this step if the saved session is older "
+            "than N minutes (the server may have expired it already)."
         ),
     )
 

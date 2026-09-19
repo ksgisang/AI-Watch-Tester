@@ -94,8 +94,9 @@ class TestSeverity:
 
 class TestStepStatus:
     def test_all_values(self) -> None:
-        assert len(StepStatus) == 6
+        assert len(StepStatus) == 7
         assert StepStatus.PASSED == "passed"
+        assert StepStatus.WARNING == "warning"
         assert StepStatus.ERROR == "error"
 
 

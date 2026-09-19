@@ -90,6 +90,11 @@ _SCREENSHOT_WORTHY_ACTIONS: frozenset[ActionType] = frozenset(
     }
 )
 
+# Below this share of changed pixels, a click is taken to have done nothing at
+# all — it is the "clicked empty space" signal, well under the transition
+# thresholds, which a focus ring or a checkbox tick still clears.
+_NO_EFFECT_RATIO = 0.001
+
 # Steps skipped entirely in concise verbosity mode
 _CONCISE_SKIP_ACTIONS: frozenset[ActionType] = frozenset(
     {
@@ -193,6 +198,7 @@ class StepExecutor:
         ai_adapter: Any = None,
         ai_verify_steps: bool = False,
         ai_verify_critical_only: bool = True,
+        learn_coords: bool = True,
     ) -> None:
         self._engine = engine
         self._matcher = matcher
@@ -207,6 +213,11 @@ class StepExecutor:
         self._ai_verify_critical_only = ai_verify_critical_only
         self._runtime_vars: dict[str, str] = {}  # save_as runtime variables
         self._scenario_vars: dict[str, str] = {}  # scenario-level vars (resolved at exec time)
+        self._learn_coords = learn_coords  # run-level switch (`aat run --no-learn`)
+        self._current_page_state: str = "normal"
+        # Coordinates waiting for proof that the click did something.
+        # Written only after post-action verification confirms a change.
+        self._pending_learn: dict[str, Any] | None = None
         self._iframe_locator: Any = None  # for iframe direct click
         self._iframe_frame: Any = None
         self._found_frame: Any = None  # frame where if_visible found target
@@ -226,6 +237,8 @@ class StepExecutor:
         """
         start = time.monotonic()
         screenshots: dict[str, str | None] = {"before": None, "after": None}
+
+        self._pending_learn = None
 
         try:
             # 0. Resolve runtime variables in step fields
@@ -282,11 +295,23 @@ class StepExecutor:
                     match_result.y,
                 )
 
-            # 2.6. Post-action verification
+            # 2.6. Post-action verification.
+            # effect_ok: True = the screen changed, False = the action did
+            # nothing, None = nothing measurable for this action.
+            effect_ok: bool | None = None
             if step.expect:
                 await self._verify_expect(step)
+                effect_ok = True
             elif self._should_verify_change(step):
-                await self._verify_click_effect(step)
+                effect_ok = await self._verify_click_effect(step)
+
+            # Only a click we saw work is worth remembering.
+            await self._settle_pending_learn(effect_ok)
+
+            # A click that moved nothing is not a pass. Navigation is judged by
+            # its URL instead: its pixel threshold is coarse enough that a plain
+            # page can clear it without anything being wrong.
+            no_effect = effect_ok is False and step.action in self._WARN_ON_NO_EFFECT
 
             # 3. POST-STEP SCREENSHOT VERIFICATION
             # Take screenshot after every action and verify the step
@@ -312,8 +337,14 @@ class StepExecutor:
             result = StepResult(
                 step=step.step,
                 action=step.action,
-                status=StepStatus.PASSED,
+                status=(StepStatus.WARNING if no_effect else StepStatus.PASSED),
                 description=step.description,
+                error_message=(
+                    "the click produced no visible change on screen — "
+                    "it probably missed its target"
+                    if no_effect
+                    else None
+                ),
                 match_result=match_result,
                 screenshot_before=screenshots["before"],
                 screenshot_after=screenshots["after"],
@@ -325,6 +356,10 @@ class StepExecutor:
         except (StepExecutionError, MatchError) as e:
             elapsed = (time.monotonic() - start) * 1000
             status = StepStatus.SKIPPED if step.optional else StepStatus.FAILED
+
+            # The step failed, so whatever position it clicked is not worth
+            # remembering — and if it came from memory, that memory is wrong.
+            await self._settle_pending_learn(False)
 
             # Record failure
             fail_result = StepResult(
@@ -802,45 +837,92 @@ class StepExecutor:
             await self._engine.key_combo("Control", "a")
             await self._engine.press_key("Delete")
 
-        # Auto-save successful coordinates for learning
-        if self._learned_store and x > 0 and y > 0:
+        # Remember the coordinates *provisionally*. Nothing is written to the
+        # learning store until post-action verification shows the click had an
+        # effect — see _settle_pending_learn().
+        if self._learned_store and self._learn_allowed(step) and x > 0 and y > 0:
             t_name = ""
             if step.target:
                 t_name = step.target.text or step.target.selector or ""
             if t_name:
-                # Wait for UI to settle after action (error messages, etc.)
-                await asyncio.sleep(_get_preset(self._engine)["ui_settle"])
-                # Detect state AFTER action + settle
-                post_state = await self._detect_page_state()
-                self._current_page_state = post_state
-                logger.info(
-                    "Learning: '%s' at (%d,%d) state=%s",
-                    t_name,
-                    x,
-                    y,
-                    post_state,
-                )
-                self._learned_store.save_or_update_by_name(
-                    t_name,
-                    x,
-                    y,
-                    confidence,
-                )
-                self._learned_store.save_state_coords(
-                    t_name,
-                    post_state,
-                    x,
-                    y,
-                    confidence,
-                )
+                self._pending_learn = {
+                    "name": t_name,
+                    "x": x,
+                    "y": y,
+                    "confidence": confidence,
+                    "from_learned": False,
+                }
 
         return result
+
+    def _learn_allowed(self, step: StepConfig) -> bool:
+        """Whether coordinates may be read from / written to the store.
+
+        `aat run --no-learn` turns it off for the whole run; `learn: false` on a
+        step turns it off for that step (modal buttons, choice overlays, list
+        rows — targets whose position follows the content).
+        """
+        if not self._learn_coords:
+            return False
+        return step.learn is not False
+
+    async def _settle_pending_learn(self, effect_ok: bool | None) -> None:
+        """Commit or discard the coordinates the last action proposed.
+
+        Args:
+            effect_ok: True  — verification saw the screen change.
+                       False — verification saw no change (the click did nothing).
+                       None  — nothing was measured; keep the old behaviour and save.
+        """
+        pending = self._pending_learn
+        self._pending_learn = None
+        if not pending or not self._learned_store:
+            return
+
+        name = str(pending["name"])
+        x, y = int(pending["x"]), int(pending["y"])
+
+        if effect_ok is False:
+            # The click landed somewhere that did nothing. Never store that, and
+            # weaken whatever we already stored — that row is what sent us here.
+            logger.warning(
+                "[AWT] not learning '%s' at (%d,%d): the click had no effect",
+                name,
+                x,
+                y,
+            )
+            with contextlib.suppress(Exception):
+                removed = self._learned_store.penalize_coords(
+                    name,
+                    self._current_page_state,
+                )
+                if removed:
+                    logger.warning(
+                        "[AWT] forgot the stored coordinates for '%s' (they no longer work)",
+                        name,
+                    )
+            return
+
+        post_state = await self._detect_page_state()
+        self._current_page_state = post_state
+        confidence = float(pending["confidence"])
+        logger.info("Learning: '%s' at (%d,%d) state=%s", name, x, y, post_state)
+        with contextlib.suppress(Exception):
+            self._learned_store.save_or_update_by_name(name, x, y, confidence)
+            self._learned_store.save_state_coords(
+                name,
+                post_state,
+                x,
+                y,
+                confidence,
+            )
 
     async def _find_and_act(self, step: StepConfig) -> MatchResult:
         """Find target and perform action: wait → match → action.
 
         Fallback chain:
-        0. CSS selector (highest priority — from crawl observation data)
+        0. CSS selector (highest priority — what the scenario named explicitly)
+        0.4 learned coordinates (only when there is no selector, or it missed)
         1. find_text_position (+ synonyms)
         2. scroll_to_top + retry find_text_position
         3. force_click_by_text (JS click, bypasses sticky headers)
@@ -873,58 +955,6 @@ class StepExecutor:
                         best["success"],
                         best["fail"],
                     )
-
-        # Priority -1: State-aware learned coordinates
-        if target_name and self._learned_store and step.method.value == "auto":
-            page_state = await self._detect_page_state()
-            coords = self._learned_store.find_state_coords(
-                target_name,
-                page_state,
-            )
-            if coords:
-                lx, ly, lconf = coords
-                logger.info(
-                    "Learned[%s]: '%s' at (%d,%d) conf=%.2f",
-                    page_state,
-                    target_name,
-                    lx,
-                    ly,
-                    lconf,
-                )
-                try:
-                    result = await self._act_at_pos(
-                        step,
-                        lx,
-                        ly,
-                        confidence=lconf,
-                    )
-                    # Success — reinforce
-                    self._learned_store.save_state_coords(
-                        target_name,
-                        page_state,
-                        lx,
-                        ly,
-                        lconf,
-                    )
-                    return result
-                except Exception:
-                    logger.info(
-                        "Learned[%s] coords stale, re-scanning",
-                        page_state,
-                    )
-
-            # Fallback: try state-agnostic learned coords
-            learned = self._learned_store.find_by_name(target_name)
-            if learned and learned.confidence >= 0.8:
-                try:
-                    return await self._act_at_pos(
-                        step,
-                        learned.correct_x,
-                        learned.correct_y,
-                        confidence=learned.confidence,
-                    )
-                except Exception:
-                    logger.info("Learned coords failed, falling through")
 
         # Priority 0: CSS selector (from observation data)
         # When both selector and text are provided, filter by text
@@ -1038,6 +1068,67 @@ class StepExecutor:
                     pass
                 if attempt < 2:
                     await asyncio.sleep(0.5)
+
+        # Priority 0.4: State-aware learned coordinates.
+        # Deliberately *after* the selector: a coordinate we guessed from an
+        # earlier run must never override an element the scenario named itself.
+        # Learned coordinates are the fallback for targets with no selector, or
+        # when the selector matched nothing.
+        if (
+            target_name
+            and self._learned_store
+            and step.method.value == "auto"
+            and self._learn_allowed(step)
+        ):
+            page_state = await self._detect_page_state()
+            coords = self._learned_store.find_state_coords(
+                target_name,
+                page_state,
+            )
+            if coords:
+                lx, ly, lconf = coords
+                logger.info(
+                    "Learned[%s]: '%s' at (%d,%d) conf=%.2f",
+                    page_state,
+                    target_name,
+                    lx,
+                    ly,
+                    lconf,
+                )
+                try:
+                    result = await self._act_at_pos(
+                        step,
+                        lx,
+                        ly,
+                        confidence=lconf,
+                    )
+                except Exception:
+                    logger.info(
+                        "Learned[%s] coords stale, re-scanning",
+                        page_state,
+                    )
+                else:
+                    # Reinforced only once the step's verification passes.
+                    if self._pending_learn:
+                        self._pending_learn["from_learned"] = True
+                    return result
+
+            # Fallback: try state-agnostic learned coords
+            learned = self._learned_store.find_by_name(target_name)
+            if learned and learned.confidence >= 0.8:
+                try:
+                    result = await self._act_at_pos(
+                        step,
+                        learned.correct_x,
+                        learned.correct_y,
+                        confidence=learned.confidence,
+                    )
+                except Exception:
+                    logger.info("Learned coords failed, falling through")
+                else:
+                    if self._pending_learn:
+                        self._pending_learn["from_learned"] = True
+                    return result
 
         # Priority 0.5: Enhanced input finding for find_and_type
         if step.action == ActionType.FIND_AND_TYPE and hasattr(self._engine, "page"):
@@ -1181,7 +1272,7 @@ class StepExecutor:
                 search_screenshot,
                 method=step.method.value,
                 fallback=step.fallback,
-                learn=step.learn,
+                learn=self._learn_allowed(step),
             )
         else:
             match_result = await self._matcher.find(target, search_screenshot)
@@ -1412,17 +1503,44 @@ class StepExecutor:
         # Check expiry (24h default)
         import os
 
-        age_hours = (time.time() - os.path.getmtime(session_path)) / 3600
-        if age_hours > 24:
-            logger.info("Session '%s' expired (%.0fh old)", session_name, age_hours)
+        age_min = (time.time() - os.path.getmtime(session_path)) / 60
+        age_text = self._format_age(age_min)
+        if age_min > 24 * 60:
+            logger.info("Session '%s' expired (saved %s)", session_name, age_text)
             session_path.unlink(missing_ok=True)
             return
 
+        # Step-level cap: the service may end an idle session long before the
+        # file looks stale, and a dead session looks exactly like a wrong
+        # password to whoever reads the failure.
+        if step.max_age_min is not None and age_min > step.max_age_min:
+            msg = (
+                f"saved session '{session_name}' is too old: saved {age_text}, "
+                f"max_age_min={step.max_age_min}. "
+                f"The service has probably ended it — log in again instead of "
+                f"reusing {session_path}."
+            )
+            logger.error("[AWT] %s", msg)
+            raise StepExecutionError(
+                msg,
+                step=step.step,
+                action=step.action.value,
+            )
+
         if hasattr(self._engine, "load_session"):
             await self._engine.load_session(str(session_path))
-            logger.info("Session loaded: %s (%.1fh old)", session_path, age_hours)
+            logger.info("Session loaded: %s — saved %s", session_path, age_text)
         else:
             logger.warning("Engine does not support load_session")
+
+    @staticmethod
+    def _format_age(age_min: float) -> str:
+        """Render a session age the way a person would say it."""
+        if age_min < 1:
+            return "less than a minute ago"
+        if age_min < 60:
+            return f"{age_min:.0f} minutes ago"
+        return f"{age_min / 60:.1f} hours ago"
 
     def _resolve_runtime_vars(self, step: StepConfig) -> StepConfig:
         """Substitute {{var}} in step fields from runtime + env vars."""
@@ -2338,6 +2456,18 @@ class StepExecutor:
         }
     )
 
+    # Actions reported as WARNING when they demonstrably changed nothing.
+    # Clicks only: a click that moves no pixel did nothing, whereas navigation
+    # is verified by URL and its 50% threshold misfires on sparse pages.
+    _WARN_ON_NO_EFFECT: frozenset[ActionType] = frozenset(
+        {
+            ActionType.FIND_AND_CLICK,
+            ActionType.FIND_AND_DOUBLE_CLICK,
+            ActionType.FIND_AND_RIGHT_CLICK,
+            ActionType.CLICK_AT,
+        }
+    )
+
     # Default change thresholds per action type
     _CRITICAL_THRESHOLDS: dict[ActionType, float] = {
         ActionType.NAVIGATE: 0.50,
@@ -2661,16 +2791,25 @@ class StepExecutor:
         # --- Vision AI step verification (last check, after OCR/URL checks) ---
         await self._ai_verify_step(step, screenshot)
 
-    async def _verify_click_effect(self, step: StepConfig) -> None:
+    async def _verify_click_effect(self, step: StepConfig) -> bool | None:
         """Verify every click caused a screen change.
 
         - critical step: FAILED if no change (raises error)
-        - normal step: WARNING log (still PASSED, but flagged)
+        - normal step: the step is reported WARNING, not PASSED
 
         Polls up to 3 times (1s interval) for transitions.
+
+        A click is only called ineffective when *nothing at all* moved
+        (< _NO_EFFECT_RATIO). Ticking a checkbox or focusing a field repaints a
+        few hundred pixels — far under the transition threshold, but clearly not
+        a click that missed. Warning on those would make warnings worth ignoring.
+
+        Returns:
+            True if the screen changed, False if it demonstrably did not,
+            None if there was nothing to compare against.
         """
         if self._last_screenshot is None:
-            return
+            return None
 
         best_ratio = 0.0
         threshold = self._get_critical_threshold(step)
@@ -2687,7 +2826,7 @@ class StepExecutor:
                     "[AWT] click verify: %.1f%% change — OK",
                     best_ratio * 100,
                 )
-                return
+                return True
 
             await asyncio.sleep(poll_interval)
 
@@ -2704,14 +2843,23 @@ class StepExecutor:
                 step=step.step,
                 action=step.action.value,
             )
-        else:
-            # Non-critical: WARNING only (step still PASSED)
+        if best_ratio < _NO_EFFECT_RATIO:
+            # Nothing moved. Reported WARNING (not PASSED), so the run summary
+            # and the exit code carry it out of the log.
             logger.warning(
-                "[AWT] click had no visible effect (%.1f%% change, "
-                "threshold %.1f%%). Step PASSED but may be a false positive.",
+                "[AWT] %s changed nothing on screen (%.2f%% of pixels)",
+                step.action.value,
                 best_ratio * 100,
-                threshold * 100,
             )
+            return False
+
+        logger.info(
+            "[AWT] %s changed %.2f%% of the screen, under the %.1f%% threshold",
+            step.action.value,
+            best_ratio * 100,
+            threshold * 100,
+        )
+        return True
 
     def _get_critical_threshold(self, step: StepConfig) -> float:
         """Get the change threshold for a critical step."""
