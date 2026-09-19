@@ -254,6 +254,7 @@ curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.ks
 
 | 버전 | 날짜 | 주요 변경 |
 |---|---|---|
+| 1.7.1 | 2026-09-19 | 상대 경로 `reports_dir`에서 PDF가 인쇄되지 않던 결함 수정, `--report-screenshots failures\|all\|none` 신설 |
 | 1.7.0 | 2026-09-19 | PDF 리포트 (`aat run --report pdf`, MCP `report` 인자), 학습 좌표 신뢰성 수정(AAT-109) |
 | 1.6.2 | — | MCP Registry 등록, 승인 우회 방지 4계층 |
 | 1.6.1 | — | visual regression, watch mode, responsive/console/open |
