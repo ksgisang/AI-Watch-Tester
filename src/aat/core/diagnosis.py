@@ -40,8 +40,16 @@ _INVESTIGATION_CHECKLISTS: dict[str, list[str]] = {
     ],
     "auth_error": [
         "Verify login credentials in the scenario",
-        "Check if the session/token has expired",
         "Check if the auth API endpoint has changed",
+        "Check the response body — the server usually says which field it rejected",
+    ],
+    "session_expired": [
+        "The credentials are not in question — a saved session was reused and "
+        "the server no longer accepts it",
+        "Log in within the scenario instead of loading a saved session",
+        "If the service expires idle sessions, set max_age_min on the "
+        "load_session step so this fails at the load, not several steps later",
+        "Delete .aat/sessions/*.json to force a fresh login",
     ],
     "server_error": [
         "Check server logs for the error details",
@@ -76,6 +84,10 @@ def classify_failure(error_message: str) -> str:
         return "timeout"
     if "navigation" in err or "goto" in err or "net::" in err:
         return "navigation_error"
+    # A reused session dying is not the same failure as a wrong password, and
+    # saying so sends people to the credentials for nothing.
+    if "session" in err and ("expired" in err or "too old" in err or "no longer" in err):
+        return "session_expired"
     if "401" in err or "403" in err or "auth" in err:
         return "auth_error"
     if "500 internal" in err or "internal server error" in err or "502" in err or "503" in err:
@@ -239,7 +251,11 @@ def format_skill_diagnosis(
         "element_not_found": "Target text/selector changed or not yet rendered",
         "timeout": "Page/element load exceeded timeout",
         "navigation_error": "URL unreachable — check server",
-        "auth_error": "Auth failed — wrong credentials or expired session",
+        "auth_error": "Auth rejected the credentials this scenario sent",
+        "session_expired": (
+            "A saved session was reused and the server no longer accepts it — "
+            "the credentials are not implicated"
+        ),
         "server_error": "Server returned 5xx — check server logs",
         "selector_changed": "CSS selector no longer matches — UI updated",
         "assertion_failed": "Expected content not found on page",

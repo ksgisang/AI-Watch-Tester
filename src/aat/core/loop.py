@@ -474,25 +474,14 @@ class DevQALoop:
     @staticmethod
     def _classify_failure(test_result: TestResult) -> str:
         """실패를 조치 가능한 카테고리로 분류한다."""
-        for step_result in test_result.steps:
-            if step_result.status.value == "passed":
-                continue
-            err = (step_result.error_message or "").lower()
+        from aat.core.diagnosis import classify_failure
 
-            if "not visible" in err or "not found" in err:
-                return "element_not_found"
-            if "timeout" in err:
-                return "timeout"
-            if "navigation" in err or "goto" in err:
-                return "navigation_error"
-            if "401" in err or "403" in err or "auth" in err:
-                return "auth_error"
-            if any(k in err for k in ("500 internal", "internal server error", "502", "503")):
-                return "server_error"
-            if "selector" in err:
-                return "selector_changed"
-            if "assert" in err:
-                return "assertion_failed"
+        for step_result in test_result.steps:
+            if step_result.status in (StepStatus.PASSED, StepStatus.WARNING):
+                continue
+            category = classify_failure(step_result.error_message or "")
+            if category != "unknown":
+                return category
 
         return "unknown"
 
