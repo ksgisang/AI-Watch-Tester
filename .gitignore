@@ -62,3 +62,6 @@ scenarios/
 .aat/learned.db
 .aat/screenshots/
 reports/
+
+# Obsidian — vault settings are shared, per-machine window layout is not
+.obsidian/workspace.json
