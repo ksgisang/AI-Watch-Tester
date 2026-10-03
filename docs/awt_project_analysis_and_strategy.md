@@ -1,8 +1,8 @@
 # AWT (AI Watch Tester) 프로젝트 전반 분석 및 사업화 전략 보고서
 
-**작성일:** 2026-03-26 (§1~§6) · **개정:** 2026-10-03 (§6 상태 정정, §7~§10 추가)
+**작성일:** 2026-03-26 (§1~§6) · **개정:** 2026-10-03 (§6 상태 정정, §7~§11 추가)
 **주제:** AWT 프로젝트의 구조적 맹점 파악, 성능 병목 사례 분석 및 엔터프라이즈 제품화를 위한 비즈니스/기술 보완 방향
-**2026-10-03 개정 범위:** 코드 전수 실측(86파일 23,449행) · 플러그인/스토어 생태계 실측 · 하늘고 스터디 9일 실사용 증거 감사 · 운영 사이트 실증 1회
+**2026-10-03 개정 범위:** 코드 전수 실측(86파일 23,449행) · 플러그인/스토어 생태계 실측 · 하늘고 스터디 9일 실사용 증거 감사 · 운영 사이트 실증 1회 · **배포본 콜드 스타트 실측(§11)**
 
 ---
 
@@ -338,3 +338,141 @@ MCP 180초 제한은 영향이 특히 큽니다. **도구의 시간 제한이 �
 - **운영 사이트 실증** — 2026-10-03 11:35, `haneul-study-web.vercel.app`에 `aat run scenarios/S1_login.yaml --report pdf`. 11/11 통과, 51,973ms, `reports/SC-001/report.pdf` 산출. 감사 로그 `approved=True, is_tty=True`.
 - **실사용 이력 감사** — 하늘고 `.aat/` 전수(`learned.db` 931행, `audit.log` 67건, 스크린샷 642장, 시나리오 12편), 프로젝트 문서·대화로그·git 전수.
 - **시장 조사** — Anthropic 1차 문서·약관·블로그, MCP Registry API 387페이지 전수 순회, Claude 웹 마켓플레이스 직접 조회, 경쟁 제품 조사, OpenAI 생태계 조사.
+
+---
+
+## 11. 콜드 스타트 실측 (2026-10-03, 격리 환경)
+
+§10-3이 "출시 전에 측정할 값은 하나"라고 적은 그 값을 실제로 쟀습니다. **PyPI에 배포된 1.7.1**을 빈 가상환경에 설치하고, 신규 사용자가 하는 순서대로 첫 시나리오 통과까지 진행했습니다. 수정본이 아니라 **지금 사용자가 받는 그 물건**을 시험했습니다.
+
+### 11-1. 설치는 빠르고 무겁습니다
+
+| 항목 | 실측 |
+|---|---|
+| `pip install aat-devqa` | **34초** |
+| 설치 용량 | **388 MB** (의존성 52개) |
+| 추가로 받는 Chromium | **99.2 MB / 20초** |
+| 합계 | 약 **490 MB, 1분** |
+
+PyPI 등재는 정상입니다(릴리스 20개, wheel + sdist, `requires_python >=3.11`).
+
+**첫 장애물은 파이썬 버전입니다.** macOS 기본 파이썬은 3.9.6이고, 그 환경에서는 이렇게 끝납니다.
+
+```
+ERROR: Could not find a version that satisfies the requirement aat-devqa
+       (from versions: none)
+```
+
+"파이썬 3.11 이상이 필요하다"는 말이 **어디에도 없습니다.** 맥에서 시스템 파이썬으로 시도한 사람은 여기서 "그냥 안 되는 패키지"로 판단하고 떠납니다. pip의 기본 동작이라 AWT의 결함은 아니지만, README 설치 절 첫 줄에 파이썬 요구 버전을 적는 것만으로 막을 수 있습니다.
+
+### 11-2. `aat doctor`는 잘 만들어져 있고, 한 자리에서 거짓말을 합니다
+
+깨끗한 환경(브라우저 캐시 비움 + `/usr/local/bin` 제외)에서 돌리면 빠진 것마다 **정확한 해결 명령을 함께** 줍니다. 이 부분은 좋습니다.
+
+```
+! Chromium may not be installed   → playwright install chromium
+✗ Tesseract OCR not found         → brew install tesseract
+! No aat.config.yaml              → aat init --name ... --url ...
+✗ AI Provider: claude — API key not set → aat setup
+```
+
+**그러나 Chromium 점검이 버전을 보지 않습니다.** 제 기계에는 `chromium-1208`이 있었고 doctor는 `✓ Chromium browser available`을 띄웠지만, 새로 설치된 Playwright 1.63.0이 요구하는 것은 **1243**이라 첫 실행이 이렇게 죽었습니다.
+
+```
+Error: Failed to start WebEngine: BrowserType.launch: Executable doesn't exist at
+  .../ms-playwright/chromium_headless_shell-1243/...
+```
+
+결정적으로, **고장 났을 때와 고친 뒤의 doctor 출력이 완전히 같습니다.** 그 ✓는 정보를 담고 있지 않으며, 사용자는 초록불을 믿고 진행했다가 다음 명령에서 벽을 만납니다. doctor의 존재 이유가 "실행 전에 막힐 곳을 미리 알려주는 것"인데 정확히 그 일에 실패합니다. Playwright가 요구하는 빌드 번호를 직접 확인하도록 고쳐야 합니다.
+
+### 11-3. 기본 설정이 알려진 결함을 그대로 출하합니다
+
+`aat init`이 만든 `aat.config.yaml`에 §7의 지적들이 손대지 않은 채 들어 있습니다.
+
+| 기본값 | 문제 |
+|---|---|
+| `chain_order: [learned, template, ocr, feature, vision_ai]` | **`learned`는 레지스트리에 키가 없어 버려집니다**(§7-5). `template`·`feature`는 `target.image`를 요구해 건너뜁니다. 결국 신규 사용자의 실질 1순위 매처는 **OCR**입니다 |
+| `model: claude-sonnet-4-20250514` | **구형 모델**이 기본값입니다 (현재 Claude 5 계열) |
+| `reports_dir: reports` | 상대 경로 — AAT-111에서 PDF를 조용히 깨뜨렸던 그 값입니다 |
+| `approval_mode: manual` | 승인해도 **파일을 쓰지 않는** 모드입니다(§7-3) |
+
+`aat init`은 설정 파일을 만든 뒤 AI 공급자를 대화형으로 묻습니다. TTY가 없으면 거기서 `Aborted.`로 끝나므로, 스크립트나 CI로 초기화할 방법이 없습니다.
+
+### 11-4. 새로 찾은 결함 — 아무것도 실행하지 않고 종료코드 0
+
+TTY가 없는 환경에서 `aat run`은 승인 게이트에 막혀 **단 한 단계도 실행하지 않습니다.** 그런데 종료코드가 **0**입니다.
+
+```
+[AWT] ERROR: approval requires an interactive terminal.
+[AWT] Execution cancelled by user.
+$ echo $?
+0
+```
+
+CI에서는 "테스트 0건 실행 → 파이프라인 녹색"이 됩니다. AAT-109가 세운 원칙(**헛클릭은 통과가 아니다**)을 프로세스 수준에서 어기는 셈이며, 하늘고 인계문의 *"「통과했다」가 「검사했다」를 뜻하지 않는다"* 와 정확히 같은 실패입니다. 승인 거부는 0이 아닌 코드로 끝나야 합니다.
+
+### 11-5. 새로 찾은 결함 — `navigate`에 `critical`을 붙이면 반드시 거짓 실패합니다
+
+신규 사용자가 쓸 법한 가장 단순한 대본이 1단계에서 죽었습니다.
+
+```
+[AWT] CRITICAL: No screen change (9.1%) after critical click (threshold 50.0%)
+[AWT] 🛑 Test stopped — Step 1 (navigate): No screen change (9.1%) after critical click
+URL: https://example.com/        ← 이동은 성공했습니다
+PAGE_TITLE: Example Domain       ← 페이지도 떴습니다
+CATEGORY: unknown
+FIX_TARGET: scenarios/SC-001_smoke.yaml   ← 멀쩡한 대본을 고치라고 지시합니다
+```
+
+`navigate`를 **"critical click"으로 취급**해 클릭용 화면변화 임계값(50%)을 들이댔고, 흰 바탕 페이지라 9.1%만 변해 치명 실패로 처리했습니다. `critical: true`만 떼면 같은 단계가 즉시 통과합니다(검증 완료).
+
+이것은 하늘고 팀이 **"가장 위험"**으로 지목한 결함과 같은 종류입니다 — 진짜 상황(이동 성공)이 엉뚱한 메시지에 덮이고, 사용자는 멀쩡한 쪽을 고치러 갑니다. 게다가 실패가 반복되면 이렇게 끝납니다.
+
+> *Repeated failures detected. AWT Cloud provides dedicated AI that analyzes more accurately. → https://awt.dev*
+
+**자기 결함으로 만든 실패 위에 유료 제품을 권합니다.** 마켓플레이스에서 이 장면이 첫인상이 되면 회복이 어렵습니다.
+
+### 11-6. 제가 틀렸던 것 — `assert_text`는 OCR이고, 그게 맞습니다
+
+`assert_text`가 *"Text 'Example Domain' not found in region=full via OCR"* 로 실패했을 때 저는 이것을 결함으로 읽었습니다. **틀렸습니다.** example.com이 개편되어 "Example Domain"은 이제 `<title>`에만 있고 `<h1>`은 없으며 화면에 보이지 않습니다(HTML 직접 확인). OCR이 정확했고 제 대본이 틀렸습니다.
+
+다만 두 가지는 남습니다.
+
+- 진단문이 `Title: Example Domain`을 출력한 **바로 아래 줄에서** `'Example Domain' not found`라고 말합니다. 같은 블록 안의 두 문장이 서로를 부정하는 것처럼 읽히며, 실제로 저를 오독으로 이끌었습니다. 제목과 본문을 구분해 표기해야 합니다.
+- `assert_text`가 DOM이 아니라 **눈에 보이는 픽셀**을 검사한다는 사실이 문서에 없습니다. 설계로서는 오히려 더 엄격하지만(숨겨진 DOM 텍스트에 속지 않습니다), 모르고 쓰면 반드시 한 번 걸립니다. 이것은 README에 적을 **장점**이지 숨길 일이 아닙니다.
+
+사소하지만 `Step 0 (assert_text)`로 단계 번호를 0으로 보고합니다(실제 3단계).
+
+### 11-7. 첫 통과까지
+
+보이는 본문을 단언하도록 고친 대본은 **3/3 통과, 21초, 종료코드 0**이었습니다.
+
+| 구간 | 시간 |
+|---|---|
+| 설치 + Chromium | 약 1분 |
+| `aat init` + `aat scan`(65개 요소, 13초) | 약 30초 |
+| 대본 작성 + 첫 통과 | 약 30초 |
+| **합계** | **약 2분** |
+
+**단, 이 2분은 제가 막힐 곳을 이미 알고 있었기 때문입니다.** 모르는 사람은 (1) 파이썬 버전 오류, (2) doctor의 거짓 초록불, (3) `critical` 거짓 실패 세 곳에서 멈추며, 각각 원인을 알려주는 메시지가 없습니다. **설치는 1분, 이해는 그보다 훨씬 깁니다.**
+
+### 11-8. 이번 수정의 실증
+
+같은 격리 환경에 수정본을 설치해 확인했습니다.
+
+| 항목 | 배포본 1.7.1 | 수정 후 |
+|---|---|---|
+| `aat --version` | `aat 1.5.5` | `aat 1.7.1` |
+| 승인 화면 3단계 | `✅ Assert text` (빈칸) | `✅ Assert text  Example Domain` |
+| 승인 화면 4단계 | `✅ Assert text` (빈칸) | `✅ Assert text  More information` |
+
+`FileChange.path`는 역변이로 확인했습니다 — 수정 전 `work_dir / "/etc/passwd"`가 **`/etc/passwd`** 로 평가되어 작업 디렉터리가 통째로 사라졌고, 지금은 절대경로·`..`·`~`·Windows 드라이브·백슬래시 경로가 모두 차단됩니다. ruff·mypy strict 무결함, **927개 시험 통과**(기존 906 + 신규 21), CI 성공.
+
+### 11-9. §10-3 우선순위 갱신
+
+콜드 스타트 결과로 **1순위에 두 건을 추가**합니다. 둘 다 "첫 5분"에서 사용자를 잃는 자리이고, 둘 다 반나절 작업입니다.
+
+- **`navigate` + `critical` 거짓 실패** (§11-5) — 가장 단순한 대본이 실패하고, 그 위에 유료 제품을 권합니다. 마켓 등재 전 반드시 막아야 합니다.
+- **승인 거부 시 종료코드 0** (§11-4) — CI에서 검사하지 않은 것을 통과로 보고합니다.
+
+그리고 1순위에 문서 세 줄을 더합니다. **파이썬 3.11+ 요구 사항**(설치 절 첫 줄), **`assert_text`는 화면에 보이는 글자를 본다**(장점으로 기술), **`aat doctor`의 Chromium 점검을 Playwright 요구 빌드와 대조**.
