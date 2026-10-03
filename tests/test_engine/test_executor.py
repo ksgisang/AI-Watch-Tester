@@ -21,6 +21,7 @@ from aat.core.models import (
     ActionType,
     AssertType,
     ExpectedResult,
+    MatchingConfig,
     MatchMethod,
     MatchResult,
     StepConfig,
@@ -1981,3 +1982,275 @@ class TestVisualBaselineBanking:
         result = await executor.execute_step(step)
 
         assert result.status == StepStatus.PASSED
+
+
+# ─── Self-healing from a banked picture ──────────────────────
+
+
+def _page_with_no_element() -> MagicMock:
+    """A page whose locators resolve to nothing — the selector has gone stale."""
+    loc = MagicMock()
+    loc.count = AsyncMock(return_value=0)
+    base = MagicMock(first=loc)
+    base.filter = MagicMock(return_value=MagicMock(first=loc))
+    page = MagicMock()
+    page.locator = MagicMock(return_value=base)
+    page.get_by_role = MagicMock(return_value=base)
+    page.get_by_text = MagicMock(return_value=base)
+    return page
+
+
+class TestSelfHealingFromBank:
+    """When the selector breaks, the banked picture has to actually find the element.
+
+    This is the differentiator, and it was wired shut in two places. The chain
+    that knows how to match a banked crop runs only after a DOM lookup fails —
+    correct — but ``--fast`` raised ``MatchError`` *before* the chain, and
+    ``--fast`` is the mode the docs, the skill and the MCP server all
+    recommend. So the one command users were told to run was the one command
+    that could never heal.
+
+    The matcher here is real, not a stub: the point of these tests is that a
+    crop taken from one screen locates the element on the next one.
+    """
+
+    BOX = {"x": 40.0, "y": 50.0, "width": 80.0, "height": 30.0}
+    URL = "https://example.com/page"
+
+    @classmethod
+    def _screen(cls) -> bytes:
+        """The page as it looks while the element is on it."""
+        return _png_with_patch(320, 240, cls.BOX)
+
+    @classmethod
+    def _screens_that_react(cls, engine: MagicMock) -> None:
+        """Show the element until something is clicked, then show a changed page.
+
+        A heal that clicked the right pixels still has to prove it did
+        something, or AAT-109 downgrades it to a warning — so the mock has to
+        react to the click the way a real page would.
+        """
+        acted = {"yes": False}
+
+        async def _click(*_args: object, **_kwargs: object) -> None:
+            acted["yes"] = True
+
+        async def _screenshot(*_args: object, **_kwargs: object) -> bytes:
+            return _png_sized(320, 240, 255) if acted["yes"] else cls._screen()
+
+        engine.click = AsyncMock(side_effect=_click)
+        engine.screenshot = AsyncMock(side_effect=_screenshot)
+
+    @classmethod
+    def _bank(cls, name: str, *, host: str = "example.com") -> None:
+        saved = template_store.save(
+            template_store.scope_for_host(host),
+            name,
+            cls._screen(),
+            left=cls.BOX["x"],
+            top=cls.BOX["y"],
+            width=cls.BOX["width"],
+            height=cls.BOX["height"],
+            method=MatchMethod.PLAYWRIGHT.value,
+            confidence=0.95,
+        )
+        assert saved is not None, "the fixture itself must bank something"
+
+    @staticmethod
+    def _executor(engine: MagicMock, tmp_path: Path) -> StepExecutor:
+        from aat.matchers.hybrid import HybridMatcher
+        from aat.matchers.template import TemplateMatcher
+
+        return StepExecutor(
+            engine=engine,
+            matcher=HybridMatcher([TemplateMatcher(MatchingConfig())]),
+            humanizer=MagicMock(move_to=AsyncMock(), type_text=AsyncMock()),
+            waiter=MagicMock(wait_until_stable=AsyncMock(return_value=True)),
+            comparator=MagicMock(check=AsyncMock(), check_assert=AsyncMock()),
+            screenshot_dir=tmp_path,
+        )
+
+    @pytest.fixture
+    def engine(self, mock_engine: MagicMock) -> MagicMock:
+        """A page that no longer answers the selector, still showing the element."""
+        mock_engine.page = _page_with_no_element()
+        self._screens_that_react(mock_engine)
+        mock_engine.get_url = AsyncMock(return_value=self.URL)
+        mock_engine._config = MagicMock(fast_mode=False, viewport_width=320, viewport_height=240)
+        return mock_engine
+
+    @pytest.mark.asyncio
+    async def test_a_broken_selector_is_healed_by_the_banked_picture(
+        self, engine: MagicMock, tmp_path: Path
+    ) -> None:
+        self._bank("#submit")
+        executor = self._executor(engine, tmp_path)
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(selector="#submit"))
+
+        result = await executor.execute_step(step)
+
+        assert result.status == StepStatus.PASSED
+        assert result.match_result is not None
+        assert result.match_result.method == MatchMethod.SAVED_TEMPLATE
+        clicked_x, clicked_y = engine.click.call_args[0]
+        assert abs(clicked_x - 80) <= 2  # 40 + 80/2
+        assert abs(clicked_y - 65) <= 2  # 50 + 30/2
+
+    @pytest.mark.asyncio
+    async def test_fast_mode_heals_instead_of_giving_up(
+        self, engine: MagicMock, tmp_path: Path
+    ) -> None:
+        """`aat run --skill-mode --fast` is the recommended command. It must heal.
+
+        One deterministic attempt only: a banked crop matched against the
+        current screen. No OCR and no paid vision call, so the mode still means
+        what it says.
+        """
+        engine._config = MagicMock(fast_mode=True, viewport_width=320, viewport_height=240)
+        self._bank("#submit")
+        executor = self._executor(engine, tmp_path)
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(selector="#submit"))
+
+        result = await executor.execute_step(step)
+
+        assert result.status == StepStatus.PASSED
+        assert result.match_result is not None
+        assert result.match_result.method == MatchMethod.SAVED_TEMPLATE
+
+    @pytest.mark.asyncio
+    async def test_fast_mode_with_nothing_banked_still_fails_fast(
+        self, engine: MagicMock, tmp_path: Path
+    ) -> None:
+        """Healing must not become a tax on every failing step.
+
+        The store is checked for a file before any matching work, so a run that
+        has banked nothing pays a stat() call and nothing else — which is why
+        the matcher must not be reached here at all.
+        """
+        engine._config = MagicMock(fast_mode=True, viewport_width=320, viewport_height=240)
+        executor = self._executor(engine, tmp_path)
+        matching = AsyncMock(return_value=None)
+        executor._matcher.find_saved_template = matching  # type: ignore[union-attr]
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(selector="#submit"))
+
+        result = await executor.execute_step(step)
+
+        assert result.status == StepStatus.FAILED
+        assert "Fast Mode" in (result.error_message or "")
+        assert matching.await_count == 0
+
+    @pytest.mark.asyncio
+    async def test_a_picture_banked_for_another_host_does_not_heal(
+        self, engine: MagicMock, tmp_path: Path
+    ) -> None:
+        """A false pass is worse than a lost heal, so the host has to match."""
+        self._bank("#submit", host="other.example.org")
+        executor = self._executor(engine, tmp_path)
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(selector="#submit"))
+
+        result = await executor.execute_step(step)
+
+        assert result.status == StepStatus.FAILED
+
+    @pytest.mark.asyncio
+    async def test_a_picture_of_something_else_does_not_heal(
+        self, engine: MagicMock, tmp_path: Path
+    ) -> None:
+        """The crop has to be found on screen; being on disk is not enough."""
+        template_store.save(
+            template_store.scope_for_host("example.com"),
+            "#submit",
+            _png_with_patch(320, 240, {"x": 200.0, "y": 150.0, "width": 60.0, "height": 40.0}),
+            left=200,
+            top=150,
+            width=60,
+            height=40,
+            method=MatchMethod.PLAYWRIGHT.value,
+            confidence=0.95,
+        )
+        engine.screenshot = AsyncMock(return_value=_png_sized(320, 240, 255))
+        executor = self._executor(engine, tmp_path)
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(selector="#submit"))
+
+        result = await executor.execute_step(step)
+
+        assert result.status == StepStatus.FAILED
+
+    @pytest.mark.asyncio
+    async def test_a_run_banks_a_picture_the_next_run_can_find(
+        self, mock_engine: MagicMock, tmp_path: Path
+    ) -> None:
+        """The round trip, which is the only thing that proves the two halves agree.
+
+        They did not. The executor banked under ``text or selector`` while the
+        chain looked up ``text or image``, so a step named only by a selector —
+        the step healing exists for, since a renamed selector is the failure
+        being healed — banked a picture nothing could ever find. Both sides now
+        call ``template_store.name_for``.
+        """
+        mock_engine.get_url = AsyncMock(return_value=self.URL)
+        mock_engine._config = MagicMock(fast_mode=False, viewport_width=320, viewport_height=240)
+        mock_engine.page = _page_with_one_element(dict(self.BOX))
+        mock_engine.screenshot = AsyncMock(
+            side_effect=itertools.chain(
+                [self._screen()],
+                (_png_sized(320, 240, s) for s in itertools.cycle((0, 200))),
+            )
+        )
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(selector="#submit"))
+
+        banked = await self._executor(mock_engine, tmp_path).execute_step(step)
+
+        assert banked.status == StepStatus.PASSED
+        assert banked.match_result is not None
+        assert banked.match_result.method == MatchMethod.PLAYWRIGHT
+
+        # Next run: the selector names nothing, the element is still on screen.
+        mock_engine.page = _page_with_no_element()
+        self._screens_that_react(mock_engine)
+
+        healed = await self._executor(mock_engine, tmp_path).execute_step(step)
+
+        assert healed.status == StepStatus.PASSED
+        assert healed.match_result is not None
+        assert healed.match_result.method == MatchMethod.SAVED_TEMPLATE
+
+    @pytest.mark.asyncio
+    async def test_a_heal_is_recorded_as_its_own_strategy(
+        self, engine: MagicMock, tmp_path: Path
+    ) -> None:
+        """"A banked picture carried this step" is advice about the scenario.
+
+        Filed under ``use_template`` it would read as "image matching works
+        here", when what happened is that the step's own selector is stale.
+        """
+        self._bank("#submit")
+        executor = self._executor(engine, tmp_path)
+        store = MagicMock()
+        store.find_state_coords = MagicMock(return_value=None)
+        store.find_by_name = MagicMock(return_value=None)
+        store.get_strategies = MagicMock(return_value=[])
+        store.get_target_failure_count = MagicMock(return_value=0)
+        executor._learned_store = store
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(selector="#submit"))
+
+        await executor.execute_step(step)
+
+        assert store.record_match.call_args.kwargs["method"] == MatchMethod.SAVED_TEMPLATE.value
+        assert store.learn_strategy.call_args[0][1] == "healed_from_bank"
+
+    @pytest.mark.asyncio
+    async def test_a_heal_does_not_rebank_from_where_it_matched(
+        self, engine: MagicMock, tmp_path: Path
+    ) -> None:
+        """Otherwise each heal re-centres on the last heal's error and the crop walks."""
+        self._bank("#submit")
+        path = template_store.path_for(template_store.scope_for_host("example.com"), "#submit")
+        before = path.read_bytes()
+        executor = self._executor(engine, tmp_path)
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(selector="#submit"))
+
+        result = await executor.execute_step(step)
+
+        assert result.status == StepStatus.PASSED
+        assert path.read_bytes() == before

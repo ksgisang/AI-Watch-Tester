@@ -978,9 +978,9 @@ class StepExecutor:
         screenshot = self._last_screenshot
         if not screenshot:
             return
-        name = ""
-        if step.target:
-            name = step.target.text or step.target.selector or ""
+        from aat.matchers import template_store
+
+        name = template_store.name_for(step.target)
         if not name:
             return
         self._pending_bank = {
@@ -1418,9 +1418,18 @@ class StepExecutor:
                 return result
 
         # --- Fast Mode Override ---
-        # If fast_mode is active, we strictly rely on DOM parsing (CSS/xpath/text).
-        # We abort immediately and skip the heavy Vision/OCR/Screenshot pipeline.
+        # Fast mode skips the heavy Vision/OCR pipeline, and that is worth
+        # keeping: it is why the mode exists. But it used to raise here, before
+        # anything visual ran, which meant the command the docs and the skill
+        # recommend -- `aat run --skill-mode --fast` -- was the one command that
+        # could never heal. So fast mode gets exactly one attempt, and only the
+        # deterministic one: match the picture a previous run banked for this
+        # target. No OCR, no paid vision call, and no screenshot at all unless
+        # a picture exists to match against.
         if getattr(getattr(self._engine, "_config", None), "fast_mode", False):
+            healed = await self._heal_from_bank(step, target)
+            if healed is not None:
+                return healed
             target_desc = target.selector or target.text or "unknown"
             rgn = step.region
             region_hint = f" (region={rgn.value})" if rgn != ScreenRegion.FULL else ""
@@ -1429,18 +1438,10 @@ class StepExecutor:
 
         # Fallback: screenshot + 3-tier matcher pipeline
         screenshot = await self._engine.screenshot()
-
-        # Region cropping: restrict search area
-        region_offset_x, region_offset_y = 0, 0
-        search_screenshot = screenshot
-        if step.region != ScreenRegion.FULL:
-            cropped, region_offset_x, region_offset_y = _crop_screenshot(
-                screenshot,
-                step.region,
-                self._get_viewport_size(),
-            )
-            if cropped is not None:
-                search_screenshot = cropped
+        search_screenshot, region_offset_x, region_offset_y = self._crop_to_region(
+            step,
+            screenshot,
+        )
 
         # Use find_with_options if HybridMatcher (3-tier system)
         from aat.matchers.hybrid import HybridMatcher
@@ -1483,6 +1484,76 @@ class StepExecutor:
             abs_y,
             match_result.confidence,
             method=match_result.method,
+        )
+
+    def _crop_to_region(
+        self,
+        step: StepConfig,
+        screenshot: bytes,
+    ) -> tuple[bytes, int, int]:
+        """Narrow the search to the step's region, with the offset to undo it.
+
+        Returns the full screenshot and a zero offset when the step named no
+        region or the crop failed, so callers can use the result unconditionally.
+        """
+        if step.region == ScreenRegion.FULL:
+            return screenshot, 0, 0
+        cropped, offset_x, offset_y = _crop_screenshot(
+            screenshot,
+            step.region,
+            self._get_viewport_size(),
+        )
+        if cropped is None:
+            return screenshot, 0, 0
+        return cropped, offset_x, offset_y
+
+    async def _heal_from_bank(
+        self,
+        step: StepConfig,
+        target: TargetSpec,
+    ) -> MatchResult | None:
+        """Find the element from a banked picture after the DOM gave up.
+
+        This is the payoff for banking. The selector no longer names anything,
+        but the element is still on screen and still looks the way it looked
+        when it was found, so the saved crop locates it.
+
+        Returns ``None`` when there is nothing banked for this target, and
+        checks that **before** taking a screenshot: on a run where no picture
+        has ever been banked, healing must cost nothing measurable, or it would
+        be a tax on every failing step.
+        """
+        from aat.matchers import template_store
+        from aat.matchers.hybrid import HybridMatcher
+
+        if not isinstance(self._matcher, HybridMatcher):
+            return None
+        name = template_store.name_for(target)
+        if not name:
+            return None
+        scope = template_store.scope_for(self._last_url)
+        if template_store.lookup(scope, name) is None:
+            return None
+
+        self._matcher.template_scope = scope
+        try:
+            screenshot = await self._engine.screenshot()
+            search_screenshot, offset_x, offset_y = self._crop_to_region(step, screenshot)
+            result = await self._matcher.find_saved_template(target, search_screenshot)
+        except Exception:
+            logger.debug("Healing '%s' from a banked picture failed", name, exc_info=True)
+            return None
+        if result is None or not result.found:
+            logger.info("No banked picture matched '%s' on the current screen", name)
+            return None
+
+        logger.info("Healed '%s' from a banked picture — the selector is stale", name)
+        return await self._act_at_pos(
+            step,
+            result.x + offset_x,
+            result.y + offset_y,
+            result.confidence,
+            method=result.method,
         )
 
     async def _do_click(
@@ -3363,6 +3434,11 @@ def _classify_strategy(step: Any, result: Any, method: str) -> str:
         return "use_ocr"
     if method == "template":
         return "use_template"
+    if method == "saved_template":
+        # Kept apart from `use_template` on purpose. This strategy says the
+        # step's own selector is stale and a banked picture carried it, which
+        # is advice about the scenario, not about matching.
+        return "healed_from_bank"
     if method == "playwright" and hasattr(step, "target") and step.target:
         sel = step.target.selector or ""
         if "iframe" in sel.lower() or "frame" in sel.lower():

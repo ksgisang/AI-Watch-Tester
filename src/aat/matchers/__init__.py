@@ -42,6 +42,12 @@ _NOT_MATCHERS: dict[str, str] = {
         "Flutter semantics lookup is part of the engine's element search, "
         "not a matcher. Listing it here does nothing"
     ),
+    "saved_template": (
+        "healing from a banked picture is the first thing the chain tries and "
+        "needs no configuring; it reuses the template matcher. It is a "
+        "MatchMethod so match_history can show how often healing saved a run. "
+        "Listing it here does nothing"
+    ),
 }
 
 

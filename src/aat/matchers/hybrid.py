@@ -212,7 +212,7 @@ class HybridMatcher(BaseMatcher):
         logger.info("HybridMatcher: Tier 1 — Template matching for '%s'", target_name)
 
         # 1a. Auto-saved template matching
-        result = await self._try_saved_template(target, screenshot)
+        result = await self.find_saved_template(target, screenshot)
         if result is not None:
             logger.info("HybridMatcher: Tier 1 ✓ via saved template")
             return result
@@ -350,7 +350,15 @@ class HybridMatcher(BaseMatcher):
             # No bounding box info — can't crop
             return
 
-        target_name = target.text or target.image or ""
+        if result.method == MatchMethod.SAVED_TEMPLATE:
+            # The picture that just healed this step is already banked, and
+            # rewriting it from where template matching *thinks* the element is
+            # lets the crop walk: each heal re-centres on the previous heal's
+            # error, so a few runs of small drift add up to a picture of the
+            # element's neighbour. Keep the original.
+            return
+
+        target_name = template_store.name_for(target)
         if not target_name:
             return
 
@@ -366,13 +374,29 @@ class HybridMatcher(BaseMatcher):
             confidence=result.confidence,
         )
 
-    async def _try_saved_template(
+    async def find_saved_template(
         self,
         target: TargetSpec,
         screenshot: bytes,
     ) -> MatchResult | None:
-        """Try matching against auto-saved templates."""
-        target_name = target.text or target.image or ""
+        """Find the element from a picture an earlier run banked.
+
+        This is the heal. The selector has already failed by the time anything
+        here runs, and the banked crop is still a true description of what the
+        user is looking for, so matching it against the current screen finds
+        the element the renamed selector no longer names.
+
+        Public because fast mode calls it directly. Fast mode deliberately
+        skips the rest of the chain, and this is the one tier cheap enough to
+        keep: a file-exists check and a template match, no OCR and no paid
+        vision call.
+
+        The result is relabelled ``SAVED_TEMPLATE``. The TemplateMatcher that
+        did the work reports ``TEMPLATE``, which also means "the scenario gave
+        us this image" -- a label that cannot distinguish a heal from an
+        ordinary image match is a label that cannot count heals.
+        """
+        target_name = template_store.name_for(target)
         if not target_name:
             return None
 
@@ -392,7 +416,13 @@ class HybridMatcher(BaseMatcher):
             temp_target = TargetSpec(image=str(template_path), text=target.text)
             result = await template.find(temp_target, screenshot)
             if result is not None and result.found:
-                return result
+                logger.info(
+                    "Healed '%s' from a banked picture (%s, conf=%.2f)",
+                    target_name,
+                    template_path.name,
+                    result.confidence,
+                )
+                return result.model_copy(update={"method": MatchMethod.SAVED_TEMPLATE})
         except Exception:
             logger.debug("Saved template matching failed", exc_info=True)
 
@@ -412,6 +442,7 @@ class HybridMatcher(BaseMatcher):
             MatchMethod.SEMANTICS: 0,
             MatchMethod.LEARNED: 1,
             MatchMethod.TEMPLATE: 1,
+            MatchMethod.SAVED_TEMPLATE: 1,
             MatchMethod.OCR: 2,
             MatchMethod.FEATURE: 2,
             MatchMethod.VISION_AI: 3,

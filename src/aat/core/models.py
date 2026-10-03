@@ -113,12 +113,19 @@ class MatchMethod(StrEnum):
     ``_act_at_pos`` was overwritten with ``OCR`` too — so a template or vision
     hit was indistinguishable from a selector hit. Measurement that cannot tell
     strategies apart cannot show that any of them works.
+
+    ``SAVED_TEMPLATE`` is the one that matters for self-healing. It means the
+    selector failed and AWT found the element from a picture it banked on an
+    earlier run. ``TEMPLATE`` cannot carry that meaning, because it also covers
+    the ordinary case where the scenario supplied the image itself. Separating
+    them is what makes "healing saved this run" a number rather than a claim.
     """
 
     PLAYWRIGHT = "playwright"
     LEARNED = "learned"
     SEMANTICS = "semantics"
     TEMPLATE = "template"
+    SAVED_TEMPLATE = "saved_template"
     OCR = "ocr"
     FEATURE = "feature"
     VISION_AI = "vision_ai"
@@ -225,7 +232,10 @@ class EngineConfig(BaseModel):
     window_y: int | None = Field(default=None, description="Browser window Y position")
     fast_mode: bool = Field(
         default=False,
-        description="Strictly use DOM matching; skip Vision/OCR fallbacks for maximum speed",
+        description=(
+            "DOM matching only, skipping the OCR and Vision AI fallbacks. A step whose "
+            "selector breaks still gets one deterministic attempt from a banked picture."
+        ),
     )
     speed: str = Field(
         default="normal",

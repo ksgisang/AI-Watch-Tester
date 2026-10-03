@@ -88,9 +88,20 @@ class TestAssertType:
 
 class TestMatchMethod:
     def test_all_values(self) -> None:
-        assert len(MatchMethod) == 7
+        assert len(MatchMethod) == 8
         assert MatchMethod.LEARNED == "learned"
         assert MatchMethod.VISION_AI == "vision_ai"
+
+    def test_a_heal_has_its_own_value(self) -> None:
+        """``saved_template`` is what makes self-healing countable.
+
+        ``template`` also means "the scenario supplied this image", so a label
+        shared between the two cannot tell a heal from an ordinary image match
+        — and "visual matching saved this run" would stay a claim rather than
+        a number in ``match_history``.
+        """
+        assert MatchMethod.SAVED_TEMPLATE == "saved_template"
+        assert MatchMethod.SAVED_TEMPLATE != MatchMethod.TEMPLATE
 
     def test_playwright_keeps_the_label_match_history_already_uses(self) -> None:
         """The DOM paths used to label themselves ``ocr``.

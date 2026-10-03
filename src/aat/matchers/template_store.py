@@ -52,6 +52,8 @@ import numpy as np
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from aat.core.models import TargetSpec
+
 logger = logging.getLogger(__name__)
 
 #: Environment variable that relocates the whole store. Read on every call
@@ -133,6 +135,23 @@ def scope_for_host(host: str | None) -> str:
         return UNSCOPED
     cleaned = _SAFE_SCOPE.sub("_", host.lower()).strip("_.")
     return cleaned or UNSCOPED
+
+
+def name_for(target: TargetSpec | None) -> str:
+    """The name a target's picture is filed under, for writers and readers alike.
+
+    Both sides have to agree or the store is write-only. They did not: the
+    executor banked under ``text or selector`` while the chain looked up
+    ``text or image``, so a step identified **only by a selector** -- exactly
+    the step that self-healing exists for, since a renamed selector is the
+    failure being healed -- banked a picture that nothing could ever find.
+
+    ``text`` comes first because it is the more durable name. A caption
+    survives the class rename that broke the selector in the first place.
+    """
+    if target is None:
+        return ""
+    return target.text or target.selector or target.image or ""
 
 
 def key_for(target_name: str) -> str:
