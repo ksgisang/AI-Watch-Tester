@@ -79,25 +79,26 @@ async def _scan(
 
         page = engine.page
 
-        # 1. Screenshot
-        scan_dir = Path(config.data_dir) / "scans"
-        scan_dir.mkdir(parents=True, exist_ok=True)
-        ts = time.strftime("%Y%m%d_%H%M%S")
-        ss_path = scan_dir / f"scan_{ts}.png"
-        ss_bytes = await engine.screenshot()
-        ss_path.write_bytes(ss_bytes)
-
-        # 2. Detect Flutter
+        # 1. Detect Flutter
+        #
+        # This runs *before* the screenshot on purpose. A CanvasKit app that
+        # fetches its font late paints tofu boxes first and the real glyphs a
+        # second later; a scan image captured ahead of that repaint is evidence
+        # of nothing. Screenshot after the wait, not before it.
         from aat.engine.flutter_semantics import (
             activate_semantics,
             get_all_semantics_labels,
-            is_flutter_page,
+            wait_for_fonts,
+            wait_until_flutter_ready,
         )
 
-        is_flutter = await is_flutter_page(page)
+        # Waits for the app to boot before answering. A scan that asks too
+        # early reports "not Flutter" and emits tips for the wrong platform.
+        is_flutter = await wait_until_flutter_ready(page)
         if is_flutter:
             typer.echo("[AWT] Flutter CanvasKit detected — activating Semantics...")
             await activate_semantics(page)
+            await wait_for_fonts(page)
 
             # Wait for stable Semantics node count (max 10s)
             from aat.engine.flutter_semantics import _count_semantics_nodes
@@ -115,6 +116,14 @@ async def _scan(
                     stable_rounds = 0
                 prev_count = count
             typer.echo(f"[AWT] Semantics stable: {prev_count} nodes")
+
+        # 2. Screenshot
+        scan_dir = Path(config.data_dir) / "scans"
+        scan_dir.mkdir(parents=True, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        ss_path = scan_dir / f"scan_{ts}.png"
+        ss_bytes = await engine.screenshot()
+        ss_path.write_bytes(ss_bytes)
 
         # 3. Collect elements
         elements: list[dict[str, Any]] = []

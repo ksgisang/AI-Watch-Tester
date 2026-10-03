@@ -2565,14 +2565,23 @@ class StepExecutor:
         try:
             from aat.engine.flutter_semantics import (
                 activate_semantics,
-                is_flutter_page,
                 reset_semantics_cache,
+                wait_for_fonts,
+                wait_until_flutter_ready,
             )
 
             page = self._engine.page  # type: ignore[attr-defined]
-            if await is_flutter_page(page):
+            # Not `is_flutter_page`: right after navigate() the app has not
+            # booted yet, so that check says "not Flutter" and this whole hook
+            # becomes a no-op on every cold load.
+            if await wait_until_flutter_ready(page):
                 await reset_semantics_cache()
                 await activate_semantics(page)
+                # The Semantics tree is correct long before the canvas is
+                # legible. Without this, every screenshot taken by the steps
+                # that follow -- evidence images, PDF report, visual baselines,
+                # the OCR fallback -- can capture tofu boxes on a healthy app.
+                await wait_for_fonts(page)
         except Exception:
             logger.debug("Flutter Semantics activation skipped", exc_info=True)
 

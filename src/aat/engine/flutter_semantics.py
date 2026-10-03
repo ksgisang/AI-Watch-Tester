@@ -41,6 +41,60 @@ async def is_flutter_page(page: Any) -> bool:
         return False
 
 
+_FLUTTER_LOADER_JS = """
+() => {
+  const srcs = Array.from(document.querySelectorAll('script'))
+    .map((s) => s.src || '')
+    .concat([document.documentElement.innerHTML.slice(0, 4000)]);
+  return srcs.some((s) =>
+    s.includes('flutter_bootstrap.js') ||
+    s.includes('main.dart.js') ||
+    s.includes('flutter.js'));
+}
+"""
+
+
+async def wait_until_flutter_ready(page: Any, timeout: float = 15.0) -> bool:
+    """Wait for a Flutter app to finish booting, without stalling other sites.
+
+    ``is_flutter_page`` looks for ``flt-glass-pane`` / ``flutter-view``, which
+    CanvasKit only creates once its WASM is up: measured at 2.6s on a real app,
+    while ``navigate()`` returned at 0.43s. Everything keyed off that check --
+    Semantics activation, the font wait -- therefore ran against a page that
+    did not look like Flutter yet, and silently did nothing. Scenario authors
+    papered over it with hand-tuned ``wait: "10000"`` steps, which is why the
+    hole stayed invisible: the workaround was in every scenario.
+
+    The fix needs an earlier signal, and ``flutter_bootstrap.js`` (or the older
+    ``main.dart.js`` / ``flutter.js``) is in the served HTML from the first
+    byte. A page without it is not Flutter and returns immediately, so no
+    ordinary site pays for this.
+    """
+    if await is_flutter_page(page):
+        return True
+
+    try:
+        is_loading_flutter = bool(await page.evaluate(_FLUTTER_LOADER_JS))
+    except Exception as e:
+        logger.debug("[AWT] Flutter loader probe failed: %s", e)
+        return False
+
+    if not is_loading_flutter:
+        return False
+
+    logger.debug("[AWT] Flutter loader detected — waiting for the app to boot")
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        await asyncio.sleep(0.25)
+        if await is_flutter_page(page):
+            logger.info("[AWT] Flutter app booted")
+            return True
+
+    logger.warning("[AWT] Flutter loader found but the app never booted (%.0fs)", timeout)
+    return False
+
+
 async def activate_semantics(page: Any) -> bool:
     """Activate Flutter Semantics tree. Call after navigation.
 
@@ -103,6 +157,111 @@ async def activate_semantics(page: Any) -> bool:
 
     logger.warning("[AWT] Semantics activation failed → OCR fallback")
     return False
+
+
+# Matched against resource URLs rather than ``initiatorType``: CanvasKit
+# fetches its fallback font from WASM, which reports as ``other``/``fetch``
+# depending on the Chromium build, so the initiator tells us nothing reliable.
+_FONT_URL_RE = r"/\.(ttf|otf|woff2?)(\?|$)|fonts\.(gstatic|googleapis)\.com/i"
+
+_FONT_PROBE_JS = f"""
+() => {{
+  const re = {_FONT_URL_RE};
+  const entries = performance.getEntriesByType('resource')
+    .filter((e) => re.test(e.name));
+  return {{
+    total: entries.length,
+    done: entries.filter((e) => e.responseEnd > 0).length,
+  }};
+}}
+"""
+
+
+_FONT_POLL_INTERVAL = 0.25
+
+# How long a font count must stop changing before we believe it. Measured on a
+# real CanvasKit app: the first batch of 3 fonts landed at 2.6s and *looked*
+# complete (done == total), then 8 more arrived at 3.9s. A naive
+# "every requested font has responded" check returns during that 1.3s gap and
+# screenshots a half-repainted canvas, so the count must also hold still.
+_FONT_QUIET_SECONDS = 1.5
+
+# How long to wait for the *first* font request. CanvasKit has to boot its WASM
+# before it asks for anything -- 2.6s on the same measurement -- so a short
+# grace period concludes "this page uses no web fonts" about two seconds before
+# the page gets around to proving otherwise.
+_FONT_APPEAR_SECONDS = 5.0
+
+
+async def wait_for_fonts(
+    page: Any,
+    timeout: float = 12.0,
+    settle: float = 0.6,
+    appear_timeout: float = _FONT_APPEAR_SECONDS,
+    quiet: float = _FONT_QUIET_SECONDS,
+) -> bool:
+    """Wait for late-arriving web fonts, then for the repaint they cause.
+
+    Flutter CanvasKit paints the whole UI into a ``<canvas>``. When the app
+    registers no font for the script it is about to draw -- a Korean app whose
+    ``pubspec.yaml`` never declared a Korean font, say -- CanvasKit fetches one
+    (typically Noto from ``fonts.gstatic.com``) and *repaints*. Until that
+    lands, every glyph is a tofu box.
+
+    Nothing in the DOM announces this. The Semantics tree is already stable and
+    correct while the canvas is still tofu, so screenshots, PDF reports, OCR
+    matching and visual-regression baselines all captured unreadable evidence
+    of a perfectly healthy app. Scenario authors worked around it by hand, with
+    ``wait: "12000"`` steps tuned by trial and error.
+
+    Pixel stability is not usable as the signal here: a dashboard with a
+    loading spinner never reaches a stable frame. Font *requests* are the
+    narrow, bounded signal, and the rule is that the request count must both
+    be fully answered and have stopped growing.
+
+    Both call sites gate this on :func:`is_flutter_page`, so the cost is paid
+    only by pages that render their text into a canvas.
+
+    Returns True if any font request was observed, False if the page fetched
+    none within ``appear_timeout``.
+    """
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + timeout
+    appear_deadline = loop.time() + appear_timeout
+
+    last_total = -1
+    unchanged_since = loop.time()
+
+    while loop.time() < deadline:
+        try:
+            probe = await page.evaluate(_FONT_PROBE_JS)
+        except Exception as e:
+            logger.debug("[AWT] font probe failed: %s", e)
+            return last_total > 0
+
+        total = int(probe.get("total", 0))
+        done = int(probe.get("done", 0))
+
+        if total != last_total:
+            last_total = total
+            unchanged_since = loop.time()
+
+        if total == 0:
+            if loop.time() >= appear_deadline:
+                logger.debug("[AWT] No web fonts requested — nothing to wait for")
+                return False
+        elif done >= total and loop.time() - unchanged_since >= quiet:
+            # Every requested font has answered and no new ones have appeared
+            # for a while. The repaint happens on the next frame, which is the
+            # part that actually changes the pixels we are about to read.
+            await asyncio.sleep(settle)
+            logger.info("[AWT] Fonts settled (%d loaded) — canvas repainted", done)
+            return True
+
+        await asyncio.sleep(_FONT_POLL_INTERVAL)
+
+    logger.info("[AWT] Font wait timed out after %.1fs — capturing anyway", timeout)
+    return last_total > 0
 
 
 async def reset_semantics_cache() -> None:

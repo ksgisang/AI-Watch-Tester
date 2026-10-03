@@ -57,10 +57,20 @@ _DETECTION_RULES: list[tuple[str, str, list[str]]] = [
 
 _BUILTIN_TIPS: dict[str, list[str]] = {
     "flutter_canvaskit": [
-        "Use click_at + type_text instead of find_and_type (hidden inputs)",
-        "text_visible auto-falls back to OCR for Canvas-rendered text",
+        # This used to read "Use click_at + type_text instead of
+        # find_and_type (hidden inputs)". Measured against a real CanvasKit
+        # app (ClasRing, 2026-10-03): find_and_type reached every field,
+        # logged in with real credentials, and drove four admin screens --
+        # 23/23 steps. The advice was steering users away from the path that
+        # works and toward hand-tuned coordinates that break on any reflow.
+        "Use find_and_click / find_and_type with target.text — "
+        "AWT activates Flutter's Semantics tree and matches its labels",
+        "target.text must match the Semantics label, which is often the "
+        "field's floating label (e.g. '이메일'), not its hint text",
+        "text_visible falls back to OCR when the text lives only on canvas",
         "Avoid CSS selectors — Flutter doesn't use standard DOM elements",
-        "Use Semantics labels or coordinates for element targeting",
+        "Fonts can arrive after first paint; AWT waits for them before "
+        "capturing, but add a wait step if your app loads data on startup",
     ],
     "flutter_html": [
         "HTML renderer has better DOM access than CanvasKit",
