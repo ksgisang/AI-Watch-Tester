@@ -10,16 +10,12 @@ Match history is recorded to SQLite for adaptive method selection.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-import cv2
-import numpy as np
-
 from aat.core.models import MatchingConfig, MatchMethod
+from aat.matchers import template_store
 from aat.matchers.base import BaseMatcher
 
 if TYPE_CHECKING:
@@ -38,8 +34,8 @@ _METHOD_TO_NAME: dict[MatchMethod, str] = {
     # (Priority 0.4), not a matcher's. See the class docstring.
 }
 
-# Templates directory for auto-saved element screenshots
-_TEMPLATES_DIR = Path.home() / ".awt" / "templates"
+#: Fallback scope when nobody told us which host this run is against.
+_DEFAULT_SCOPE = template_store.UNSCOPED
 
 
 class HybridMatcher(BaseMatcher):
@@ -73,6 +69,14 @@ class HybridMatcher(BaseMatcher):
         self._matchers = {m.name: m for m in matchers}
         self._config = config or MatchingConfig()
         self._learned_store = learned_store
+        self.template_scope = _DEFAULT_SCOPE
+        """Which host the banked templates belong to.
+
+        Writable because a scenario may navigate between hosts mid-run, so the
+        step executor sets it per step. It is not a constructor argument for
+        the same reason: one matcher outlives many pages. Left at
+        ``UNSCOPED`` it still works, it just shares a drawer with every other
+        unidentified run."""
 
     # -- BaseMatcher interface ------------------------------------------------
 
@@ -330,7 +334,18 @@ class HybridMatcher(BaseMatcher):
         screenshot: bytes,
         result: MatchResult,
     ) -> None:
-        """Save the matched region as a template for future Tier 1 matching."""
+        """Bank the matched region so the cheap tier can find it next time.
+
+        Worth doing even though the chain only runs *after* a DOM lookup
+        failed: whatever healed this step was the expensive end of the chain
+        (OCR, or a paid vision call), and a banked crop means the template tier
+        answers next time instead.
+
+        The rectangle is converted from the chain's centre-and-size convention.
+        No viewport width is passed because the chain's coordinates were read
+        off this very screenshot -- they are already in image pixels, so
+        rescaling them would be wrong.
+        """
         if result.width == 0 or result.height == 0:
             # No bounding box info — can't crop
             return
@@ -339,48 +354,17 @@ class HybridMatcher(BaseMatcher):
         if not target_name:
             return
 
-        try:
-            # Decode screenshot
-            screen_arr = np.frombuffer(screenshot, dtype=np.uint8)
-            screen_bgr = cv2.imdecode(screen_arr, cv2.IMREAD_COLOR)
-            if screen_bgr is None:
-                return
-
-            # Calculate crop region with padding
-            sh, sw = screen_bgr.shape[:2]
-            pad = 5
-            x1 = max(0, result.x - result.width // 2 - pad)
-            y1 = max(0, result.y - result.height // 2 - pad)
-            x2 = min(sw, result.x + result.width // 2 + pad)
-            y2 = min(sh, result.y + result.height // 2 + pad)
-
-            if x2 - x1 < 4 or y2 - y1 < 4:
-                return
-
-            cropped = screen_bgr[y1:y2, x1:x2]
-
-            # Save to ~/.awt/templates/<hash>.png
-            _TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
-            name_hash = hashlib.md5(target_name.encode()).hexdigest()[:12]  # noqa: S324
-            template_path = _TEMPLATES_DIR / f"{name_hash}.png"
-            cv2.imwrite(str(template_path), cropped)
-
-            # Also save metadata
-            meta_path = _TEMPLATES_DIR / f"{name_hash}.txt"
-            meta_path.write_text(
-                f"target: {target_name}\n"
-                f"method: {result.method.value}\n"
-                f"confidence: {result.confidence}\n",
-                encoding="utf-8",
-            )
-
-            logger.debug(
-                "Auto-saved template for '%s' → %s",
-                target_name,
-                template_path,
-            )
-        except Exception:
-            logger.debug("Template auto-save failed", exc_info=True)
+        template_store.save(
+            self.template_scope,
+            target_name,
+            screenshot,
+            left=result.x - result.width / 2,
+            top=result.y - result.height / 2,
+            width=result.width,
+            height=result.height,
+            method=result.method.value,
+            confidence=result.confidence,
+        )
 
     async def _try_saved_template(
         self,
@@ -392,10 +376,8 @@ class HybridMatcher(BaseMatcher):
         if not target_name:
             return None
 
-        name_hash = hashlib.md5(target_name.encode()).hexdigest()[:12]  # noqa: S324
-        template_path = _TEMPLATES_DIR / f"{name_hash}.png"
-
-        if not template_path.exists():
+        template_path = template_store.lookup(self.template_scope, target_name)
+        if template_path is None:
             return None
 
         # Use TemplateMatcher logic directly

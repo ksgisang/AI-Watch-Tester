@@ -126,6 +126,14 @@ _SYNONYMS: dict[str, list[str]] = {
 }
 
 
+def _box_centre(box: dict[str, float]) -> tuple[int, int]:
+    """Centre of a Playwright bounding box, which is where a click goes."""
+    return (
+        int(box["x"] + box["width"] / 2),
+        int(box["y"] + box["height"] / 2),
+    )
+
+
 def _parse_coordinates(value: str | None) -> tuple[int, int]:
     """Parse 'x,y' coordinate string.
 
@@ -221,6 +229,9 @@ class StepExecutor:
         # Coordinates waiting for proof that the click did something.
         # Written only after post-action verification confirms a change.
         self._pending_learn: dict[str, Any] | None = None
+        # The element crop waiting for the same proof, destined for the
+        # template store rather than SQLite. See _propose_bank().
+        self._pending_bank: dict[str, Any] | None = None
         self._iframe_locator: Any = None  # for iframe direct click
         self._iframe_frame: Any = None
         self._found_frame: Any = None  # frame where if_visible found target
@@ -242,6 +253,7 @@ class StepExecutor:
         screenshots: dict[str, str | None] = {"before": None, "after": None}
 
         self._pending_learn = None
+        self._pending_bank = None
 
         try:
             # 0. Resolve runtime variables in step fields
@@ -623,18 +635,28 @@ class StepExecutor:
         except Exception:
             logger.debug("wait_for %r timed out or failed — continuing", state, exc_info=True)
 
-    async def _find_text_with_synonyms(self, text: str) -> tuple[int, int] | None:
-        """Try find_text_position with synonym + iframe fallback."""
+    async def _find_text_with_synonyms(
+        self,
+        text: str,
+    ) -> tuple[int, int, dict[str, float] | None] | None:
+        """Try find_text_position with synonym + iframe fallback.
+
+        Returns ``(x, y, box)``. The box comes along because a centre point
+        cannot be cropped out of a screenshot, and cropping the element is how
+        a run heals once the selector stops working. It is ``None`` for the
+        iframe path, where the click goes through the frame locator and there
+        is no main-frame rectangle to photograph.
+        """
         # Main frame
-        pos = await self._engine.find_text_position(text)
-        if pos is not None:
-            return pos
+        box = await self._find_text_box(text)
+        if box is not None:
+            return _box_centre(box) + (box,)
 
         # Synonyms on main frame
         for syn in _SYNONYMS.get(text.lower(), []):
-            pos = await self._engine.find_text_position(syn)
-            if pos is not None:
-                return pos
+            box = await self._find_text_box(syn)
+            if box is not None:
+                return _box_centre(box) + (box,)
 
         # Search iframes — store frame reference for direct click
         if hasattr(self._engine, "page"):
@@ -649,13 +671,35 @@ class StepExecutor:
                         self._iframe_locator = loc
                         self._iframe_frame = frame
                         # Return dummy coords — actual click via frame
-                        return -1, -1
+                        return -1, -1, None
                 except Exception:
                     continue
 
         return None
 
-    async def _find_input_field(self, step: StepConfig) -> tuple[int, int] | None:
+    async def _find_text_box(self, text: str) -> dict[str, float] | None:
+        """The rectangle of the element matching ``text``, if the engine offers one.
+
+        ``WebEngine`` exposes ``find_text_box``; ``DesktopEngine`` and test
+        doubles may only have ``find_text_position``. Falling back to a
+        zero-sized box around the centre keeps those callers working -- they
+        just have nothing to bank, which :func:`template_store.save` already
+        treats as "nothing worth writing".
+        """
+        finder = getattr(self._engine, "find_text_box", None)
+        if finder is not None:
+            box = await finder(text)
+            return box if isinstance(box, dict) else None
+
+        pos = await self._engine.find_text_position(text)
+        if pos is None:
+            return None
+        return {"x": float(pos[0]), "y": float(pos[1]), "width": 0.0, "height": 0.0}
+
+    async def _find_input_field(
+        self,
+        step: StepConfig,
+    ) -> tuple[int, int, dict[str, float]] | None:
         """Enhanced input field finding for find_and_type.
 
         Fallback chain when CSS selector fails:
@@ -665,7 +709,10 @@ class StepExecutor:
         4. Short text prefix match (e.g. "이메일" from "이메일을 입력하세요")
         5. input[type] match (email, password) inferred from selector/text
 
-        Returns None if page is not a real Playwright page.
+        Returns ``(x, y, box)``, or None if page is not a real Playwright page.
+        The box lets the caller bank a picture of the field — an input found by
+        placeholder is exactly the kind of target whose selector changes while
+        its appearance does not.
         """
         try:
             return await self._find_input_field_inner(step)
@@ -677,7 +724,10 @@ class StepExecutor:
             )
             return None
 
-    async def _find_input_field_inner(self, step: StepConfig) -> tuple[int, int] | None:
+    async def _find_input_field_inner(
+        self,
+        step: StepConfig,
+    ) -> tuple[int, int, dict[str, float]] | None:
         """Inner implementation — may raise on non-Playwright pages."""
         page = self._engine.page  # type: ignore[attr-defined]
         target: TargetSpec = step.target  # type: ignore[assignment]
@@ -735,10 +785,7 @@ class StepExecutor:
                         await loc.scroll_into_view_if_needed(timeout=2000)
                     box = await loc.bounding_box()
                     if box:
-                        return (
-                            int(box["x"] + box["width"] / 2),
-                            int(box["y"] + box["height"] / 2),
-                        )
+                        return _box_centre(box) + (box,)
             except Exception:
                 continue
 
@@ -752,6 +799,7 @@ class StepExecutor:
         confidence: float = 1.0,
         *,
         method: MatchMethod | None = None,
+        box: dict[str, float] | None = None,
     ) -> MatchResult:
         """Execute find_and_* action at given position, return MatchResult.
 
@@ -762,11 +810,23 @@ class StepExecutor:
         ``match_history`` could not distinguish a CSS selector from a template
         match. Defaults to ``PLAYWRIGHT`` because most callers here resolve the
         target through a DOM locator.
+
+        ``box`` is the element's rectangle in CSS pixels, when the caller has
+        it. It is what makes self-healing possible: the crop is banked *before*
+        the action, while the element still looks the way it looked when the
+        selector worked.
         """
         from aat.core.models import MatchResult
 
         if method is None:
             method = MatchMethod.PLAYWRIGHT
+
+        # Note the picture before acting. After a click the page may navigate;
+        # after a type the field holds different text. Either way the element
+        # no longer looks like the thing a future run will be looking for.
+        # Nothing is written yet — see _settle_pending_bank().
+        if box is not None:
+            self._propose_bank(step, box, method, confidence)
 
         # Handle iframe direct click (x=-1 sentinel from _find_text_with_synonyms)
         iframe_loc = getattr(self, "_iframe_locator", None)
@@ -895,6 +955,74 @@ class StepExecutor:
             return False
         return step.learn is not False
 
+    def _propose_bank(
+        self,
+        step: StepConfig,
+        box: dict[str, float],
+        method: MatchMethod,
+        confidence: float,
+    ) -> None:
+        """Note the crop that *would* become this target's visual baseline.
+
+        Provisional on purpose. A DOM selector can resolve to the wrong
+        element — that is what the nav-zone warning above exists for — and a
+        picture of the wrong element is worse than no picture, because healing
+        from it reproduces the wrong click and calls it a pass. So this follows
+        AAT-109's rule for coordinates: propose now, write only once
+        verification has seen the action do something.
+        """
+        if not self._learn_allowed(step):
+            return
+        if box.get("width", 0) <= 0 or box.get("height", 0) <= 0:
+            return
+        screenshot = self._last_screenshot
+        if not screenshot:
+            return
+        name = ""
+        if step.target:
+            name = step.target.text or step.target.selector or ""
+        if not name:
+            return
+        self._pending_bank = {
+            "name": name,
+            "screenshot": screenshot,
+            "box": dict(box),
+            "method": method.value,
+            "confidence": confidence,
+        }
+
+    def _settle_pending_bank(self, effect_ok: bool | None) -> None:
+        """Write the proposed visual baseline, unless the action did nothing.
+
+        Scoped to the host the step ran against, so one application's picture
+        can never answer another's lookup. ``_last_url`` is captured before
+        every action by :meth:`execute_step`, which also means banking costs no
+        extra screenshot: the one taken for ``assert_screen_changed`` is the
+        one cropped here.
+        """
+        pending = self._pending_bank
+        self._pending_bank = None
+        if not pending or effect_ok is False:
+            return
+
+        from aat.matchers import template_store
+
+        box = pending["box"]
+        viewport_w, _ = self._get_viewport_size()
+        with contextlib.suppress(Exception):
+            template_store.save(
+                template_store.scope_for(self._last_url),
+                str(pending["name"]),
+                bytes(pending["screenshot"]),
+                left=float(box["x"]),
+                top=float(box["y"]),
+                width=float(box["width"]),
+                height=float(box["height"]),
+                method=str(pending["method"]),
+                confidence=float(pending["confidence"]),
+                viewport_width=viewport_w,
+            )
+
     async def _settle_pending_learn(self, effect_ok: bool | None) -> None:
         """Commit or discard the coordinates the last action proposed.
 
@@ -903,6 +1031,11 @@ class StepExecutor:
                        False — verification saw no change (the click did nothing).
                        None  — nothing was measured; keep the old behaviour and save.
         """
+        # The visual baseline settles on the same evidence, but on its own
+        # store — it must not be skipped just because coordinate learning has
+        # no SQLite store to write to.
+        self._settle_pending_bank(effect_ok)
+
         pending = self._pending_learn
         self._pending_learn = None
         if not pending or not self._learned_store:
@@ -1084,9 +1217,14 @@ class StepExecutor:
                             await loc.scroll_into_view_if_needed(timeout=2000)
                         box = await loc.bounding_box()
                         if box:
-                            x = int(box["x"] + box["width"] / 2)
-                            y = int(box["y"] + box["height"] / 2)
-                            return await self._act_at_pos(step, x, y, confidence=1.0)
+                            x, y = _box_centre(box)
+                            return await self._act_at_pos(
+                                step,
+                                x,
+                                y,
+                                confidence=1.0,
+                                box=box,
+                            )
                 except Exception:
                     logger.debug(
                         "CSS selector attempt %d failed (selector=%s)",
@@ -1163,9 +1301,15 @@ class StepExecutor:
 
         # Priority 0.5: Enhanced input finding for find_and_type
         if step.action == ActionType.FIND_AND_TYPE and hasattr(self._engine, "page"):
-            pos = await self._find_input_field(step)
-            if pos is not None:
-                return await self._act_at_pos(step, pos[0], pos[1], confidence=0.9)
+            field_hit = await self._find_input_field(step)
+            if field_hit is not None:
+                return await self._act_at_pos(
+                    step,
+                    field_hit[0],
+                    field_hit[1],
+                    confidence=0.9,
+                    box=field_hit[2],
+                )
 
         # Priority 0.7: Check if history recommends a specific method
         # If a target has 3+ failures, log a warning
@@ -1205,16 +1349,16 @@ class StepExecutor:
 
         # Try Playwright native text search first (no screenshot needed)
         if target.text and hasattr(self._engine, "find_text_position"):
-            pos = await self._find_text_with_synonyms(target.text)
-            if pos is not None:
-                return await self._act_at_pos(step, pos[0], pos[1])
+            text_hit = await self._find_text_with_synonyms(target.text)
+            if text_hit is not None:
+                return await self._act_at_pos(step, text_hit[0], text_hit[1], box=text_hit[2])
 
             # Fallback 2: scroll to top + retry
             if hasattr(self._engine, "scroll_to_top"):
                 await self._engine.scroll_to_top()
-                pos = await self._find_text_with_synonyms(target.text)
-                if pos is not None:
-                    return await self._act_at_pos(step, pos[0], pos[1])
+                text_hit = await self._find_text_with_synonyms(target.text)
+                if text_hit is not None:
+                    return await self._act_at_pos(step, text_hit[0], text_hit[1], box=text_hit[2])
 
             # Fallback 3: JS force click via locator (bypasses sticky headers)
             if hasattr(self._engine, "force_click_by_text"):
@@ -1302,6 +1446,13 @@ class StepExecutor:
         from aat.matchers.hybrid import HybridMatcher
 
         if isinstance(self._matcher, HybridMatcher):
+            # Tell the chain which host its banked pictures belong to. A
+            # scenario may cross hosts mid-run, so this is per step, not per
+            # run — and getting it wrong means one application's picture
+            # answering another's lookup.
+            from aat.matchers import template_store
+
+            self._matcher.template_scope = template_store.scope_for(self._last_url)
             match_result = await self._matcher.find_with_options(
                 target,
                 search_screenshot,
@@ -2884,9 +3035,7 @@ class StepExecutor:
             # An engine that hands back something other than a URL leaves the
             # question unanswered, and unanswered is not the same as failed.
             current = seen if isinstance(seen, str) else ""
-            if current and (
-                not requested or self._url_key(requested) in self._url_key(current)
-            ):
+            if current and (not requested or self._url_key(requested) in self._url_key(current)):
                 break
             await asyncio.sleep(poll_interval)
 

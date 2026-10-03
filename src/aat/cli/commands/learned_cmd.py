@@ -27,11 +27,44 @@ def learned_list(
     except Exception:
         data_dir = ".aat"
 
+    # The database and the picture store are independent. A run that never
+    # learned a coordinate writes no `learned.db`, so returning early when the
+    # file is missing would hide every banked picture behind "no learned data"
+    # -- a report that contradicts the disk.
     db_path = Path(data_dir) / "learned.db"
-    if not db_path.exists():
-        typer.echo("No learned data yet. Run tests with --learn to start.")
-        return
+    rows: list[Any] = []
+    coords: list[Any] = []
+    stats: list[Any] = []
+    platforms: list[Any] = []
 
+    if db_path.exists():
+        rows, coords, stats, platforms = _print_db_sections(db_path)
+
+    # Banked element pictures — the other half of what AWT remembers, and the
+    # one that decides whether a broken selector heals or fails.
+    templates = _template_inventory()
+    if templates:
+        typer.echo("\n  Banked Element Pictures:")
+        typer.echo(f"  {'Host':<24} {'Target':<24} {'Size':<11} {'Age':>7}")
+        typer.echo("  " + "-" * 68)
+        for t in templates[:20]:
+            size = f"{t.width}x{t.height}"
+            age = f"{t.age_days:.1f}d" if t.saved_at else "?"
+            typer.echo(f"  {t.scope[:24]:<24} {t.target[:24]:<24} {size:<11} {age:>7}")
+        if len(templates) > 20:
+            typer.echo(f"  … and {len(templates) - 20} more")
+        typer.echo("  Remove them with: aat learned clear --templates")
+
+    if not rows and not coords and not stats and not platforms and not templates:
+        typer.echo("No learned data yet. Run tests with --learn to start.")
+
+    typer.echo()
+
+
+def _print_db_sections(
+    db_path: Path,
+) -> tuple[list[Any], list[Any], list[Any], list[Any]]:
+    """Print everything the learning database holds, and report what was there."""
     from aat.learning.store import LearnedStore
 
     store = LearnedStore(db_path)
@@ -89,18 +122,44 @@ def learned_list(
             src = f"({p['source']})" if p["source"] != "builtin" else ""
             typer.echo(f"  [{p['platform']}] {p['tip']} {src}")
 
-    if not rows and not coords and not stats and not platforms:
-        typer.echo("No learned data yet. Run tests with --learn to start.")
+    return list(rows), list(coords), list(stats), list(platforms)
 
-    typer.echo()
+
+def _template_inventory() -> list[Any]:
+    """Banked pictures, or an empty list if the store is unreadable.
+
+    Listing learned data must not fail because of the template store: it is a
+    cache of screenshots, and a report about what AWT remembers is more useful
+    partially than not at all.
+    """
+    try:
+        from aat.matchers import template_store
+
+        return list(template_store.inventory())
+    except Exception:
+        return []
 
 
 @learned_app.command(name="clear")
 def learned_clear(
     config_path: str | None = typer.Option(None, "--config", "-c", help="Config file path."),
     confirm: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
+    templates: bool = typer.Option(
+        False,
+        "--templates",
+        help="Clear banked element pictures instead of the learning database.",
+    ),
+    host: str | None = typer.Option(
+        None,
+        "--host",
+        help="With --templates, clear only one host (e.g. localhost:3000).",
+    ),
 ) -> None:
     """Clear all learned data (elements, coordinates, failures, platform tips)."""
+    if templates:
+        _clear_templates(host, confirm=confirm)
+        return
+
     try:
         cfg = load_config(config_path=Path(config_path) if config_path else None)
         data_dir = cfg.data_dir
@@ -130,3 +189,37 @@ def learned_clear(
     store._conn.execute("DELETE FROM platform_patterns")
     store._conn.commit()
     typer.echo(typer.style("  ✓ All learned data cleared.", fg=typer.colors.GREEN))
+
+
+def _clear_templates(host: str | None, *, confirm: bool) -> None:
+    """Delete banked element pictures, optionally for one host only.
+
+    Separate from the database clear because the two answer different
+    questions. "AWT clicks the wrong place" is coordinates; "AWT heals to the
+    wrong element" is a picture. Clearing both when the user asked about one
+    throws away working knowledge.
+    """
+    from aat.matchers import template_store
+
+    scope = template_store.scope_for_host(host) if host else None
+    found = template_store.inventory(scope)
+    if not found:
+        where = f" for {host}" if host else ""
+        typer.echo(f"No banked element pictures{where}.")
+        return
+
+    if not confirm:
+        where = f" for {host}" if host else ""
+        proceed = typer.confirm(f"Delete {len(found)} banked element picture(s){where}?")
+        if not proceed:
+            typer.echo("Cancelled.")
+            return
+
+    removed = template_store.clear(scope)
+    typer.echo(
+        typer.style(
+            f"  ✓ {removed} banked element picture(s) cleared "
+            f"from {template_store.templates_root()}",
+            fg=typer.colors.GREEN,
+        )
+    )

@@ -22,6 +22,22 @@ from aat.core.models import EngineConfig
 from aat.engine.base import BaseEngine
 
 
+def _as_box(rect: Any) -> dict[str, float]:
+    """Playwright's bounding box as a plain dict of four floats.
+
+    ``bounding_box()`` returns a ``FloatRect``, which is not a ``dict[str,
+    float]`` as far as the type checker is concerned. Copying the four keys we
+    actually use keeps the return type honest and stops a Playwright type
+    detail from leaking into every caller that wants to crop a screenshot.
+    """
+    return {
+        "x": float(rect["x"]),
+        "y": float(rect["y"]),
+        "width": float(rect["width"]),
+        "height": float(rect["height"]),
+    }
+
+
 class WebEngine(BaseEngine):
     """Playwright-based web test engine."""
 
@@ -295,6 +311,22 @@ class WebEngine(BaseEngine):
         return await self.page.inner_text("body")
 
     async def find_text_position(self, text: str) -> tuple[int, int] | None:
+        """Centre of the element matching ``text``, or ``None``.
+
+        A thin view over :meth:`find_text_box` so the search strategy has one
+        implementation. The box itself matters to callers that want to bank a
+        picture of the element for self-healing, which a centre point cannot
+        describe.
+        """
+        box = await self.find_text_box(text)
+        if box is None:
+            return None
+        return (
+            int(box["x"] + box["width"] / 2),
+            int(box["y"] + box["height"] / 2),
+        )
+
+    async def find_text_box(self, text: str) -> dict[str, float] | None:
         """Find element on page and scroll into view if needed.
 
         Strategy:
@@ -304,8 +336,8 @@ class WebEngine(BaseEngine):
         4. get_by_role("link") — links
         5. get_by_text — general text fallback
 
-        Automatically scrolls elements into the viewport before returning
-        coordinates. Returns (x, y) center coordinates, or None.
+        Automatically scrolls elements into the viewport before returning the
+        bounding box (CSS pixels, as Playwright reports it), or ``None``.
         """
         # If text looks like a CSS selector, try it directly first
         if text.startswith(("#", "[", ".")) or text.startswith("input"):
@@ -315,10 +347,7 @@ class WebEngine(BaseEngine):
                     await locator.scroll_into_view_if_needed(timeout=3000)
                     box = await locator.bounding_box()
                     if box:
-                        return (
-                            int(box["x"] + box["width"] / 2),
-                            int(box["y"] + box["height"] / 2),
-                        )
+                        return _as_box(box)
             except Exception:
                 pass
 
@@ -340,10 +369,7 @@ class WebEngine(BaseEngine):
                 await locator.scroll_into_view_if_needed(timeout=3000)
                 box = await locator.bounding_box()
                 if box:
-                    return (
-                        int(box["x"] + box["width"] / 2),
-                        int(box["y"] + box["height"] / 2),
-                    )
+                    return _as_box(box)
             except Exception:
                 continue
 

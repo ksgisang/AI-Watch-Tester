@@ -28,6 +28,7 @@ from aat.core.models import (
     TargetSpec,
 )
 from aat.engine.executor import _SYNONYMS, StepExecutor, _parse_coordinates, _parse_scroll_params
+from aat.matchers import template_store
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -94,6 +95,10 @@ def mock_engine() -> MagicMock:
     del engine.find_on_screen
     del engine.scroll_to_top
     del engine.force_click_by_text
+    # Same reason: an auto-created `find_text_box` is a MagicMock, and awaiting
+    # one raises. Engines that can report a rectangle set it deliberately —
+    # see TestVisualBaselineBanking.
+    del engine.find_text_box
     # fast_mode must be False so executor doesn't short-circuit with MatchError
     engine._config = MagicMock(fast_mode=False)
     return engine
@@ -799,6 +804,7 @@ class TestSynonymFallback:
         engine.screenshot = AsyncMock(side_effect=_screen_that_reacts())
         engine.save_screenshot = AsyncMock()
         del engine.find_on_screen
+        del engine.find_text_box  # awaiting an auto-created MagicMock raises
 
         executor = StepExecutor(
             engine=engine,
@@ -860,6 +866,7 @@ class TestScrollToTopFallback:
         engine.screenshot = AsyncMock(side_effect=_screen_that_reacts())
         engine.save_screenshot = AsyncMock()
         del engine.find_on_screen
+        del engine.find_text_box  # awaiting an auto-created MagicMock raises
         del engine.force_click_by_text
 
         executor = StepExecutor(
@@ -898,6 +905,7 @@ class TestForceClickFallback:
         engine.screenshot = AsyncMock(side_effect=_screen_that_reacts())
         engine.save_screenshot = AsyncMock()
         del engine.find_on_screen
+        del engine.find_text_box  # awaiting an auto-created MagicMock raises
 
         executor = StepExecutor(
             engine=engine,
@@ -934,6 +942,7 @@ class TestForceClickFallback:
         engine.screenshot = AsyncMock(side_effect=_screen_that_reacts())
         engine.save_screenshot = AsyncMock()
         del engine.find_on_screen
+        del engine.find_text_box  # awaiting an auto-created MagicMock raises
 
         executor = StepExecutor(
             engine=engine,
@@ -1407,6 +1416,7 @@ class TestNavigationEffect:
         engine.get_url = AsyncMock(side_effect=itertools.cycle(urls))
         engine.find_text_position = AsyncMock(return_value=None)
         del engine.find_on_screen
+        del engine.find_text_box  # awaiting an auto-created MagicMock raises
         del engine.scroll_to_top
         del engine.force_click_by_text
         del engine.page  # skip the URL/title blocker probe
@@ -1544,9 +1554,7 @@ class TestNavigationEffect:
             ("https://example.com", "https://example.org"),
         ],
     )
-    def test_url_key_keeps_different_destinations_apart(
-        self, requested: str, landed: str
-    ) -> None:
+    def test_url_key_keeps_different_destinations_apart(self, requested: str, landed: str) -> None:
         assert StepExecutor._url_key(requested) not in StepExecutor._url_key(landed)
 
 
@@ -1743,3 +1751,233 @@ class TestMatchProvenanceLabel:
         await executor.execute_step(step)
 
         assert store.record_match.call_args.kwargs["method"] == MatchMethod.PLAYWRIGHT.value
+
+
+# ─── Visual baseline banking ─────────────────────────────────
+
+
+def _png_sized(width: int, height: int, shade: int) -> bytes:
+    """A PNG of a given size, so a 320x240 element box lands inside it."""
+    return bytes(cv2.imencode(".png", np.full((height, width), shade, dtype=np.uint8))[1])
+
+
+def _screen_that_reacts_sized(width: int, height: int) -> Callable[[], bytes]:
+    shades = itertools.cycle((0, 255))
+    return lambda: _png_sized(width, height, next(shades))
+
+
+def _png_with_patch(width: int, height: int, box: dict[str, float]) -> bytes:
+    """A dark frame with a red rectangle where the element is."""
+    img = np.full((height, width, 3), 30, dtype=np.uint8)
+    x, y = int(box["x"]), int(box["y"])
+    img[y : y + int(box["height"]), x : x + int(box["width"])] = (0, 0, 255)
+    return bytes(cv2.imencode(".png", img)[1])
+
+
+class TestVisualBaselineBanking:
+    """A DOM hit has to leave behind a picture, or self-healing has nothing to heal from.
+
+    The feature was advertised and shipped, and it fired zero times in real
+    use. One reason was that the only code that ever banked a template lived
+    inside ``HybridMatcher`` — which the executor reaches *only after* a DOM
+    lookup has already failed. So every element AWT successfully found was
+    never photographed, and when the selector later broke there was nothing on
+    disk to fall back to.
+
+    Banking costs no extra screenshot: the frame captured for
+    ``assert_screen_changed`` is the one cropped. And it is provisional, for
+    the AAT-109 reason — a selector can resolve to the wrong element, and a
+    picture of the wrong element is worse than none, because healing from it
+    reproduces the wrong click and reports a pass.
+    """
+
+    BOX = {"x": 40.0, "y": 50.0, "width": 80.0, "height": 30.0}
+
+    @staticmethod
+    def _executor(engine: MagicMock, tmp_path: Path, *, learn: bool = True) -> StepExecutor:
+        return StepExecutor(
+            engine=engine,
+            matcher=MagicMock(find=AsyncMock(return_value=MatchResult(found=False, x=0, y=0))),
+            humanizer=MagicMock(move_to=AsyncMock(), type_text=AsyncMock()),
+            waiter=MagicMock(wait_until_stable=AsyncMock(return_value=True)),
+            comparator=MagicMock(check=AsyncMock(), check_assert=AsyncMock()),
+            screenshot_dir=tmp_path,
+            learn_coords=learn,
+        )
+
+    @pytest.fixture
+    def engine(self, mock_engine: MagicMock) -> MagicMock:
+        """A page with one findable element, screenshotted at viewport size."""
+        mock_engine.screenshot = AsyncMock(side_effect=_screen_that_reacts_sized(320, 240))
+        mock_engine._config = MagicMock(fast_mode=False, viewport_width=320, viewport_height=240)
+        mock_engine.page = _page_with_one_element(dict(self.BOX))
+        return mock_engine
+
+    @pytest.mark.asyncio
+    async def test_a_selector_hit_banks_a_picture_of_the_element(
+        self, engine: MagicMock, tmp_path: Path
+    ) -> None:
+        """The regression: a DOM hit used to leave the store empty."""
+        executor = self._executor(engine, tmp_path)
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(selector="#submit"))
+
+        result = await executor.execute_step(step)
+
+        assert result.status == StepStatus.PASSED
+        (entry,) = template_store.inventory()
+        assert entry.target == "#submit"
+        assert entry.width == 80 + 2 * template_store.PAD
+        assert entry.height == 30 + 2 * template_store.PAD
+        assert entry.method == MatchMethod.PLAYWRIGHT.value
+
+    @pytest.mark.asyncio
+    async def test_the_scope_follows_the_page_the_step_ran_against(
+        self, engine: MagicMock, tmp_path: Path
+    ) -> None:
+        """Pictures belong to a host, so one app's "확인" cannot answer another's."""
+        engine.get_url = AsyncMock(return_value="https://shop.example.net/cart")
+        executor = self._executor(engine, tmp_path)
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(selector="#buy"))
+
+        await executor.execute_step(step)
+
+        (entry,) = template_store.inventory()
+        assert entry.scope == "shop.example.net"
+        assert template_store.lookup("shop.example.net", "#buy") is not None
+
+    @pytest.mark.asyncio
+    async def test_the_picture_comes_from_before_the_action(
+        self, engine: MagicMock, tmp_path: Path
+    ) -> None:
+        """After a click the element may be gone; the crop must predate it.
+
+        The first frame has a red rectangle where the element is and every
+        later frame does not, so a red crop proves the banked picture came
+        from the frame taken before the action — not from the post-step frame,
+        which is the one most of the verification code works with.
+        """
+        engine.screenshot = AsyncMock(
+            side_effect=itertools.chain(
+                [_png_with_patch(320, 240, self.BOX)],
+                (_png_sized(320, 240, s) for s in itertools.cycle((0, 200))),
+            )
+        )
+        executor = self._executor(engine, tmp_path)
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(selector="#submit"))
+
+        await executor.execute_step(step)
+
+        (entry,) = template_store.inventory()
+        img = cv2.imread(str(entry.path))
+        centre = img[img.shape[0] // 2, img.shape[1] // 2]
+        assert tuple(int(c) for c in centre) == (0, 0, 255)
+
+    @pytest.mark.asyncio
+    async def test_a_click_that_moved_nothing_banks_nothing(
+        self, engine: MagicMock, tmp_path: Path
+    ) -> None:
+        """AAT-109's rule, applied to pictures as well as coordinates.
+
+        A selector that resolves to the wrong element still "succeeds". The
+        only evidence that it found the right one is that clicking it did
+        something, so banking waits for that evidence.
+        """
+        engine.screenshot = AsyncMock(return_value=_png_sized(320, 240, 128))
+        executor = self._executor(engine, tmp_path)
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(selector="#submit"))
+
+        result = await executor.execute_step(step)
+
+        assert result.status == StepStatus.WARNING
+        assert template_store.inventory() == []
+
+    @pytest.mark.asyncio
+    async def test_no_learn_turns_banking_off(self, engine: MagicMock, tmp_path: Path) -> None:
+        """`aat run --no-learn` means remember nothing, pictures included."""
+        executor = self._executor(engine, tmp_path, learn=False)
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(selector="#submit"))
+
+        result = await executor.execute_step(step)
+
+        assert result.status == StepStatus.PASSED
+        assert template_store.inventory() == []
+
+    @pytest.mark.asyncio
+    async def test_a_step_marked_learn_false_banks_nothing(
+        self, engine: MagicMock, tmp_path: Path
+    ) -> None:
+        """`learn: false` marks targets whose position follows the content."""
+        executor = self._executor(engine, tmp_path)
+        step = make_step(
+            ActionType.FIND_AND_CLICK, target=TargetSpec(selector="#submit")
+        ).model_copy(update={"learn": False})
+
+        await executor.execute_step(step)
+
+        assert template_store.inventory() == []
+
+    @pytest.mark.asyncio
+    async def test_a_text_search_hit_banks_the_box_the_engine_reported(
+        self, mock_engine: MagicMock, tmp_path: Path
+    ) -> None:
+        """Most scenarios name a button by its label, not by a selector."""
+        del mock_engine.page  # skip the selector and semantics paths
+        mock_engine.screenshot = AsyncMock(side_effect=_screen_that_reacts_sized(320, 240))
+        mock_engine._config = MagicMock(fast_mode=False, viewport_width=320, viewport_height=240)
+        mock_engine.find_text_box = AsyncMock(return_value=dict(self.BOX))
+        executor = self._executor(mock_engine, tmp_path)
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(text="Submit"))
+
+        result = await executor.execute_step(step)
+
+        assert result.status == StepStatus.PASSED
+        (entry,) = template_store.inventory()
+        assert entry.target == "Submit"
+
+    @pytest.mark.asyncio
+    async def test_an_engine_without_boxes_still_passes(
+        self, mock_engine: MagicMock, tmp_path: Path
+    ) -> None:
+        """DesktopEngine reports a centre point and no rectangle.
+
+        Nothing to photograph is not an error — the step must still run.
+        """
+        del mock_engine.page
+        mock_engine.screenshot = AsyncMock(side_effect=_screen_that_reacts_sized(320, 240))
+        mock_engine._config = MagicMock(fast_mode=False, viewport_width=320, viewport_height=240)
+        mock_engine.find_text_position = AsyncMock(return_value=(80, 65))
+        executor = self._executor(mock_engine, tmp_path)
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(text="Submit"))
+
+        result = await executor.execute_step(step)
+
+        assert result.status == StepStatus.PASSED
+        assert template_store.inventory() == []
+
+    @pytest.mark.asyncio
+    async def test_coordinate_clicks_bank_nothing(self, engine: MagicMock, tmp_path: Path) -> None:
+        """`click_at: "100,50"` names no element, so there is nothing to recognise."""
+        executor = self._executor(engine, tmp_path)
+        step = make_step(ActionType.CLICK_AT, value="100,50")
+
+        await executor.execute_step(step)
+
+        assert template_store.inventory() == []
+
+    @pytest.mark.asyncio
+    async def test_a_store_failure_does_not_fail_the_step(
+        self, engine: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A step that found its element must not fail on the bookkeeping after."""
+
+        def _explode(*_args: object, **_kwargs: object) -> None:
+            msg = "disk full"
+            raise OSError(msg)
+
+        monkeypatch.setattr(template_store, "save", _explode)
+        executor = self._executor(engine, tmp_path)
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(selector="#submit"))
+
+        result = await executor.execute_step(step)
+
+        assert result.status == StepStatus.PASSED
