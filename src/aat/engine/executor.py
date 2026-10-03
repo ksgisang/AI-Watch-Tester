@@ -492,7 +492,7 @@ class StepExecutor:
         elif step.action == ActionType.TYPE_TEXT:
             await self._do_type(step.value or "", step.humanize)
             if step.verify and step.value:
-                await self._verify_text_on_screen(step.value, step.region, step.message)
+                await self._verify_text_on_screen(step.value, step.region, step.message, step.step)
 
         elif step.action == ActionType.PRESS_KEY:
             await self._engine.press_key(step.value or "")
@@ -514,6 +514,32 @@ class StepExecutor:
                     page = self._engine.page  # type: ignore[attr-defined]
                     loc = page.locator(selector).first
                     if await loc.count() > 0:
+                        if not await loc.is_visible():
+                            # The element is in the DOM but nobody can read it.
+                            # `innerText` falls back to `textContent` on a
+                            # non-rendered element, so without this check a
+                            # `display:none` block satisfied the assertion --
+                            # which is how a deleted notice went on "passing"
+                            # after the code that hid it shipped.
+                            #
+                            # Reported here rather than falling through to OCR:
+                            # OCR would answer "not found on screen", which is
+                            # true and useless. "Present but hidden" is the
+                            # sentence that tells the reader what to look at.
+                            detail = (
+                                f"selector {selector!r} is in the DOM but not visible, "
+                                f"so its text cannot satisfy an assertion"
+                            )
+                            raise StepExecutionError(
+                                f"{step.message}\n  ↳ actual cause: {detail}"
+                                if step.message
+                                else detail,
+                                step=step.step,
+                                action="assert_text",
+                            )
+                        # On a rendered element `innerText` already excludes
+                        # hidden descendants, so the top element's visibility is
+                        # the only check this branch needs.
                         inner = (await loc.inner_text()).strip()
                         if target_text.strip().lower() in inner.lower():
                             logger.info(
@@ -537,21 +563,26 @@ class StepExecutor:
                             )
                     else:
                         # selector not found → fall through to OCR
-                        await self._verify_text_on_screen(target_text, step.region, step.message)
+                        await self._verify_text_on_screen(
+                            target_text, step.region, step.message, step.step
+                        )
                 except StepExecutionError:
                     raise
                 except Exception:
                     # On unexpected error, fall back to OCR
-                    await self._verify_text_on_screen(target_text, step.region, step.message)
+                    await self._verify_text_on_screen(
+                        target_text, step.region, step.message, step.step
+                    )
             else:
                 # No selector: try page-level text match first (DOM), then OCR fallback
                 page_match = False
                 if hasattr(self._engine, "page"):
                     try:
                         page = self._engine.page  # type: ignore[attr-defined]
-                        loc = page.get_by_text(target_text, exact=False).first
-                        if await loc.count() > 0:
-                            page_match = True
+                        page_match = await self._any_visible_match(
+                            page.get_by_text(target_text, exact=False)
+                        )
+                        if page_match:
                             logger.info(
                                 "assert_text: '%s' found via page.get_by_text",
                                 target_text,
@@ -559,7 +590,9 @@ class StepExecutor:
                     except Exception:
                         page_match = False
                 if not page_match:
-                    await self._verify_text_on_screen(target_text, step.region, step.message)
+                    await self._verify_text_on_screen(
+                        target_text, step.region, step.message, step.step
+                    )
 
         elif step.action == ActionType.ASSERT_SCREEN_CHANGED:
             await self._check_screen_changed(step.threshold, step.region, step.message)
@@ -3302,13 +3335,49 @@ class StepExecutor:
             w, h = 1280, 720
         return w, h
 
+    @staticmethod
+    async def _any_visible_match(locator: Any, limit: int = 20) -> bool:
+        """True when at least one of *locator*'s matches is actually rendered.
+
+        ``get_by_text`` matches hidden nodes, so counting matches answered "yes,
+        the text is there" for text inside a ``display:none`` block -- a notice
+        the code had deliberately stopped showing still satisfied an assertion
+        that it was on the page.
+
+        Every match is checked, not just the first: a page can hold the same
+        words in a hidden template and in the live view, and the first node in
+        document order is often the hidden one. *limit* bounds a page that
+        repeats a word hundreds of times -- at that point one of the first
+        twenty being visible is near certain, and the alternative is one round
+        trip per node.
+        """
+        try:
+            count = await locator.count()
+        except Exception:
+            return False
+        for i in range(min(count, limit)):
+            try:
+                if await locator.nth(i).is_visible():
+                    return True
+            except Exception:
+                continue
+        return False
+
     async def _verify_text_on_screen(
         self,
         text: str,
         region: ScreenRegion = ScreenRegion.FULL,
         message: str = "",
+        step_number: int = 0,
     ) -> None:
-        """Verify text exists on screen via OCR (region-aware)."""
+        """Verify text exists on screen via OCR (region-aware).
+
+        ``step_number`` is threaded in because both raises below used to pass
+        ``step=0``, and ``StepExecutionError`` builds its message from that: a
+        failed assertion on step 7 reported itself as ``Step 0 (assert_text)``
+        in the console, in ``last_run.json`` and in the PDF. The same defect
+        was fixed in the comparator for AAT-114; this is the other half of it.
+        """
         import pytesseract  # type: ignore[import-untyped]
 
         screenshot = await self._engine.screenshot()
@@ -3324,7 +3393,7 @@ class StepExecutor:
         if img is None:
             raise StepExecutionError(
                 message or "Failed to decode screenshot for text verification",
-                step=0,
+                step=step_number,
                 action="assert_text",
             )
 
@@ -3338,7 +3407,7 @@ class StepExecutor:
         search = text.strip().lower()
         if search not in ocr_text.lower():
             err = message or (f"Text '{text}' not found in region={region.value} via OCR")
-            raise StepExecutionError(err, step=0, action="assert_text")
+            raise StepExecutionError(err, step=step_number, action="assert_text")
 
         logger.info(
             "assert_text: '%s' found in region=%s",

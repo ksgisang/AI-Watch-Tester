@@ -126,18 +126,20 @@ _ACTIONS: dict[ActionType, ActionDoc] = {
     ActionType.ASSERT_TEXT: ActionDoc(
         "Assert",
         "Check that text is **contained** in the page — DOM first, OCR "
-        "fallback. Substring match; hidden (`display:none`) text still matches",
+        "fallback. Substring match; `display:none` text does not count",
         "Text to look for, if `target.text` is not used",
         target="required",
         value="optional",
         caveat=(
             "Measured, not assumed: the DOM text engine matches anywhere in "
-            "`<body>` and does not filter on visibility, so an assertion can "
-            "pass on a toast or modal the user never saw — pass "
-            "`target.selector` and assert on a container you know is rendered "
-            "when that matters. Text that lives only in `<title>` or other "
-            "`<head>` metadata never matches, because neither the DOM text "
-            "engine nor OCR can reach it. "
+            "`<body>`, so an assertion can pass on a toast or modal further "
+            "down the page than the reader looked — pass `target.selector` "
+            "when you mean one element. It does require a *rendered* match, "
+            "though: `display:none` text is in the DOM but satisfies nothing, "
+            "and a selector naming a non-rendered element fails saying so. "
+            "Text that lives only in `<title>` or other `<head>` metadata "
+            "never matches, because neither the DOM text engine nor OCR can "
+            "reach it. "
             "Being a substring match has a consequence worth stating "
             "outright: the right words wrapped in junk pass. A template that "
             "leaks its own markup and renders `\\(\\text{질량}\\)` where it "

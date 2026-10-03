@@ -503,16 +503,34 @@ class TestFindAndClearAction:
 # ─── assert_text ─────────────────────────────────────────────
 
 
-def _page_with_text(*, count: int, inner: str = "", found_by_text: bool = False) -> MagicMock:
-    """Build a Playwright-like page for the DOM side of assert_text."""
+def _page_with_text(
+    *,
+    count: int,
+    inner: str = "",
+    found_by_text: bool = False,
+    visible: bool = True,
+) -> MagicMock:
+    """Build a Playwright-like page for the DOM side of assert_text.
+
+    `visible` models whether the matched element is actually rendered. An
+    assertion is only satisfied by text a person could read, so the executor
+    asks before it trusts `inner_text` (AAT-115 ③).
+    """
     locator = MagicMock()
     locator.count = AsyncMock(return_value=count)
     locator.inner_text = AsyncMock(return_value=inner)
+    locator.is_visible = AsyncMock(return_value=visible)
+
+    # The no-selector path walks every match rather than taking the first, so
+    # the fake has to answer `nth(i)` as well as `count()`.
     by_text = MagicMock()
     by_text.count = AsyncMock(return_value=1 if found_by_text else 0)
+    by_text.is_visible = AsyncMock(return_value=visible)
+    by_text.nth = MagicMock(return_value=by_text)
+
     page = MagicMock()
     page.locator = MagicMock(return_value=MagicMock(first=locator))
-    page.get_by_text = MagicMock(return_value=MagicMock(first=by_text))
+    page.get_by_text = MagicMock(return_value=by_text)
     return page
 
 
@@ -589,6 +607,42 @@ class TestAssertTextAction:
         self, executor: StepExecutor, mock_engine: MagicMock
     ) -> None:
         mock_engine.page = _page_with_text(count=0, found_by_text=False)
+        ocr = AsyncMock()
+        executor._verify_text_on_screen = ocr  # type: ignore[method-assign]
+        step = make_step(ActionType.ASSERT_TEXT, target=TargetSpec(text="Saved"))
+        result = await executor.execute_step(step)
+        assert result.status == StepStatus.PASSED
+        ocr.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_selector_naming_a_hidden_element_fails(
+        self, executor: StepExecutor, mock_engine: MagicMock
+    ) -> None:
+        """A `display:none` element holds its text but shows nobody (AAT-115 ③).
+
+        The failure is reported here rather than handed to OCR: OCR would
+        answer "not found on screen", which is true and tells the author
+        nothing about why.
+        """
+        mock_engine.page = _page_with_text(count=1, inner="Saved", visible=False)
+        ocr = AsyncMock()
+        executor._verify_text_on_screen = ocr  # type: ignore[method-assign]
+        step = make_step(ActionType.ASSERT_TEXT, target=TargetSpec(selector="#msg", text="Saved"))
+        result = await executor.execute_step(step)
+        assert result.status == StepStatus.FAILED
+        assert "not visible" in (result.error_message or "")
+        ocr.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_without_selector_a_hidden_match_does_not_count(
+        self, executor: StepExecutor, mock_engine: MagicMock
+    ) -> None:
+        """Hidden text in the DOM must not short-circuit the search (AAT-115 ③).
+
+        Without a selector there is still the screen to look at, so this
+        falls through to OCR instead of failing outright.
+        """
+        mock_engine.page = _page_with_text(count=0, found_by_text=True, visible=False)
         ocr = AsyncMock()
         executor._verify_text_on_screen = ocr  # type: ignore[method-assign]
         step = make_step(ActionType.ASSERT_TEXT, target=TargetSpec(text="Saved"))

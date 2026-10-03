@@ -21,9 +21,12 @@ Pinned here:
   * `text_equals` scoped to a selector is the check that catches the leak, and
     it is new: unscoped, it compares against `inner_text("body")`, so it demands
     the whole visible page equal the value and essentially never passes.
-  * `assert_text` passes on text the DOM holds but `display: none` hides. That
-    is a real defect and is left as a strict xfail, not a fix, because fixing
-    it turns currently-passing scenarios red -- 대표님's call, not this file's.
+  * `assert_text` no longer passes on text the DOM holds but `display: none`
+    hides, on either path. That was the one fix in AAT-115 a green suite can
+    feel: a scenario asserting on a notice the code has since hidden now goes
+    red, because it had been reporting that users could see something they
+    could not. The controls next to it pin the other direction -- visible text
+    still passes, including a visible copy standing behind a hidden one.
 """
 
 from __future__ import annotations
@@ -49,7 +52,7 @@ from aat.engine.waiter import Waiter
 from aat.engine.web import WebEngine
 from aat.matchers.hybrid import HybridMatcher
 from aat.matchers.template import TemplateMatcher
-from tests.fixtures.rendered_text_server import LEAKED, WORD, rendered_text_server
+from tests.fixtures.rendered_text_server import LEAKED, NOTICE, WORD, rendered_text_server
 
 
 @pytest.fixture(scope="module")
@@ -83,9 +86,9 @@ def _executor(engine: WebEngine, tmp_path: Path) -> StepExecutor:
     )
 
 
-def _assert_text(expected: str, *, selector: str | None = None) -> StepConfig:
+def _assert_text(expected: str, *, selector: str | None = None, step: int = 1) -> StepConfig:
     return StepConfig(
-        step=1,
+        step=step,
         action=ActionType.ASSERT_TEXT,
         description=f"check for {expected!r}",
         target=TargetSpec(text=expected, selector=selector),
@@ -333,24 +336,20 @@ class TestTextVisibleStaysASubstringMatch:
 
 
 class TestHiddenText:
-    """A strict xfail, following the host-scoping precedent.
+    """ "The DOM contains it" must not stand in for "a person can read it".
 
-    `assert_text` reads `inner_text`, and Playwright's `inner_text` does respect
-    `display: none` — but the no-selector path uses `get_by_text`, which matches
-    hidden nodes, and the OCR fallback is only reached when the DOM path finds
-    nothing. So "the DOM contains it" can stand in for "a person can read it".
+    Both paths through `assert_text` used to accept hidden text, for different
+    reasons. The no-selector path counts `get_by_text` matches, and that
+    locator matches hidden nodes. The selector path reads `inner_text`, which
+    does respect `display: none` — on a *rendered* element; on a non-rendered
+    one it falls back to `textContent` and hands back the hidden string.
 
-    Not fixed here: a scenario asserting on text that is present but hidden
-    passes today, and making it fail turns currently-green suites red. That is
-    a behaviour change and 대표님's decision. Marked `strict=True` so that
-    whoever fixes it is told to come back and remove the marker — a comment
-    would not have said anything at all.
+    This is the one of AAT-115's three fixes that changes behaviour a green
+    suite can feel: a scenario asserting on a notice the code has since hidden
+    now goes red. That is the point — it was reporting that users could see
+    something they could not.
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="assert_text passes on display:none text; fixing it is a behaviour change",
-    )
     @pytest.mark.asyncio
     async def test_text_a_person_cannot_read_should_not_satisfy_an_assertion(
         self, engine: WebEngine, base_url: str, tmp_path: Path
@@ -360,6 +359,98 @@ class TestHiddenText:
         result = await _executor(engine, tmp_path).execute_step(_assert_text("삭제된 안내문"))
 
         assert result.status == StepStatus.FAILED
+
+    @pytest.mark.asyncio
+    async def test_the_selector_path_refuses_hidden_text_too(
+        self, engine: WebEngine, base_url: str, tmp_path: Path
+    ) -> None:
+        """Naming the hidden element directly must not be a way around it."""
+        await engine.navigate(f"{base_url}/?render=clean")
+
+        result = await _executor(engine, tmp_path).execute_step(
+            _assert_text("삭제된 안내문", selector="#hidden")
+        )
+
+        assert result.status == StepStatus.FAILED
+
+    @pytest.mark.asyncio
+    async def test_the_reason_given_is_hidden_not_missing(
+        self, engine: WebEngine, base_url: str, tmp_path: Path
+    ) -> None:
+        """ "Not found on screen" would be true and useless.
+
+        The reader has to be told the element exists, or they go looking for a
+        rendering bug when the answer is a `display: none` they can grep for.
+        """
+        await engine.navigate(f"{base_url}/?render=clean")
+
+        result = await _executor(engine, tmp_path).execute_step(
+            _assert_text("삭제된 안내문", selector="#hidden")
+        )
+
+        assert "not visible" in (result.error_message or "")
+
+    @pytest.mark.asyncio
+    async def test_visible_text_still_passes_by_selector(
+        self, engine: WebEngine, base_url: str, tmp_path: Path
+    ) -> None:
+        """The control. Without it the fix above could be "fail on everything"."""
+        await engine.navigate(f"{base_url}/?render=clean")
+
+        result = await _executor(engine, tmp_path).execute_step(
+            _assert_text(WORD, selector="#question")
+        )
+
+        assert result.status == StepStatus.PASSED, result.error_message
+
+    @pytest.mark.asyncio
+    async def test_visible_text_still_passes_without_a_selector(
+        self, engine: WebEngine, base_url: str, tmp_path: Path
+    ) -> None:
+        """The other control: narrowing `get_by_text` must not break the common case."""
+        await engine.navigate(f"{base_url}/?render=clean")
+
+        result = await _executor(engine, tmp_path).execute_step(_assert_text(WORD))
+
+        assert result.status == StepStatus.PASSED, result.error_message
+
+    @pytest.mark.asyncio
+    async def test_a_visible_copy_behind_a_hidden_one_still_passes(
+        self, engine: WebEngine, base_url: str, tmp_path: Path
+    ) -> None:
+        """The page is fine; only the first match in document order is hidden.
+
+        A stale template that still holds last release's wording, plus the live
+        view that holds this release's -- the same words, twice, unreadable copy
+        first. Checking only the first `get_by_text` match would call this page
+        broken, which is the opposite of the mistake the rest of this class
+        guards against and just as wrong.
+        """
+        await engine.navigate(f"{base_url}/?render=clean")
+
+        result = await _executor(engine, tmp_path).execute_step(_assert_text(NOTICE))
+
+        assert result.status == StepStatus.PASSED, result.error_message
+
+    @pytest.mark.asyncio
+    async def test_a_failure_is_reported_against_the_step_that_failed(
+        self, engine: WebEngine, base_url: str, tmp_path: Path
+    ) -> None:
+        """Derived repair: the OCR fallback raised with `step=0`.
+
+        `StepExecutionError` builds its message from that number, so an
+        assertion failing on step 7 announced itself as `Step 0 (assert_text)`
+        — in the console, in `last_run.json` and in the PDF. The comparator's
+        half of this was fixed in AAT-114; this is the engine's half.
+        """
+        await engine.navigate(f"{base_url}/?render=clean")
+
+        result = await _executor(engine, tmp_path).execute_step(
+            _assert_text("존재하지 않는 문구", step=7)
+        )
+
+        assert result.status == StepStatus.FAILED
+        assert "Step 0" not in (result.error_message or "")
 
 
 class TestGetElementText:

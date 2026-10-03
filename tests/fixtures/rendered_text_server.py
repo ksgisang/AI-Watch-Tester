@@ -15,7 +15,13 @@ So the page serves the same words three ways, chosen by `render`:
 
 and always carries a `#hidden` paragraph holding text that is in the DOM but
 `display: none`, because "the DOM has it" and "a person can read it" are not
-the same claim and AWT currently cannot tell them apart.
+the same claim. AAT-115 taught `assert_text` to tell them apart.
+
+It also carries the harder shape of the same problem: `NOTICE` appears twice,
+in a hidden stale template **first** and in the live view second. Document
+order puts the unreadable copy ahead of the readable one, so checking only the
+first match -- the obvious implementation -- fails a page that is perfectly
+fine. One copy is not enough to catch that; two in this order are.
 
 Usage:
     with rendered_text_server() as base_url:
@@ -38,6 +44,9 @@ WORD = "질량"
 #: which is the entire reason the original bug survived its own test suite.
 LEAKED = "\\(\\text{질량}\\)"
 
+#: Present twice: hidden copy first, visible copy second. See the module docstring.
+NOTICE = "주의 사항"
+
 _BODIES = {
     "clean": WORD,
     "latex": LEAKED,
@@ -51,11 +60,14 @@ _PAGE = """<!doctype html>
   #question {{ font-size: 24px; }}
   /* In the DOM, unreadable on screen. */
   #hidden {{ display: none; }}
+  #stale-notice {{ display: none; }}
 </style></head>
 <body>
 <h1>문항</h1>
 <p id="question">{body}</p>
 <p id="hidden">삭제된 안내문</p>
+<p id="stale-notice">{notice}</p>
+<p id="live-notice">{notice}</p>
 </body></html>
 """
 
@@ -63,7 +75,7 @@ _PAGE = """<!doctype html>
 class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler's name
         render = (parse_qs(urlparse(self.path).query).get("render") or ["clean"])[0]
-        page = _PAGE.format(body=_BODIES.get(render, _BODIES["clean"]))
+        page = _PAGE.format(body=_BODIES.get(render, _BODIES["clean"]), notice=NOTICE)
         payload = page.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
