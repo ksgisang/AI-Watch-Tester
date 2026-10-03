@@ -167,8 +167,9 @@ class TestMatchingConfig:
         cfg = MatchingConfig()
         assert cfg.confidence_threshold == 0.85
         assert cfg.multi_scale is True
+        # LEARNED is deliberately absent: see MatchingConfig.chain_order.
+        assert MatchMethod.LEARNED not in cfg.chain_order
         assert cfg.chain_order == [
-            MatchMethod.LEARNED,
             MatchMethod.TEMPLATE,
             MatchMethod.OCR,
             MatchMethod.FEATURE,

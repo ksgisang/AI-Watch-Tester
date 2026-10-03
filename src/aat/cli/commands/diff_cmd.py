@@ -162,7 +162,7 @@ async def _diff(
         from aat.engine.executor import StepExecutor
         from aat.engine.humanizer import Humanizer
         from aat.engine.waiter import Waiter
-        from aat.matchers import MATCHER_REGISTRY
+        from aat.matchers import build_matchers
         from aat.matchers.hybrid import HybridMatcher
 
         engine_cls = ENGINE_REGISTRY.get(config.engine.type)
@@ -171,12 +171,8 @@ async def _diff(
             raise AATError(msg)
         engine = engine_cls(config.engine)
 
-        matchers = []
-        for m in config.matching.chain_order:
-            if m.value in MATCHER_REGISTRY and m.value != "vision_ai":
-                matchers.append(
-                    MATCHER_REGISTRY[m.value](config.matching)  # type: ignore[call-arg]
-                )
+        # No Vision AI: a visual-regression run must not reach for a paid API.
+        matchers = build_matchers(config.matching, include_vision=False)
         hybrid = HybridMatcher(matchers, config.matching)
         humanizer = Humanizer(config.humanizer)
         waiter = Waiter()

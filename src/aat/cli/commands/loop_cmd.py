@@ -21,7 +21,7 @@ from aat.engine.comparator import Comparator
 from aat.engine.executor import StepExecutor
 from aat.engine.humanizer import Humanizer
 from aat.engine.waiter import Waiter
-from aat.matchers import MATCHER_REGISTRY
+from aat.matchers import build_matchers
 from aat.matchers.hybrid import HybridMatcher
 from aat.reporters import build_reporter
 
@@ -334,29 +334,7 @@ async def _loop(
     engine = engine_cls(config.engine)
 
     # Assemble matchers (3-tier hybrid with Vision AI)
-    matchers = []
-    for m in config.matching.chain_order:
-        if m.value not in MATCHER_REGISTRY:
-            continue
-        if m.value == "vision_ai":
-            vis = MATCHER_REGISTRY[m.value](  # type: ignore[call-arg]
-                vision_config=config.vision,
-                matching_config=config.matching,
-                ai_config=config.ai,
-            )
-            matchers.append(vis)
-        else:
-            matchers.append(MATCHER_REGISTRY[m.value](config.matching))  # type: ignore[call-arg]
-    if not any(m.name == "vision_ai" for m in matchers):
-        from aat.matchers.vision_ai import VisionAIMatcher
-
-        matchers.append(
-            VisionAIMatcher(
-                vision_config=config.vision,
-                matching_config=config.matching,
-                ai_config=config.ai,
-            )
-        )
+    matchers = build_matchers(config.matching, vision=config.vision, ai=config.ai)
     learned_store = None
     try:
         from aat.learning.store import LearnedStore

@@ -27,7 +27,7 @@ from aat.engine.comparator import Comparator
 from aat.engine.executor import StepExecutor
 from aat.engine.humanizer import Humanizer
 from aat.engine.waiter import Waiter
-from aat.matchers import MATCHER_REGISTRY
+from aat.matchers import build_matchers
 from aat.matchers.hybrid import HybridMatcher
 from aat.reporters import build_reporter
 
@@ -262,7 +262,8 @@ def run_command(
         "-V",
         help=(
             "Execution verbosity: 'detailed' (default, run all steps) or "
-            "'concise' (skip wait/screenshot/assert_screen_changed steps for speed)."
+            "'concise' (skip screenshot/assert_screen_changed steps and cap "
+            "every wait at 100ms, for speed)."
         ),
     ),
     screenshots: str | None = typer.Option(
@@ -590,30 +591,7 @@ async def _run(
         msg = f"Unknown engine type: {config.engine.type}"
         raise AATError(msg)
     engine = engine_cls(config.engine)
-    matchers = []
-    for m in config.matching.chain_order:
-        if m.value not in MATCHER_REGISTRY:
-            continue
-        if m.value == "vision_ai":
-            vis = MATCHER_REGISTRY[m.value](  # type: ignore[call-arg]
-                vision_config=config.vision,
-                matching_config=config.matching,
-                ai_config=config.ai,  # legacy fallback
-            )
-            matchers.append(vis)
-        else:
-            matchers.append(MATCHER_REGISTRY[m.value](config.matching))  # type: ignore[call-arg]
-    # Always add VisionAIMatcher if not in chain_order (Tier 3 fallback)
-    if not any(m.name == "vision_ai" for m in matchers):
-        from aat.matchers.vision_ai import VisionAIMatcher
-
-        matchers.append(
-            VisionAIMatcher(
-                vision_config=config.vision,
-                matching_config=config.matching,
-                ai_config=config.ai,
-            )
-        )
+    matchers = build_matchers(config.matching, vision=config.vision, ai=config.ai)
     # Set up LearnedStore for match history tracking
     learned_store = None
     try:

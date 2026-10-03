@@ -27,7 +27,7 @@ from aat.engine.comparator import Comparator
 from aat.engine.executor import StepExecutor
 from aat.engine.humanizer import Humanizer
 from aat.engine.waiter import Waiter
-from aat.matchers import MATCHER_REGISTRY
+from aat.matchers import build_matchers
 from aat.matchers.hybrid import HybridMatcher
 from aat.reporters import REPORTER_REGISTRY
 
@@ -295,11 +295,7 @@ async def _start_guided(config_path: str | None) -> None:
         raise typer.Exit(code=1)
     engine = engine_cls(config.engine)
 
-    matchers = [
-        MATCHER_REGISTRY[m.value](config.matching)  # type: ignore[call-arg]
-        for m in config.matching.chain_order
-        if m.value in MATCHER_REGISTRY
-    ]
+    matchers = build_matchers(config.matching, vision=config.vision, ai=config.ai)
     hybrid = HybridMatcher(matchers, config.matching)
 
     humanizer = Humanizer(config.humanizer)

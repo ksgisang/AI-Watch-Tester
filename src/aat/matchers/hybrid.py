@@ -34,7 +34,8 @@ _METHOD_TO_NAME: dict[MatchMethod, str] = {
     MatchMethod.OCR: "ocr",
     MatchMethod.FEATURE: "feature",
     MatchMethod.VISION_AI: "vision_ai",
-    MatchMethod.LEARNED: "learned",
+    # No MatchMethod.LEARNED entry: learned coordinates are the executor's job
+    # (Priority 0.4), not a matcher's. See the class docstring.
 }
 
 # Templates directory for auto-saved element screenshots
@@ -46,16 +47,21 @@ class HybridMatcher(BaseMatcher):
 
     Matching strategy (in order):
 
-    1. **Learned data** -- Check SQLite for previously learned positions.
-    2. **Saved templates** -- Try auto-saved templates from previous runs.
-    3. **Chain traversal** -- Walk tiers in order:
+    1. **Saved templates** -- Try auto-saved templates from previous runs.
+    2. **Chain traversal** -- Walk tiers in order:
        - Tier 1: Template matching (if target.image provided)
        - Tier 2: OCR (enhanced preprocessing)
        - Tier 3: Vision AI (Claude API, expensive)
-    4. **Give up** -- Return ``None``.
+    3. **Give up** -- Return ``None``.
 
     After a successful match, the matched region is saved as a template
     for future Tier 1 matching (auto-learning).
+
+    Learned coordinates are *not* consulted here. The step executor applies
+    them at its own Priority 0.4 -- below an explicit selector, and only
+    reinforced once the step's verification passes (AAT-109). This class once
+    documented a learned-first tier, but no call site ever supplied a matcher
+    named ``learned``, so the promise was never kept.
     """
 
     def __init__(
@@ -201,21 +207,13 @@ class HybridMatcher(BaseMatcher):
         # --- Tier 1: Fast / Deterministic ---
         logger.info("HybridMatcher: Tier 1 — Template matching for '%s'", target_name)
 
-        # 1a. Learned data (hash-based exact match)
-        learned = self._matchers.get("learned")
-        if learned:
-            result = await self._try_matcher(learned, target, screenshot)
-            if result is not None:
-                logger.info("HybridMatcher: Tier 1 ✓ via learned data")
-                return result
-
-        # 1b. Auto-saved template matching
+        # 1a. Auto-saved template matching
         result = await self._try_saved_template(target, screenshot)
         if result is not None:
             logger.info("HybridMatcher: Tier 1 ✓ via saved template")
             return result
 
-        # 1c. Template matching (if target has image)
+        # 1b. Template matching (if target has image)
         template = self._matchers.get("template")
         if template:
             result = await self._try_matcher(template, target, screenshot)

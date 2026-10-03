@@ -1321,7 +1321,7 @@ async def _execute_run(
         from aat.engine.executor import StepExecutor
         from aat.engine.humanizer import Humanizer
         from aat.engine.waiter import Waiter
-        from aat.matchers import MATCHER_REGISTRY
+        from aat.matchers import build_matchers
         from aat.matchers.hybrid import HybridMatcher
 
         await _manager.broadcast({"type": "run_start"})
@@ -1345,11 +1345,11 @@ async def _execute_run(
         engine = engine_cls(_current_config.engine)
 
         # Assemble matchers
-        matchers = [
-            MATCHER_REGISTRY[m.value](_current_config.matching)  # type: ignore[call-arg]
-            for m in _current_config.matching.chain_order
-            if m.value in MATCHER_REGISTRY
-        ]
+        matchers = build_matchers(
+            _current_config.matching,
+            vision=_current_config.vision,
+            ai=_current_config.ai,
+        )
         hybrid = HybridMatcher(matchers, _current_config.matching)
 
         # Assemble executor
@@ -1454,7 +1454,7 @@ async def _execute_loop(
         from aat.engine.executor import StepExecutor
         from aat.engine.humanizer import Humanizer
         from aat.engine.waiter import Waiter
-        from aat.matchers import MATCHER_REGISTRY
+        from aat.matchers import build_matchers
         from aat.matchers.hybrid import HybridMatcher
         from aat.reporters import REPORTER_REGISTRY
 
@@ -1488,11 +1488,7 @@ async def _execute_loop(
             return
         engine = engine_cls(config.engine)
 
-        matchers = [
-            MATCHER_REGISTRY[m.value](config.matching)  # type: ignore[call-arg]
-            for m in config.matching.chain_order
-            if m.value in MATCHER_REGISTRY
-        ]
+        matchers = build_matchers(config.matching, vision=config.vision, ai=config.ai)
         hybrid = HybridMatcher(matchers, config.matching)
 
         humanizer = Humanizer(config.humanizer)
@@ -1650,7 +1646,7 @@ async def _execute_oneclick(url: str) -> None:
         from aat.engine.executor import StepExecutor
         from aat.engine.humanizer import Humanizer
         from aat.engine.waiter import Waiter
-        from aat.matchers import MATCHER_REGISTRY
+        from aat.matchers import build_matchers
         from aat.matchers.hybrid import HybridMatcher
 
         await _manager.broadcast({"type": "oneclick_start", "url": url})
@@ -1743,11 +1739,11 @@ async def _execute_oneclick(url: str) -> None:
         engine = engine_cls(_current_config.engine)
 
         # Assemble matchers
-        matchers = [
-            MATCHER_REGISTRY[m.value](_current_config.matching)  # type: ignore[call-arg]
-            for m in _current_config.matching.chain_order
-            if m.value in MATCHER_REGISTRY
-        ]
+        matchers = build_matchers(
+            _current_config.matching,
+            vision=_current_config.vision,
+            ai=_current_config.ai,
+        )
         hybrid = HybridMatcher(matchers, _current_config.matching)
 
         # Assemble executor

@@ -97,7 +97,13 @@ class AssertType(StrEnum):
 
 
 class MatchMethod(StrEnum):
-    """Image matching algorithm."""
+    """Image matching algorithm.
+
+    ``LEARNED`` and ``SEMANTICS`` name no matcher. They are kept so configs
+    that still list them in ``chain_order`` load rather than fail validation;
+    ``build_matchers`` then logs what actually handles that work instead of
+    dropping the entry in silence.
+    """
 
     LEARNED = "learned"
     SEMANTICS = "semantics"
@@ -230,8 +236,9 @@ class EngineConfig(BaseModel):
     verbosity: str = Field(
         default="detailed",
         description=(
-            "Execution verbosity: 'detailed' (all steps, default) "
-            "or 'concise' (skip wait/screenshot/assert_screen_changed)"
+            "Execution verbosity: 'detailed' (all steps, default) or "
+            "'concise' (skip screenshot/assert_screen_changed steps and cap "
+            "every wait at 100ms)"
         ),
     )
 
@@ -245,9 +252,13 @@ class MatchingConfig(BaseModel):
     scale_range_max: float = Field(default=2.0, ge=1.0, le=4.0)
     grayscale: bool = Field(default=True)
     ocr_languages: list[str] = Field(default=["eng", "kor"])
+    # No LEARNED here. It led this list for months and was dropped on every
+    # run, because no matcher is registered under that name -- learned
+    # coordinates are the step executor's job (Priority 0.4), below an
+    # explicit selector. The enum value is kept so existing configs that name
+    # it still load; ``build_matchers`` reports it instead of ignoring it.
     chain_order: list[MatchMethod] = Field(
         default=[
-            MatchMethod.LEARNED,
             MatchMethod.TEMPLATE,
             MatchMethod.OCR,
             MatchMethod.FEATURE,
