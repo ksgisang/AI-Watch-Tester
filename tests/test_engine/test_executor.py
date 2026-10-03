@@ -16,7 +16,7 @@ import cv2
 import numpy as np
 import pytest
 
-from aat.core.exceptions import StepExecutionError
+from aat.core.exceptions import CriticalStepError, StepExecutionError
 from aat.core.models import (
     ActionType,
     AssertType,
@@ -51,6 +51,25 @@ def _screen_that_reacts() -> Callable[[], bytes]:
     return lambda: _png(next(shades))
 
 
+def _a_browser_that_moves(engine: MagicMock, start: str = "https://example.com/page") -> None:
+    """Wire the mock's URL to follow its own ``navigate()`` calls.
+
+    The executor now judges a navigation by where the browser landed, so a mock
+    whose ``get_url`` is a constant is claiming every navigate went nowhere —
+    the same trap ``_screen_that_reacts`` avoids for screenshots.
+    """
+    location = {"url": start}
+
+    async def _navigate(url: str, *_args: object, **_kwargs: object) -> None:
+        location["url"] = url
+
+    async def _get_url() -> str:
+        return location["url"]
+
+    engine.navigate = AsyncMock(side_effect=_navigate)
+    engine.get_url = AsyncMock(side_effect=_get_url)
+
+
 @pytest.fixture
 def mock_engine() -> MagicMock:
     engine = MagicMock()
@@ -67,7 +86,7 @@ def mock_engine() -> MagicMock:
     engine.screenshot = AsyncMock(side_effect=_screen_that_reacts())
     engine.save_screenshot = AsyncMock()
     engine.get_page_text = AsyncMock(return_value="Page text")
-    engine.get_url = AsyncMock(return_value="https://example.com/page")
+    _a_browser_that_moves(engine)
     engine.find_text_position = AsyncMock(return_value=None)
     # Explicitly remove attributes so hasattr() returns False
     # (MagicMock auto-creates any attribute, breaking the screen-coord code path)
@@ -1342,3 +1361,189 @@ class TestLoadSessionAge:
         )
 
         assert classify_failure(message) == "session_expired"
+
+
+# ─── Navigation is judged by the URL, not by pixels ──────────
+
+
+class TestNavigationEffect:
+    """`critical: true` on a navigate step used to fail every time.
+
+    NAVIGATE sat in `_CRITICAL_CHANGE_ACTIONS` with a 50% pixel threshold, so
+    the simplest scenario a new user can write died on step 1 against a plain
+    page — example.com repaints 9.1% — while the URL and title printed on the
+    next log lines proved the navigation had worked. The diagnosis then aimed
+    FIX_TARGET at the healthy scenario.
+    """
+
+    @staticmethod
+    def _frozen_screen() -> bytes:
+        """One image, returned every time: zero measured pixel change.
+
+        This is the sparse page that broke the old threshold.
+        """
+        return _png(200)
+
+    @staticmethod
+    def _executor(engine: MagicMock, tmp_path: Path) -> StepExecutor:
+        return StepExecutor(
+            engine=engine,
+            matcher=MagicMock(find=AsyncMock(return_value=MatchResult(found=True, x=1, y=1))),
+            humanizer=MagicMock(move_to=AsyncMock(), type_text=AsyncMock()),
+            waiter=MagicMock(wait_until_stable=AsyncMock(return_value=True)),
+            comparator=MagicMock(check=AsyncMock(), check_assert=AsyncMock()),
+            screenshot_dir=tmp_path,
+        )
+
+    @classmethod
+    def _engine(cls, urls: list[str]) -> MagicMock:
+        """An engine whose screen never moves and whose URL follows `urls`."""
+        engine = MagicMock()
+        engine.navigate = AsyncMock()
+        engine.screenshot = AsyncMock(return_value=cls._frozen_screen())
+        engine.save_screenshot = AsyncMock()
+        engine.get_page_text = AsyncMock(return_value="Example Domain")
+        engine.get_url = AsyncMock(side_effect=itertools.cycle(urls))
+        engine.find_text_position = AsyncMock(return_value=None)
+        del engine.find_on_screen
+        del engine.scroll_to_top
+        del engine.force_click_by_text
+        del engine.page  # skip the URL/title blocker probe
+        engine._config = MagicMock(fast_mode=False)
+        return engine
+
+    @pytest.mark.asyncio
+    async def test_critical_navigate_passes_on_a_page_that_barely_repaints(
+        self, tmp_path: Path
+    ) -> None:
+        """The regression. A frozen screen must not fail a navigate that worked.
+
+        Mutation check: putting NAVIGATE back in `_CRITICAL_THRESHOLDS` and
+        routing it to `_verify_click_effect` makes this raise CriticalStepError.
+        """
+        engine = self._engine(["about:blank", "https://example.com/"])
+        executor = self._executor(engine, tmp_path)
+        step = StepConfig(
+            step=1,
+            action=ActionType.NAVIGATE,
+            description="Open the target site",
+            value="https://example.com",
+            critical=True,
+        )
+
+        result = await executor.execute_step(step)
+
+        assert result.status == StepStatus.PASSED
+
+    @pytest.mark.asyncio
+    async def test_critical_navigate_fails_when_the_browser_never_left(
+        self, tmp_path: Path
+    ) -> None:
+        """Dropping the pixel check must not drop the check altogether."""
+        engine = self._engine(["https://old.example/stuck"])
+        executor = self._executor(engine, tmp_path)
+        step = StepConfig(
+            step=1,
+            action=ActionType.NAVIGATE,
+            description="Open the target site",
+            value="https://example.com/target",
+            critical=True,
+        )
+
+        with pytest.raises(CriticalStepError) as exc:
+            await executor.execute_step(step)
+
+        assert "old.example/stuck" in str(exc.value)
+
+    @pytest.mark.asyncio
+    async def test_a_navigate_that_never_left_is_a_warning_not_a_pass(
+        self, tmp_path: Path
+    ) -> None:
+        """Non-critical, but still not PASSED — AAT-109's rule, one step up."""
+        engine = self._engine(["https://old.example/stuck"])
+        executor = self._executor(engine, tmp_path)
+        step = StepConfig(
+            step=1,
+            action=ActionType.NAVIGATE,
+            description="Open the target site",
+            value="https://example.com/target",
+        )
+
+        result = await executor.execute_step(step)
+
+        assert result.status == StepStatus.WARNING
+
+    @pytest.mark.asyncio
+    async def test_a_redirect_passes_and_the_destination_is_logged(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Following a redirect is the server's decision, not a test failure.
+
+        It still has to show up in the log: the scenario asked for one place
+        and ended up in another, and the reader needs to see which.
+        """
+        engine = self._engine(["https://example.com/old", "https://example.com/new-home"])
+        executor = self._executor(engine, tmp_path)
+        step = StepConfig(
+            step=1,
+            action=ActionType.NAVIGATE,
+            description="Open the target site",
+            value="https://example.com/old-home",
+            critical=True,
+        )
+
+        with caplog.at_level(logging.INFO):
+            result = await executor.execute_step(step)
+
+        assert result.status == StepStatus.PASSED
+        assert "new-home" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_an_unreadable_url_is_not_counted_as_a_failure(self, tmp_path: Path) -> None:
+        """No URL means no verdict. Guessing either way would be worse."""
+        engine = self._engine(["about:blank"])
+        engine.get_url = AsyncMock(side_effect=RuntimeError("engine detached"))
+        executor = self._executor(engine, tmp_path)
+        step = StepConfig(
+            step=1,
+            action=ActionType.NAVIGATE,
+            description="Open the target site",
+            value="https://example.com",
+            critical=True,
+        )
+
+        result = await executor.execute_step(step)
+
+        assert result.status == StepStatus.PASSED
+
+    def test_navigate_is_no_longer_scored_in_pixels(self) -> None:
+        """Guards the fix itself, so a future edit cannot quietly undo it."""
+        assert ActionType.NAVIGATE not in StepExecutor._CRITICAL_CHANGE_ACTIONS
+        assert ActionType.NAVIGATE not in StepExecutor._CRITICAL_THRESHOLDS
+
+    @pytest.mark.parametrize(
+        ("requested", "landed"),
+        [
+            ("https://example.com", "https://example.com/"),
+            ("https://example.com", "http://www.example.com"),
+            ("https://example.com/app", "https://example.com/app?ref=1"),
+            ("https://example.com/app", "https://example.com/app#top"),
+            ("example.com/app", "https://EXAMPLE.com/app/"),
+        ],
+    )
+    def test_url_key_reads_these_as_the_same_destination(
+        self, requested: str, landed: str
+    ) -> None:
+        assert StepExecutor._url_key(requested) in StepExecutor._url_key(landed)
+
+    @pytest.mark.parametrize(
+        ("requested", "landed"),
+        [
+            ("https://example.com/dashboard", "https://example.com/login"),
+            ("https://example.com", "https://example.org"),
+        ],
+    )
+    def test_url_key_keeps_different_destinations_apart(
+        self, requested: str, landed: str
+    ) -> None:
+        assert StepExecutor._url_key(requested) not in StepExecutor._url_key(landed)

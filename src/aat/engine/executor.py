@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 import time
 import uuid
 from pathlib import Path
@@ -205,6 +206,7 @@ class StepExecutor:
         self._humanizer = humanizer
         self._waiter = waiter
         self._last_screenshot: bytes | None = None  # for assert_screen_changed
+        self._last_url: str = ""  # pre-action URL, so navigation is judged by URL
         self._comparator = comparator
         self._screenshot_dir = screenshot_dir or Path(".aat/screenshots")
         self._learned_store = learned_store  # for step-level learning
@@ -264,6 +266,12 @@ class StepExecutor:
             with contextlib.suppress(Exception):
                 self._last_screenshot = await self._engine.screenshot()
 
+            # Capture the URL too: navigation is verified by where the browser
+            # landed, never by how many pixels moved.
+            self._last_url = ""
+            with contextlib.suppress(Exception):
+                self._last_url = await self._engine.get_url()
+
             # 1.5. if_visible check — skip if target not on screen
             if step.if_visible and step.target:
                 visible = await self._check_target_visible(step)
@@ -302,6 +310,8 @@ class StepExecutor:
             if step.expect:
                 await self._verify_expect(step)
                 effect_ok = True
+            elif step.action == ActionType.NAVIGATE:
+                effect_ok = await self._verify_navigation_effect(step)
             elif self._should_verify_change(step):
                 effect_ok = await self._verify_click_effect(step)
 
@@ -2445,8 +2455,28 @@ class StepExecutor:
 
     # -- Critical step auto-verification ------------------------------------
 
-    # Actions that should show screen change when critical
+    # Actions whose effect is measured in pixels. Clicks only.
+    #
+    # NAVIGATE used to be in here with a 50% threshold, which made
+    # `critical: true` on a navigate step fail every time against a plain
+    # page: example.com repaints 9.1% and lost to the click threshold while
+    # the URL and title on the next log lines proved the navigation worked.
+    # Navigation is judged by where the browser landed — see
+    # _verify_navigation_effect.
     _CRITICAL_CHANGE_ACTIONS: frozenset[ActionType] = frozenset(
+        {
+            ActionType.FIND_AND_CLICK,
+            ActionType.FIND_AND_DOUBLE_CLICK,
+            ActionType.FIND_AND_RIGHT_CLICK,
+            ActionType.CLICK_AT,
+        }
+    )
+
+    # Actions reported as WARNING when they demonstrably had no effect.
+    # A click that moves no pixel did nothing; a navigate that never left the
+    # previous URL did nothing. Both are measured by the right instrument now,
+    # so both are worth carrying out of the log.
+    _WARN_ON_NO_EFFECT: frozenset[ActionType] = frozenset(
         {
             ActionType.NAVIGATE,
             ActionType.FIND_AND_CLICK,
@@ -2456,21 +2486,8 @@ class StepExecutor:
         }
     )
 
-    # Actions reported as WARNING when they demonstrably changed nothing.
-    # Clicks only: a click that moves no pixel did nothing, whereas navigation
-    # is verified by URL and its 50% threshold misfires on sparse pages.
-    _WARN_ON_NO_EFFECT: frozenset[ActionType] = frozenset(
-        {
-            ActionType.FIND_AND_CLICK,
-            ActionType.FIND_AND_DOUBLE_CLICK,
-            ActionType.FIND_AND_RIGHT_CLICK,
-            ActionType.CLICK_AT,
-        }
-    )
-
     # Default change thresholds per action type
     _CRITICAL_THRESHOLDS: dict[ActionType, float] = {
-        ActionType.NAVIGATE: 0.50,
         ActionType.FIND_AND_CLICK: 0.05,
         ActionType.FIND_AND_DOUBLE_CLICK: 0.05,
         ActionType.FIND_AND_RIGHT_CLICK: 0.05,
@@ -2790,6 +2807,90 @@ class StepExecutor:
 
         # --- Vision AI step verification (last check, after OCR/URL checks) ---
         await self._ai_verify_step(step, screenshot)
+
+    @staticmethod
+    def _url_key(url: str) -> str:
+        """Reduce a URL to the part a navigation is responsible for.
+
+        Drops scheme, ``www.``, a trailing slash, and the query/fragment, so
+        that ``https://example.com`` and ``http://www.example.com/`` read as
+        the same destination. Keeps host and path, because those are what the
+        scenario asked for.
+        """
+        u = url.strip().lower()
+        u = re.sub(r"^[a-z][a-z0-9+.-]*://", "", u)
+        u = u.split("#", 1)[0].split("?", 1)[0]
+        u = re.sub(r"^www\.", "", u)
+        return u.rstrip("/")
+
+    async def _verify_navigation_effect(self, step: StepConfig) -> bool | None:
+        """Verify a navigate step by where the browser landed.
+
+        Pixels are the wrong instrument here. A navigation to a sparse page
+        repaints very little and a navigation that failed outright can repaint
+        a lot (an error page); either way the question "did we go there?" has
+        an exact answer in the URL, and the browser already has it.
+
+        Redirects count as success — following one is the server's decision,
+        not a test failure — but the landing URL is logged so the report says
+        where the step actually ended up. A redirect to a login page is caught
+        separately by :meth:`_verify_post_step`.
+
+        Returns:
+            True if the browser moved or arrived where asked, False if it
+            demonstrably never left the previous page, None if the URL could
+            not be read.
+        """
+        requested = (step.value or "").strip()
+        current = ""
+        poll_interval = _get_preset(self._engine)["url_poll"]
+
+        for _ in range(3):
+            seen: object = ""
+            with contextlib.suppress(Exception):
+                seen = await self._engine.get_url()
+            # An engine that hands back something other than a URL leaves the
+            # question unanswered, and unanswered is not the same as failed.
+            current = seen if isinstance(seen, str) else ""
+            if current and (
+                not requested or self._url_key(requested) in self._url_key(current)
+            ):
+                break
+            await asyncio.sleep(poll_interval)
+
+        if not current:
+            return None
+
+        arrived = bool(requested) and self._url_key(requested) in self._url_key(current)
+        moved = bool(self._last_url) and self._url_key(current) != self._url_key(self._last_url)
+
+        if arrived:
+            logger.info("[AWT] navigate verify: landed on %s — OK", current)
+            return True
+        if moved:
+            # A redirect. Record the destination: the scenario asked for one
+            # place and the server sent us to another, which the reader needs
+            # to see even though the step passed.
+            logger.info(
+                "[AWT] navigate verify: asked for %s, served %s (redirect) — OK",
+                requested or "(no url)",
+                current,
+            )
+            return True
+
+        # The scenario's own wording is added to the fact, never substituted
+        # for it: a step.message that replaced this sentence would hide the two
+        # URLs that are the only way to tell what actually happened.
+        msg = f"Navigation did not leave {self._last_url or current}" + (
+            f" (requested {requested})" if requested else ""
+        )
+        if step.message:
+            msg = f"{step.message} — {msg}"
+        if step.critical:
+            logger.error("[AWT] CRITICAL: %s", msg)
+            raise StepExecutionError(msg, step=step.step, action=step.action.value)
+        logger.warning("[AWT] %s", msg)
+        return False
 
     async def _verify_click_effect(self, step: StepConfig) -> bool | None:
         """Verify every click caused a screen change.

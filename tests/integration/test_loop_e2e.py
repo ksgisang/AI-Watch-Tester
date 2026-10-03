@@ -250,8 +250,18 @@ class TestStepExecutorE2E:
         engine.screenshot = AsyncMock(side_effect=_reacting_screen())
         engine.click = AsyncMock()
         engine.type_text = AsyncMock()
-        engine.navigate = AsyncMock()
         engine.press_key = AsyncMock()
+
+        # The URL follows navigate(), because the executor judges a navigation
+        # by where the browser landed. A constant get_url would assert that
+        # every navigate went nowhere — the same trap _reacting_screen avoids.
+        location = {"url": "http://example.com/page"}
+
+        async def _navigate(url: str, *_args: object, **_kwargs: object) -> None:
+            location["url"] = url
+
+        engine.navigate = AsyncMock(side_effect=_navigate)
+        engine.get_url = AsyncMock(side_effect=lambda: location["url"])
         engine.go_back = AsyncMock()
         engine.refresh = AsyncMock()
         engine.current_url = AsyncMock(return_value="http://example.com/page")
