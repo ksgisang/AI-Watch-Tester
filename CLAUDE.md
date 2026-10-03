@@ -446,6 +446,15 @@ aat run --skill-mode --fast <scenario>
   - 시험: OCR 후퇴 11건(`tests/test_engine/test_comparator.py`, 실패 화면을 잘라낸 픽스처 사진 포함), 폰트·기동 대기 14건(`tests/test_engine/test_flutter_fonts.py`, 실제 Chromium 탐침 1건 포함)
   - 기록: 보고서 §11-19
 
+- [x] **AAT-119** 언어 데이터가 없으면 `doctor`가 말해 준다 — 완료 2026-10-03
+  - **CI가 사용자의 실패를 그대로 재현해 주었습니다.** AAT-116을 올리자 한국어 OCR 증명 시험 다섯 건이 `Text '학원 관리 시스템' not visible on page`로 빨개졌습니다 — 러너가 `tesseract-ocr`만 깔고 `tesseract-ocr-kor`를 깔지 않았기 때문입니다. **그 문장이 사용자가 보는 문장과 똑같습니다**
+  - 이것은 AAT-114·§11-14가 두 번 만난 「초록불이 빨간불로 갈 수 없는」 자리입니다. `_check_tesseract`는 **실행 파일이 있는지만** 물었고, Tesseract는 문서가 다루는 모든 플랫폼에서 **영어만** 깔립니다. 묶음이 없으면 `image_to_string`이 예외를 내고 후퇴가 그것을 삼켜 「글자가 안 보인다」로 보고합니다 — 페이지는 멀쩡한데 **진단이 페이지를 탓합니다**
+  - `doctor`가 `matching.ocr_languages`를 `tesseract --list-langs`와 대조하고, 없는 언어와 **증상 문구**("reads as 'not visible on page'")를 함께 알립니다 — 증상을 적지 않으면 사용자가 지금 보고 있는 실패와 연결하지 못합니다
+  - **경고이고 실패가 아닙니다.** 영어만 쓰는 앱에 영어만 깔린 것은 **올바른 설치**이고, 거기에 빨간불을 켜면 아무 문제 없는 사람의 `doctor`가 0이 아닌 값으로 끝납니다. `--list-langs`를 읽을 수 없으면 **아무 말도 하지 않습니다**(묶음이 있을 수도 있으므로, 가진 것을 설치하라고 보내는 것보다 침묵이 낫습니다)
+  - CI 두 워크플로에 `tesseract-ocr-kor` 추가 + 시험에 `requires_korean_ocr` 건너뛰기. **건너뛰기는 CI가 아니라 기여자를 위한 것입니다** — apt 목록이 모자란 사람에게 「네 코드가 틀렸다」고 말하는 빨간 시험은 시험을 무시하는 습관을 가르칩니다
+  - 시험 6건(`TestTesseractLanguageCheck`): 없는 언어 보고 / 다 있으면 **침묵** / 물을 수 없으면 침묵 / 머리글 줄 제외 파싱 / 설정에서 읽기 / **묶음이 없어도 `_check_tesseract`는 통과**
+  - 기록: 보고서 §11-19 ④
+
 ---
 
 ## 협업 프로젝트 연동 (ClasRing + DSL)
@@ -493,8 +502,8 @@ aat run --skill-mode --fast <scenario>
 
 ## Current Status
 
-- **현재 단계**: 보고서(`docs/awt_project_analysis_and_strategy.md`) **1~3순위 + 판단 대기 3건 전량 마감**(AAT-115까지), 그 위에 **Flutter CanvasKit 세 겹 수리**(AAT-116~118)를 더했습니다. 다음 작업은 품질 수리가 아니라 **등재와 홍보**이고, 미결 사항은 **`1.8.0` 배포 승인**입니다
-- **완료**: Phase 1~6 (Ultra-MVP) + AAT-060~065 + AAT-070~076 + AAT-080~081 + AAT-090~092 + AAT-093~095 + AAT-100~118 (Post-MVP)
+- **현재 단계**: 보고서(`docs/awt_project_analysis_and_strategy.md`) **1~3순위 + 판단 대기 3건 전량 마감**(AAT-115까지), 그 위에 **Flutter CanvasKit 세 겹 수리**(AAT-116~118)와 그 CI가 드러낸 `doctor` 결손(AAT-119)를 더했습니다. 다음 작업은 품질 수리가 아니라 **등재와 홍보**이고, 미결 사항은 **`1.8.0` 배포 승인**입니다
+- **완료**: Phase 1~6 (Ultra-MVP) + AAT-060~065 + AAT-070~076 + AAT-080~081 + AAT-090~092 + AAT-093~095 + AAT-100~119 (Post-MVP)
 - **블로커**: 없음. 판단 대기도 없습니다 — 세 건 모두 AAT-115에서 수리했고, 저장소에 `xfail(strict=True)`는 **한 건도 남아 있지 않습니다**
 - **Flutter 웹 실측 상태**(2026-10-03): ClasRing CanvasKit 앱에서 **23/23 통과**, `wait` 단계를 전부 뺀 대본도 **5/5 통과**, 증거 사진의 한국어가 또렷합니다. Semantics 라벨 기반 `find_and_click`·`find_and_type`를 권하십시오 — 손좌표를 권하던 이전 조언은 실측으로 뒤집혔습니다(AAT-118)
 - **Python**: 3.12.12 (.venv), `source .venv/bin/activate`
