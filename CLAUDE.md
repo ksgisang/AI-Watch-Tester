@@ -388,6 +388,21 @@ aat run --skill-mode --fast <scenario>
   - 시험 3건(`TestSkillAttemptState`): 상태만 쓰고 한 글자도 내지 않음 / 서명에 `total_failed` 없음 / `src/aat` 전체에 `awt.dev`·`AWT Cloud` 없음. 역변이로 2건 빨개짐
   - 기록: 보고서 §11-16
 
+### Post-MVP: 「통과했다 ≠ 검사했다」를 코드로 막기 (AAT-114)
+
+- [x] **AAT-114** CLI 시험 40건 + 글자 단정의 맹점 고정 + `text_equals`를 쓸 수 있게 — 완료 2026-10-03
+  - 보고서 3순위 두 항목(§7-2 CLI 커버리지, §9-2 부분일치)을 닫고, 작업 중에 **셋째 겹**을 찾았습니다
+  - **CLI 시험 40건**(`tests/test_cli/test_run_devqa_internals.py`). `aat run` 15% / `aat devqa` 9%였습니다. 어려워서가 아니라 **브라우저를 요구하는 비동기 본문 밑에 깔린 작은 함수들**이라 아무도 찾아가지 않았습니다. 시험이 **한 번도 호출한 적 없는 코드**에서 결함 두 개가 나왔습니다
+    - `_js_str`가 줄바꿈을 통과시켜 JS `SyntaxError`를 만들었고, 호출자의 `except Exception: pass`가 삼켜 **오버레이가 조용히 집계를 멈췄습니다.** `json.dumps`로 교체 — U+2028·U+2029도 함께 막힙니다
+    - devqa 자동 수정기가 주석을 `+=`로 붙여 ㉮ 시도마다 **누적**(실재) ㉯ `#`가 YAML 주석처럼 보이나 실제로는 `description` 값 ㉰ 키 부재 시 `KeyError`(잠재 — `description`은 필수 필드이고 `_generate_scenario`가 전부 채웁니다). ㉰을 "잠재"로 적은 것은 시험을 쓰다가 스스로 잡은 과장 정정입니다
+  - **`text_equals`는 광고되어 있고 사용 불가였습니다.** `comparator.py`가 `get_page_text()`(= `inner_text("body")`)와 비교했으므로 **페이지 전체가 그 값과 같을 것**을 요구했습니다. AI 어댑터 프롬프트 세 곳이 이 타입을 유효하다고 제시하므로 생성된 대본에 실제로 들어가고, 선택자가 있으면 무조건 실패했습니다. 이제 `target.selector`가 있으면 **그 요소의 글자와 정확히 비교**합니다 — 노출(`\(\text{질량}\)`)을 잡는 유일한 단정입니다. 선택자 + `text_equals`는 이전에 무조건 실패했으므로 **깨뜨리는 변경이 아닙니다**(그 논거도 시험으로 고정)
+  - **`text_visible`은 일부러 좁히지 않았습니다.** 페이지 전체 부분일치가 그 타입의 존재 이유이고, 좁히면 통과하던 대본이 빨개집니다. 이 결정도 시험에 적어 두었습니다
+  - **파생 수리**: `check`의 여덟 `raise`가 전부 `step=0`을 넘겨 **7번 단계 실패가 `Step 0 (assert)`로 보고**되었습니다 — 콘솔·`last_run.json`·PDF 전부. `_check_as_step`이 `raw_message`로 재부착합니다
+  - **신규 발견(미수정, 기록됨)**: `Scenario.expected_result`는 **아무도 읽지 않습니다.** 모델 선언·검증기·배포 템플릿·AI 프롬프트 세 곳이 모두 쓰라고 하는데 평가되지 않아, **검사가 실행되지 않은 채 성공을 보고합니다.** 켜면 기존 대본이 대량으로 빨개지므로(검증기가 영문 산문을 그 문장 전체에 대한 `text_visible`로 바꿔 넣습니다) 대표님 판단 사항입니다. `display:none` 글자 통과도 같은 성질입니다. 둘 다 `xfail(strict=True)`
+  - 시험: 실제 Chromium 통합 21건 + `xfail` 2건(`tests/integration/test_text_assertions.py`, 픽스처 `rendered_text_server.py`), CLI 40건. 역변이 18종 전부 잡힘(CLI 9 + 비교기/엔진 9)
+  - 표면: CLI 플래그는 늘지 않았으므로(`cli-reference.md` 해당 없음) `SKILL.md`에 절 추가, `scenario-schema.md`·`scenario-template.yaml`은 **생성기(`scripts/gen_scenario_schema.py`)를 통해** 갱신 — `tests/test_docs_sync.py`가 모델과 대조하므로 손질은 다음 생성에서 지워집니다
+  - 기록: 보고서 §11-17
+
 ---
 
 ## 협업 프로젝트 연동 (ClasRing + DSL)
@@ -435,8 +450,8 @@ aat run --skill-mode --fast <scenario>
 
 ## Current Status
 
-- **현재 단계**: 자기 치유 완성 — 시각 매칭을 실제로 작동하게 (AAT-112). 진행 중인 전체 수리는 `docs/awt_project_analysis_and_strategy.md`와 `_HOME.md` 대시보드 참조
-- **완료**: Phase 1~6 (Ultra-MVP) + AAT-060~065 + AAT-070~076 + AAT-080~081 + AAT-090~092 + AAT-093~095 + AAT-100~112 (Post-MVP)
-- **블로커**: 없음
+- **현재 단계**: 보고서(`docs/awt_project_analysis_and_strategy.md`) **1~3순위 전량 마감** (AAT-114까지). 다음은 등재·홍보이고, 그 전에 대표님 판단이 필요한 세 건이 `_HOME.md` 대시보드에 🔶로 적혀 있습니다
+- **완료**: Phase 1~6 (Ultra-MVP) + AAT-060~065 + AAT-070~076 + AAT-080~081 + AAT-090~092 + AAT-093~095 + AAT-100~114 (Post-MVP)
+- **블로커**: 없음. 단 **판단 대기 3건** — `LearnedStore` 호스트 구획(AAT-112), `expected_result` 평가 여부, `display:none` 글자 통과 여부(둘 다 AAT-114). 세 건 모두 `xfail(strict=True)`로 고정되어 있어 고치는 순간 시험이 알려 줍니다
 - **Python**: 3.12.12 (.venv), `source .venv/bin/activate`
 - **GitHub**: https://github.com/ksgisang/AI-Watch-Tester (public)

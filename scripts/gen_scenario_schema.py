@@ -125,8 +125,8 @@ _ACTIONS: dict[ActionType, ActionDoc] = {
     ),
     ActionType.ASSERT_TEXT: ActionDoc(
         "Assert",
-        "Check that text is in the page — DOM first, OCR fallback. "
-        "Hidden (`display:none`) text still matches",
+        "Check that text is **contained** in the page — DOM first, OCR "
+        "fallback. Substring match; hidden (`display:none`) text still matches",
         "Text to look for, if `target.text` is not used",
         target="required",
         value="optional",
@@ -137,7 +137,15 @@ _ACTIONS: dict[ActionType, ActionDoc] = {
             "`target.selector` and assert on a container you know is rendered "
             "when that matters. Text that lives only in `<title>` or other "
             "`<head>` metadata never matches, because neither the DOM text "
-            "engine nor OCR can reach it."
+            "engine nor OCR can reach it. "
+            "Being a substring match has a consequence worth stating "
+            "outright: the right words wrapped in junk pass. A template that "
+            "leaks its own markup and renders `\\(\\text{질량}\\)` where it "
+            "should render `질량` satisfies `assert_text: 질량` — the word "
+            "really is in there. If what you mean is “this element shows "
+            "exactly this and nothing else”, use `assert_type: "
+            "text_equals` with a `target.selector`; that is the only "
+            "assertion AWT offers that fails on the leak."
         ),
     ),
     ActionType.ASSERT_SCREEN_CHANGED: ActionDoc(
@@ -234,8 +242,10 @@ _GROUP_ORDER = (
 )
 
 _ASSERT_TYPES: dict[AssertType, str] = {
-    AssertType.TEXT_VISIBLE: "Text appears anywhere on the page",
-    AssertType.TEXT_EQUALS: "Text matches exactly",
+    AssertType.TEXT_VISIBLE: ("Text appears **somewhere** on the page (substring, DOM then OCR)"),
+    AssertType.TEXT_EQUALS: (
+        "Text is **exactly** the whole text of `target.selector` — see below"
+    ),
     AssertType.IMAGE_VISIBLE: "Image template is found on screen",
     AssertType.URL_CONTAINS: "Current URL contains the substring",
     AssertType.URL_NOT_CONTAINS: "Current URL does not contain the substring",
@@ -466,6 +476,38 @@ def render() -> str:
 
 {_table(Scenario)}
 
+### `expected_result` does nothing — use `assert` steps
+
+Measured, not assumed: the field is loaded, validated, and never read by any
+executor. Whatever you write there is discarded, and the scenario reports
+success without the check having run. The table above used to say
+"checked after the last step", which was simply false; the shipped
+`scenario-template.yaml` still shows the field, and the AI scenario generator
+still fills it in. Treat all three as leftovers.
+
+Put the assertion in a step instead, where it is actually evaluated:
+
+```yaml
+# Not this — silently ignored:
+expected_result:
+  - type: url_contains
+    value: "/dashboard"
+
+# This — the last step of `steps:`:
+- step: 9
+  action: assert_url
+  value: "/dashboard"
+  description: "the login landed on the dashboard"
+```
+
+It is not switched on because doing so would fail scenarios that currently
+pass: the loader coerces a free-text item such as `"User sees welcome
+message"` into `text_visible` against that whole sentence, and AI-generated
+scenarios are full of exactly that prose. Turning the field on would therefore
+need the prose cleaned out first. Pinned by
+`tests/integration/test_text_assertions.py` as a strict `xfail`, so
+implementing it announces itself.
+
 ## StepConfig
 
 {_table(StepConfig)}
@@ -503,6 +545,34 @@ but not enforced by the validators, so `aat validate` lets them through.
 | Value | Meaning |
 |---|---|
 {chr(10).join(f"| `{m.value}` | {d} |" for m, d in _ASSERT_TYPES.items())}
+
+`text_equals` is the only exact-match assertion, and it needs a
+`target.selector` to be useful:
+
+```yaml
+- step: 3
+  action: assert
+  description: the question shows the formula, not its LaTeX source
+  assert_type: text_equals
+  value: "질량"
+  target:
+    selector: "#question"
+```
+
+With a selector it compares the element's visible text (stripped of
+surrounding whitespace) against `value`, so it fails when the element shows
+`\\(\\text{{질량}}\\)` — which `assert_text` and `text_visible` both pass,
+because both are substring matches. If the selector matches nothing, the step
+fails saying so, rather than quietly comparing against an empty string.
+
+Without a selector it compares against the whole visible page
+(`body` inner text), which is almost never what you want: it demands that the
+page contain nothing but `value`. The unscoped form is kept only so older
+scenarios keep their behaviour.
+
+`text_visible` ignores `target.selector` on purpose. Substring-matching the
+whole page is what that type is *for*, and narrowing it would turn passing
+scenarios red.
 
 ## FindMethod (step-level)
 
