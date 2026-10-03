@@ -30,8 +30,9 @@ successful run leaves behind — the position it remembered:
     run one both banks a picture and learns a position, run two passed on the
     position and never reached the picture. Every mock-based test was green.
     Fixed by ordering evidence before guess (executor, Priority 0.9 then 1.0).
-  * remembered positions are not scoped by host, unlike pictures. Recorded
-    below as a strict xfail, because a comment does not run.
+  * remembered positions were not scoped by host, unlike pictures. Recorded
+    below as a strict xfail, because a comment does not run -- and the marker
+    is what announced the fix when AAT-115 scoped them.
 """
 
 from __future__ import annotations
