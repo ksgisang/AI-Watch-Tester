@@ -1236,69 +1236,6 @@ class StepExecutor:
                 if attempt < 2:
                     await asyncio.sleep(0.5)
 
-        # Priority 0.4: State-aware learned coordinates.
-        # Deliberately *after* the selector: a coordinate we guessed from an
-        # earlier run must never override an element the scenario named itself.
-        # Learned coordinates are the fallback for targets with no selector, or
-        # when the selector matched nothing.
-        if (
-            target_name
-            and self._learned_store
-            and step.method.value == "auto"
-            and self._learn_allowed(step)
-        ):
-            page_state = await self._detect_page_state()
-            coords = self._learned_store.find_state_coords(
-                target_name,
-                page_state,
-            )
-            if coords:
-                lx, ly, lconf = coords
-                logger.info(
-                    "Learned[%s]: '%s' at (%d,%d) conf=%.2f",
-                    page_state,
-                    target_name,
-                    lx,
-                    ly,
-                    lconf,
-                )
-                try:
-                    result = await self._act_at_pos(
-                        step,
-                        lx,
-                        ly,
-                        confidence=lconf,
-                        method=MatchMethod.LEARNED,
-                    )
-                except Exception:
-                    logger.info(
-                        "Learned[%s] coords stale, re-scanning",
-                        page_state,
-                    )
-                else:
-                    # Reinforced only once the step's verification passes.
-                    if self._pending_learn:
-                        self._pending_learn["from_learned"] = True
-                    return result
-
-            # Fallback: try state-agnostic learned coords
-            learned = self._learned_store.find_by_name(target_name)
-            if learned and learned.confidence >= 0.8:
-                try:
-                    result = await self._act_at_pos(
-                        step,
-                        learned.correct_x,
-                        learned.correct_y,
-                        confidence=learned.confidence,
-                        method=MatchMethod.LEARNED,
-                    )
-                except Exception:
-                    logger.info("Learned coords failed, falling through")
-                else:
-                    if self._pending_learn:
-                        self._pending_learn["from_learned"] = True
-                    return result
-
         # Priority 0.5: Enhanced input finding for find_and_type
         if step.action == ActionType.FIND_AND_TYPE and hasattr(self._engine, "page"):
             field_hit = await self._find_input_field(step)
@@ -1417,19 +1354,41 @@ class StepExecutor:
                     await self._engine.press_key("Delete")
                 return result
 
+        # Priority 0.9: a picture an earlier run banked for this target.
+        #
+        # Every DOM route above has now failed, which is the definition of the
+        # selector having gone stale. This runs *before* learned coordinates
+        # below, and the order is the point: a banked picture is evidence that
+        # the element is on the screen right now, while a remembered position is
+        # a guess that it has not moved. AAT-109 is the record of what that
+        # guess costs -- it clicked empty space and reported PASSED.
+        #
+        # The first real-browser test of healing is what exposed this. Run one
+        # banks a picture *and* remembers a position, so on run two the
+        # remembered position answered first and healing never ran. The element
+        # had not moved, so the step passed and the heal looked unnecessary --
+        # which is exactly how a path stays dead without anyone noticing.
+        healed = await self._heal_from_bank(step, target)
+        if healed is not None:
+            return healed
+
+        # Priority 1.0: state-aware learned coordinates.
+        # After the selector, the text search and the banked picture: a
+        # coordinate we guessed from an earlier run must never override
+        # something the scenario named itself or something we can see.
+        learned_hit = await self._act_on_learned_coords(step, target_name)
+        if learned_hit is not None:
+            return learned_hit
+
         # --- Fast Mode Override ---
         # Fast mode skips the heavy Vision/OCR pipeline, and that is worth
-        # keeping: it is why the mode exists. But it used to raise here, before
-        # anything visual ran, which meant the command the docs and the skill
-        # recommend -- `aat run --skill-mode --fast` -- was the one command that
-        # could never heal. So fast mode gets exactly one attempt, and only the
-        # deterministic one: match the picture a previous run banked for this
-        # target. No OCR, no paid vision call, and no screenshot at all unless
-        # a picture exists to match against.
+        # keeping: it is why the mode exists. It used to raise before anything
+        # visual ran, which meant the command the docs and the skill recommend
+        # -- `aat run --skill-mode --fast` -- was the one command that could
+        # never heal. The one visual attempt it does get is the deterministic
+        # one above: a template match against a banked crop, with no screenshot
+        # taken at all unless a picture exists to match against.
         if getattr(getattr(self._engine, "_config", None), "fast_mode", False):
-            healed = await self._heal_from_bank(step, target)
-            if healed is not None:
-                return healed
             target_desc = target.selector or target.text or "unknown"
             rgn = step.region
             region_hint = f" (region={rgn.value})" if rgn != ScreenRegion.FULL else ""
@@ -1506,6 +1465,79 @@ class StepExecutor:
         if cropped is None:
             return screenshot, 0, 0
         return cropped, offset_x, offset_y
+
+    async def _act_on_learned_coords(
+        self,
+        step: StepConfig,
+        target_name: str,
+    ) -> MatchResult | None:
+        """Act on a position remembered from an earlier run, if there is one.
+
+        The last resort before matching, and the only route here that is a
+        guess rather than an observation: nothing has been seen on this screen,
+        we are trusting that the element is where it used to be. AAT-109 is the
+        record of what that costs when the trust is misplaced, which is why the
+        position is reinforced only after the step's own verification passes.
+
+        Returns ``None`` when nothing is remembered, when learning is switched
+        off for this run or step, or when acting on the remembered position
+        raised -- in which case the caller falls through to matching.
+        """
+        if not (
+            target_name
+            and self._learned_store
+            and step.method.value == "auto"
+            and self._learn_allowed(step)
+        ):
+            return None
+
+        page_state = await self._detect_page_state()
+        coords = self._learned_store.find_state_coords(target_name, page_state)
+        if coords:
+            lx, ly, lconf = coords
+            logger.info(
+                "Learned[%s]: '%s' at (%d,%d) conf=%.2f",
+                page_state,
+                target_name,
+                lx,
+                ly,
+                lconf,
+            )
+            try:
+                result = await self._act_at_pos(
+                    step,
+                    lx,
+                    ly,
+                    confidence=lconf,
+                    method=MatchMethod.LEARNED,
+                )
+            except Exception:
+                logger.info("Learned[%s] coords stale, re-scanning", page_state)
+            else:
+                # Reinforced only once the step's verification passes.
+                if self._pending_learn:
+                    self._pending_learn["from_learned"] = True
+                return result
+
+        # Fallback: try state-agnostic learned coords
+        learned = self._learned_store.find_by_name(target_name)
+        if learned and learned.confidence >= 0.8:
+            try:
+                result = await self._act_at_pos(
+                    step,
+                    learned.correct_x,
+                    learned.correct_y,
+                    confidence=learned.confidence,
+                    method=MatchMethod.LEARNED,
+                )
+            except Exception:
+                logger.info("Learned coords failed, falling through")
+            else:
+                if self._pending_learn:
+                    self._pending_learn["from_learned"] = True
+                return result
+
+        return None
 
     async def _heal_from_bank(
         self,

@@ -35,8 +35,9 @@ _NOT_MATCHERS: dict[str, str] = {
     ),
     "learned": (
         "learned coordinates are applied by the step executor, not by the "
-        "matcher chain, and deliberately rank below an explicit selector "
-        "(AAT-109). Listing it here does nothing"
+        "matcher chain, and deliberately rank below every DOM lookup and "
+        "below any picture an earlier run banked (AAT-109). Listing it here "
+        "does nothing"
     ),
     "semantics": (
         "Flutter semantics lookup is part of the engine's element search, "

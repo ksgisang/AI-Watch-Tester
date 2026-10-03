@@ -31,7 +31,7 @@ _METHOD_TO_NAME: dict[MatchMethod, str] = {
     MatchMethod.FEATURE: "feature",
     MatchMethod.VISION_AI: "vision_ai",
     # No MatchMethod.LEARNED entry: learned coordinates are the executor's job
-    # (Priority 0.4), not a matcher's. See the class docstring.
+    # (Priority 1.0), not a matcher's. See the class docstring.
 }
 
 #: Fallback scope when nobody told us which host this run is against.
@@ -54,7 +54,9 @@ class HybridMatcher(BaseMatcher):
     for future Tier 1 matching (auto-learning).
 
     Learned coordinates are *not* consulted here. The step executor applies
-    them at its own Priority 0.4 -- below an explicit selector, and only
+    them at its own Priority 1.0 -- after every DOM route and after any
+    picture an earlier run banked, because a remembered position is the only
+    route there that is a guess rather than something we can see, and only
     reinforced once the step's verification passes (AAT-109). This class once
     documented a learned-first tier, but no call site ever supplied a matcher
     named ``learned``, so the promise was never kept.

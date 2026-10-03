@@ -18,6 +18,14 @@ Negative — what must never happen again:
   * a position that stopped working must lose confidence and be forgotten,
   * `learn_coords=False` and step-level `learn: false` must neither read the
     memory nor write to it.
+
+A remembered position is the **last** thing the executor consults: after the
+selector, the input finder, the text search and any picture an earlier run
+banked. That is this file's own thesis carried to its end -- a guess must not
+answer ahead of something we can see -- and it is why most tests here call
+`_blind_the_search` before the run under test. Without that the button is
+simply found in the DOM and clicked, the memory is never reached, and a test
+about stale positions would be measuring nothing.
 """
 
 from __future__ import annotations
@@ -172,7 +180,16 @@ def _blind_the_search(engine: WebEngine, executor: StepExecutor) -> None:
 
     After this, a step that still clicks the right thing can only have done it
     from memory — which is what the positive tests need to prove.
+
+    ``find_text_box`` is blinded as well as ``find_text_position``, and that
+    pairing is load-bearing. Banking element pictures introduced the box finder
+    and the executor prefers it, so a helper that blinded only the older method
+    stopped blinding anything: every test built on it went on passing while the
+    DOM quietly did the work the memory was supposed to be doing. Any new way
+    of locating an element has to be added here too, or the tests below go
+    hollow without going red.
     """
+    engine.find_text_box = AsyncMock(return_value=None)  # type: ignore[method-assign]
     engine.find_text_position = AsyncMock(return_value=None)  # type: ignore[method-assign]
     engine.force_click_by_text = AsyncMock(return_value=False)  # type: ignore[method-assign]
     executor._find_input_field = AsyncMock(return_value=None)  # type: ignore[method-assign]
@@ -278,10 +295,17 @@ class TestSelectorBeatsMemory:
     async def test_planted_position_is_used_when_no_selector_is_given(
         self, engine: WebEngine, store: LearnedStore, quiz_url: str, tmp_path: Path
     ) -> None:
-        """Control for the test above: without a selector the memory does act.
+        """Control for the test above: with no other way to find it, memory acts.
 
         Without this, the previous test would also pass if remembered
         coordinates had simply stopped working altogether.
+
+        The search is blinded because dropping the selector is no longer enough
+        to reach the memory: the field is still named "Nickname" in the DOM, so
+        the input finder locates it and types there, and the memory is never
+        asked. That is the right behaviour -- it is the whole point of ordering
+        what we can see ahead of what we guessed -- but it leaves no way to
+        exercise the memory except to take the DOM routes away.
         """
         executor = _executor(engine, store, tmp_path)
         await _open(engine, quiz_url, SHORT_PAGE)
@@ -289,6 +313,7 @@ class TestSelectorBeatsMemory:
         store.save_state_coords(
             "Nickname", "normal", int(note["x"] + note["w"] / 2), int(note["y"] + note["h"] / 2)
         )
+        _blind_the_search(engine, executor)
 
         result = await executor.execute_step(_type_nickname())
 
@@ -297,7 +322,15 @@ class TestSelectorBeatsMemory:
 
 
 class TestClickWithNoEffect:
-    """Negative: a click that moved nothing is not a pass."""
+    """Negative: a click that moved nothing is not a pass.
+
+    Every test here blinds the DOM search before the acting run. The remembered
+    position is the last thing consulted, so with the DOM routes left in place
+    the button is simply found and clicked correctly and there is no missed
+    click to report. Blinding is what puts the step in the only situation where
+    a stale position is reached at all: nothing on the page can be located, and
+    the tool is down to trusting that the element has not moved.
+    """
 
     async def test_stale_position_click_is_reported_as_warning(
         self, engine: WebEngine, store: LearnedStore, quiz_url: str, tmp_path: Path
@@ -307,6 +340,7 @@ class TestClickWithNoEffect:
         assert (await executor.execute_step(_click_grade())).status == StepStatus.PASSED
 
         await _open(engine, quiz_url, TALL_PAGE)  # the button moved out from under it
+        _blind_the_search(engine, executor)
 
         result = await executor.execute_step(_click_grade(step=2))
 
@@ -327,6 +361,7 @@ class TestClickWithNoEffect:
         before = (_memory(store, "Grade it") or {})["confidence"]
 
         await _open(engine, quiz_url, TALL_PAGE)
+        _blind_the_search(engine, executor)
         await executor.execute_step(_click_grade(step=2))
 
         after = _memory(store, "Grade it")
@@ -340,6 +375,7 @@ class TestClickWithNoEffect:
         executor = _executor(engine, store, tmp_path)
         await _open(engine, quiz_url, SHORT_PAGE)
         store.save_state_coords("Grade it", "normal", 5, 5, confidence=0.7)
+        _blind_the_search(engine, executor)
 
         result = await executor.execute_step(_click_grade())
 
@@ -355,6 +391,7 @@ class TestClickWithNoEffect:
         executor = _executor(engine, store, tmp_path)
         await _open(engine, quiz_url, SHORT_PAGE)
         store.save_state_coords("Grade it", "normal", 5, 5, confidence=0.7)
+        _blind_the_search(engine, executor)
 
         await executor.execute_step(_click_grade())
 

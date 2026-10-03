@@ -275,9 +275,10 @@ class MatchingConfig(BaseModel):
     ocr_languages: list[str] = Field(default=["eng", "kor"])
     # No LEARNED here. It led this list for months and was dropped on every
     # run, because no matcher is registered under that name -- learned
-    # coordinates are the step executor's job (Priority 0.4), below an
-    # explicit selector. The enum value is kept so existing configs that name
-    # it still load; ``build_matchers`` reports it instead of ignoring it.
+    # coordinates are the step executor's job (Priority 1.0), after every DOM
+    # route and after any banked picture. The enum value is kept so existing
+    # configs that name it still load; ``build_matchers`` reports it instead of
+    # ignoring it.
     chain_order: list[MatchMethod] = Field(
         default=[
             MatchMethod.TEMPLATE,

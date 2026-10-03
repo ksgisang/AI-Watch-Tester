@@ -2219,7 +2219,7 @@ class TestSelfHealingFromBank:
     async def test_a_heal_is_recorded_as_its_own_strategy(
         self, engine: MagicMock, tmp_path: Path
     ) -> None:
-        """"A banked picture carried this step" is advice about the scenario.
+        """ "A banked picture carried this step" is advice about the scenario.
 
         Filed under ``use_template`` it would read as "image matching works
         here", when what happened is that the step's own selector is stale.
