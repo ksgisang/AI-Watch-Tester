@@ -154,7 +154,10 @@ async def _devqa(
         attempt=1,
         auto_approve=False,  # devqa always requires human approval
     ):
-        raise typer.Exit(code=0)
+        # Same rule as `aat run`: a person saying no is 0, no person to ask is 4.
+        from aat.cli.commands.run_cmd import _unapproved_exit_code
+
+        raise typer.Exit(code=_unapproved_exit_code(1))
 
     # -- Step 4-6: Run + fix loop --------------------------------------------
     typer.echo("[AWT] Step 3/4: Testing...")

@@ -337,6 +337,22 @@ def _is_interactive() -> bool:
         return sys.stdin.isatty()  # Windows fallback
 
 
+def can_prompt() -> bool:
+    """Whether there is a human to ask in this process.
+
+    Read-only, and it decides nothing: approval still comes from the prompt and
+    from nowhere else, and both answers lead to the same place when approval is
+    missing — nothing runs.
+
+    It exists so the exit code can tell two opposite events apart. "The human
+    said no" and "there was no human to ask" are the same event to the gate,
+    but to a CI pipeline the first is a deliberate stop and the second means
+    the suite was never run. Reporting both as 0 told the pipeline that
+    unchecked work had passed.
+    """
+    return _is_interactive()
+
+
 def _read_tty(prompt: str = "") -> str:
     """Read a line from /dev/tty, bypassing stdin redirection.
 

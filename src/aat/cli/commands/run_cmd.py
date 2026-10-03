@@ -10,6 +10,7 @@ from pathlib import Path
 
 import typer
 
+from aat.core import scenario_reviewer
 from aat.core.config import load_config
 from aat.core.diagnosis import (
     check_learned_hint,
@@ -373,6 +374,37 @@ async def _write_reports(
         typer.echo(f"  Report: {written}")
 
 
+def _unapproved_exit_code(scenario_count: int) -> int:
+    """Report an unapproved run, and say which kind of unapproved it was.
+
+    A person who presses ``n`` has made a decision, and nothing is wrong: 0.
+    A process with no terminal could not be asked at all, so **no step ran and
+    nothing was checked** — that must never read as success, because a CI job
+    would print a green tick over a suite that never opened a browser. It exits
+    4, outside the 0-3 range the finished-run codes use, so a pipeline can tell
+    "did not run" from any verdict about a run.
+
+    Prints the reason as well as returning the code: a bare exit status is the
+    thing nobody notices.
+    """
+    if scenario_reviewer.can_prompt():
+        typer.echo("[AWT] Execution cancelled by user.")
+        return 0
+
+    loaded = f"{scenario_count} scenarios were" if scenario_count != 1 else "1 scenario was"
+    typer.echo(
+        f"[AWT] NOT RUN: approval needs a terminal, and this process has none. "
+        f"{loaded} loaded and none were executed.",
+        err=True,
+    )
+    typer.echo(
+        "[AWT] Nothing was tested. Run `aat run` from your own terminal; "
+        "there is no flag that skips approval.",
+        err=True,
+    )
+    return 4
+
+
 def _exit_code(
     *,
     had_critical: bool,
@@ -537,8 +569,7 @@ async def _run(
                         scenarios=_scenario_ids,
                     )
                 )
-                typer.echo("[AWT] Execution cancelled by user.")
-                raise typer.Exit(code=0)
+                raise typer.Exit(code=_unapproved_exit_code(len(scenarios)))
             if len(scenarios) > 1 and i < len(scenarios) - 1:
                 typer.echo(f"  ({i + 1}/{len(scenarios)} approved — next: {scenarios[i + 1].id})")
 

@@ -9,8 +9,14 @@ import pytest
 import typer.main
 from typer.testing import CliRunner
 
-from aat.cli.commands.run_cmd import _build_test_result, _exit_code, _write_reports
+from aat.cli.commands.run_cmd import (
+    _build_test_result,
+    _exit_code,
+    _unapproved_exit_code,
+    _write_reports,
+)
 from aat.cli.main import app
+from aat.core import scenario_reviewer
 from aat.core.models import (
     ActionType,
     Scenario,
@@ -259,3 +265,81 @@ class TestExitCode:
         kwargs = {"had_critical": False, "total_failed": 0, "total_skipped": 2, "total_warned": 0}
         assert _exit_code(**kwargs, strict_mode=False) == 0
         assert _exit_code(**kwargs, strict_mode=True) == 1
+
+
+class TestUnapprovedExitCode:
+    """What the process tells the pipeline when nothing was approved.
+
+    Two opposite events used to share exit code 0. A person pressing `n` is a
+    deliberate stop and nothing is wrong. A process with no terminal could not
+    be asked, so no step ran and nothing was checked — reported as 0, a CI job
+    printed a green tick over a suite that never opened a browser. That is the
+    same mistake AAT-109 fixed inside a run ("a click that moved nothing is not
+    a pass"), committed one level up at the process boundary.
+    """
+
+    def test_a_person_saying_no_is_a_clean_exit(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setattr(scenario_reviewer, "can_prompt", lambda: True)
+
+        assert _unapproved_exit_code(1) == 0
+        assert "cancelled by user" in capsys.readouterr().out.lower()
+
+    def test_no_terminal_to_ask_is_not_a_clean_exit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The regression. 0 here is a false green in every pipeline."""
+        monkeypatch.setattr(scenario_reviewer, "can_prompt", lambda: False)
+
+        assert _unapproved_exit_code(3) == 4
+
+    def test_it_is_outside_the_range_a_finished_run_uses(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """4 cannot collide with a verdict about a run that actually happened.
+
+        0-3 all mean "it ran, and here is how it went". "It did not run" has to
+        be distinguishable from every one of them, or a pipeline cannot tell
+        "nothing was tested" from "everything passed".
+        """
+        monkeypatch.setattr(scenario_reviewer, "can_prompt", lambda: False)
+        finished_codes = {
+            _exit_code(
+                had_critical=crit,
+                total_failed=failed,
+                total_skipped=skipped,
+                total_warned=warned,
+                strict_mode=strict,
+            )
+            for crit in (True, False)
+            for failed in (0, 1)
+            for skipped in (0, 1)
+            for warned in (0, 1)
+            for strict in (True, False)
+        }
+
+        assert _unapproved_exit_code(1) not in finished_codes
+
+    def test_the_reason_is_printed_not_just_returned(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A bare exit status is the thing nobody notices."""
+        monkeypatch.setattr(scenario_reviewer, "can_prompt", lambda: False)
+
+        _unapproved_exit_code(3)
+        err = capsys.readouterr().err.lower()
+
+        assert "not run" in err
+        assert "3 scenarios" in err  # how much went unchecked
+        assert "nothing was tested" in err
+        assert "no flag that skips approval" in err  # ... and no hint of a bypass
+
+    def test_one_scenario_is_not_pluralised(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setattr(scenario_reviewer, "can_prompt", lambda: False)
+
+        _unapproved_exit_code(1)
+
+        assert "1 scenario were" not in capsys.readouterr().err

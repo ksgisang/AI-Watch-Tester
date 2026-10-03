@@ -249,6 +249,12 @@ async def aat_run_skill_mode(
     (exit code 3): the steps ran, but a click moved nothing on screen. Treat it
     like a failure to investigate, not like a pass.
 
+    Exit code 4 means the opposite of a verdict: nothing ran, because approval
+    needed a terminal and this process had none. Never report it as a pass or as
+    a test failure — no browser opened and nothing was checked. Tell the user to
+    run `aat run` in their own terminal, and do not look for a way around the
+    gate; there isn't one.
+
     Args:
         scenario_file: Path to a YAML scenario file or directory.
         verbosity: 'concise' (faster) or 'detailed' (all steps). Default: 'concise'.

@@ -117,6 +117,11 @@ directory and each scenario is reviewed separately, with a
 | **`n`** | Cancelled. Nothing is launched; exit code 0 |
 | **Ctrl+C** | Same as `n` |
 
+There is a fourth way out that is not a key, because nobody pressed anything:
+if the process has **no terminal** to ask at, the gate cannot be answered and
+the run exits **4**, not 0. See *Exit codes* below — "nobody was asked" is a
+different event from "someone said no".
+
 ### 3. The decision is recorded
 
 Every attempt appends one JSONL line to `.aat/audit.log`, approvals and
@@ -149,12 +154,22 @@ the test passed or failed, unless you pass `--skip-teardown`.
 | `1` | A step failed |
 | `2` | A critical step failed and stopped the run |
 | `3` | Every step ran, but at least one changed nothing on screen |
+| `4` | **Nothing ran.** Approval needed a terminal and there was none |
+
+Codes `0`–`3` are all verdicts about a run that happened. Code `4` is outside
+that range on purpose: it says no browser opened and nothing was checked, so a
+CI job cannot print a green tick over a suite it never executed. If you see it,
+run `aat run` from your own terminal — there is no flag that skips approval.
 
 Code `3` is the "it clicked, but nothing happened" case. The step is reported as
 `WARNING` rather than `PASSED`, because a click that moves no pixel has almost
 certainly missed its target, and the real failure would otherwise surface
 several steps later as if the product were broken. Check the screenshot for the
 warned step and the target it was given.
+
+Codes `3` and `4` are the same principle applied at two scales: a step that
+changed nothing is not a pass, and a suite that ran nothing is not a pass
+either.
 
 ### 6. A report you can send to someone
 
