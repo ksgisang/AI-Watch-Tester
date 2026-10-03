@@ -61,6 +61,18 @@ class TestStepExecutionError:
         err = StepExecutionError("fail", step=1, action="click")
         assert isinstance(err, AATError)
 
+    def test_keeps_the_message_without_the_prefix(self) -> None:
+        """A caller already printing "Step N (action)" should not have to repeat it.
+
+        ``str(err)`` carries the prefix because the message usually travels
+        alone. ``raw_message`` is the same sentence with the label removed, for
+        the one caller that prints its own — see TestCriticalStepError.
+        """
+        err = StepExecutionError("element not found", step=3, action="find_and_click")
+
+        assert str(err) == "Step 3 (find_and_click): element not found"
+        assert err.raw_message == "element not found"
+
 
 class TestCriticalStepError:
     """The step's own message must never replace the real reason it died."""
@@ -95,3 +107,59 @@ class TestCriticalStepError:
         assert err.action == "find_and_click"
         assert err.message == "msg"
         assert isinstance(err, AATError)
+
+
+class TestCriticalStepErrorFromAStepFailure:
+    """How the executor builds the exception, as the user reads it.
+
+    These assert on the exact text because the text is the product here: this is
+    the line a person sees when a run stops, and §9-4 of the analysis report is
+    a record of that line sending someone to debug the wrong application.
+    """
+
+    @staticmethod
+    def _as_the_executor_does(inner: StepExecutionError, author_message: str = "") -> str:
+        """Mirror executor.py's critical-step branch."""
+        reason = getattr(inner, "raw_message", "") or str(inner)
+        return str(
+            CriticalStepError(
+                author_message or reason,
+                step=inner.step,
+                action=inner.action,
+                cause=reason,
+            )
+        )
+
+    def test_the_step_label_is_printed_once(self) -> None:
+        """The regression. Passing the prefixed str(e) printed it twice.
+
+        "CRITICAL Step 3 (find_and_click): Step 3 (find_and_click): element not
+        found" reads like a quote of someone else's error, and the reason is
+        pushed to the far right of the line where it is easiest to miss.
+        """
+        inner = StepExecutionError("element not found", step=3, action="find_and_click")
+
+        text = self._as_the_executor_does(inner)
+
+        assert text == "CRITICAL Step 3 (find_and_click): element not found"
+        assert text.count("Step 3 (find_and_click)") == 1
+
+    def test_the_authors_wording_does_not_replace_the_reason(self) -> None:
+        """Both lines survive: what the author expected, and what actually broke."""
+        inner = StepExecutionError("Login redirect detected", step=2, action="assert_url")
+
+        text = self._as_the_executor_does(inner, "A signed-out visitor saw the home page")
+
+        assert "A signed-out visitor saw the home page" in text
+        assert "↳ actual cause: Login redirect detected" in text
+        # ... and the cause line does not repeat the step it is already under
+        assert text.count("Step 2 (assert_url)") == 1
+
+    def test_an_error_with_no_step_context_still_reports_its_reason(self) -> None:
+        """MatchError and friends have no raw_message; str() is all there is."""
+        inner = MatchError("target image failed to load")
+
+        reason = getattr(inner, "raw_message", "") or str(inner)
+        text = str(CriticalStepError(reason, step=1, action="find_and_click", cause=reason))
+
+        assert text == "CRITICAL Step 1 (find_and_click): target image failed to load"

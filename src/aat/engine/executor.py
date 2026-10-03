@@ -389,11 +389,15 @@ class StepExecutor:
 
             # Critical step or on_fail=stop → raise to abort scenario
             if step.critical or step.on_fail == "stop":
+                # The bare reason, not the prefixed str(e): CriticalStepError
+                # prints "Step N (action):" itself, so passing the prefixed form
+                # printed it twice and buried the reason behind its own label.
+                reason = getattr(e, "raw_message", "") or str(e)
                 raise CriticalStepError(
-                    step.message or str(e),
+                    step.message or reason,
                     step=step.step,
                     action=step.action.value,
-                    cause=str(e),
+                    cause=reason,
                 ) from e
 
             return fail_result

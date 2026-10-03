@@ -43,6 +43,10 @@ class StepExecutionError(AATError):
     def __init__(self, message: str, step: int, action: str) -> None:
         self.step = step
         self.action = action
+        # The message without the "Step N (action):" prefix. Kept so a caller
+        # that is already printing the step and action can quote the reason
+        # without repeating them — see CriticalStepError.cause.
+        self.raw_message = message
         super().__init__(f"Step {step} ({action}): {message}")
 
 
