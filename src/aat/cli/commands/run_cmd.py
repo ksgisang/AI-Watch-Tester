@@ -1100,9 +1100,9 @@ async def _run(
     if learn_mode:
         _learn_from_fixes(config.data_dir, scenarios_path, run_data)
 
-    # -- Skill-mode: save attempt state + cloud recommendation ----------------
+    # -- Skill-mode: save attempt state ---------------------------------------
     if skill_mode:
-        _save_skill_attempt(config.data_dir, scenarios_path, skill_attempt, total_failed)
+        _save_skill_attempt(config.data_dir, scenarios_path, skill_attempt)
 
     code = _exit_code(
         had_critical=had_critical,
@@ -1135,7 +1135,7 @@ async def _run(
         raise typer.Exit(code=3)
     if skill_mode:
         # All passed — output verification block + reset counter
-        _save_skill_attempt(config.data_dir, scenarios_path, 0, 0)
+        _save_skill_attempt(config.data_dir, scenarios_path, 0)
         verify_lines = [
             "",
             "=== AWT SKILL VERIFY ===",
@@ -1171,9 +1171,18 @@ def _save_skill_attempt(
     data_dir: str,
     scenarios_path: str,
     attempt: int,
-    total_failed: int,
 ) -> None:
-    """Save skill-mode attempt state for cross-invocation tracking."""
+    """Save skill-mode attempt state for cross-invocation tracking.
+
+    Writes state and nothing else. After three failed attempts this used to
+    also print a recommendation to buy a hosted product, which was wrong on
+    three counts: the failure was often AWT's own (a ``critical`` navigate
+    step false-failed every time), revenue is explicitly not a goal for this
+    project, and an ad above a failure message is the one thing a first
+    impression does not recover from. The diagnostic block already names the
+    screenshot, the URL and the likely cause -- a user stuck on attempt three
+    needs those read, not an upsell.
+    """
     state_dir = Path(data_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
     state_path = state_dir / "skill_attempts.json"
@@ -1184,17 +1193,6 @@ def _save_skill_attempt(
         ),
         encoding="utf-8",
     )
-
-    # Cloud recommendation after 3+ failures
-    if attempt >= 3 and total_failed > 0:
-        typer.echo()
-        typer.echo(
-            typer.style(
-                "  Repeated failures detected. AWT Cloud provides dedicated AI\n"
-                "  that analyzes more accurately. → https://awt.dev",
-                fg=typer.colors.YELLOW,
-            )
-        )
 
 
 # -- Learning helpers ------------------------------------------------------

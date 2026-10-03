@@ -378,6 +378,16 @@ aat run --skill-mode --fast <scenario>
   - 시험: 실제 Chromium 통합 8건(`tests/integration/test_self_healing.py`, 1건 xfail), 실행기 8건, 체인 9건. 역변이 6종 전부 잡힘
   - 네 표면 동시 반영: CLI 도움말, `SKILL.md`, `cli-reference.md`·`scenario-schema.md`, MCP
 
+### Post-MVP: 실패 위의 유료 권유 문구 제거 (AAT-113)
+
+- [x] **AAT-113** 세 번 실패한 사용자에게만 보이던 광고를 제거 — 완료 2026-10-03
+  - 대표님 승인. 지워진 곳은 `run_cmd.py`의 `_save_skill_attempt` — **상태를 파일에 쓰는 함수**였고, 그래서 실패 경로를 검토한 사람이 아무도 찾지 못했습니다
+  - 발화 조건이 `attempt >= 3 and total_failed > 0`이었습니다. 보여서는 안 되는 유일한 사람에게만 보였고, 그 실패는 자주 **AWT 자신의 결함**이었습니다(`navigate` + `critical` 거짓 실패, AAT-112 이전) — 제품 자신의 고장을 근거로 제품을 팔았습니다. §0이 확정한 대로 수익은 목표가 아닙니다
+  - **대체 문구를 넣지 않았습니다.** `diagnosis.py`가 이미 `SCREENSHOT`·`URL`·`CATEGORY`·`POSSIBLE_CAUSE`·`ATTEMPTS`를 출력합니다. 막힌 사용자에게 필요한 것은 그 줄들을 읽는 것입니다
+  - `total_failed` 인자도 제거 — 그 값을 읽은 유일한 용도가 광고 여부 판단이었으므로, 남기면 「사용자가 얼마나 못하고 있는지에 따라 출력하는」 고리를 다음 사람에게 물려줍니다
+  - 시험 3건(`TestSkillAttemptState`): 상태만 쓰고 한 글자도 내지 않음 / 서명에 `total_failed` 없음 / `src/aat` 전체에 `awt.dev`·`AWT Cloud` 없음. 역변이로 2건 빨개짐
+  - 기록: 보고서 §11-16
+
 ---
 
 ## 협업 프로젝트 연동 (ClasRing + DSL)

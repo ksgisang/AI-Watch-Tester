@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
-from pathlib import Path  # noqa: TC003
+import inspect
+import json
+from pathlib import Path
 from typing import Any
 
 import pytest
 import typer.main
 from typer.testing import CliRunner
 
+import aat
 from aat.cli.commands.run_cmd import (
     _build_test_result,
     _exit_code,
+    _save_skill_attempt,
     _unapproved_exit_code,
     _write_reports,
 )
@@ -341,3 +345,51 @@ class TestUnapprovedExitCode:
         _unapproved_exit_code(1)
 
         assert "1 scenario were" not in capsys.readouterr().err
+
+
+class TestSkillAttemptState:
+    """Saving attempt state prints nothing — least of all an advertisement.
+
+    After three failed attempts this function used to recommend a paid hosted
+    product. It was removed, and the test is here rather than the deletion
+    alone because the line looked harmless in isolation: it only fired for
+    users already having a bad time, which is exactly who it should never have
+    fired for. The failures were frequently AWT's own — a ``critical`` navigate
+    step false-failed on any plain page — so the product was being sold on the
+    strength of its own defect.
+    """
+
+    def test_it_only_writes_state(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _save_skill_attempt(str(tmp_path), "scenarios/SC-001.yaml", 7)
+
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
+        state = json.loads((tmp_path / "skill_attempts.json").read_text(encoding="utf-8"))
+        assert state == {"scenario": "scenarios/SC-001.yaml", "attempt": 7}
+
+    def test_the_failure_count_is_no_longer_an_argument(self) -> None:
+        """The only thing it was ever read for was deciding whether to advertise.
+
+        Keeping the parameter would leave the hook in place for the next person
+        who wants to print something conditional on how badly the user is doing.
+        """
+        assert "total_failed" not in inspect.signature(_save_skill_attempt).parameters
+
+    def test_no_cli_surface_sells_anything(self) -> None:
+        """Swept across the package, because one call site is not the risk.
+
+        The recommendation lived in a state-writing helper, which is why nobody
+        reviewing the failure path found it. This looks everywhere a user can
+        see output instead. Docs are excluded on purpose — the cloud API
+        reference legitimately documents that host as a base URL.
+        """
+        package_root = Path(aat.__file__).parent
+        cli_source = "\n".join(
+            path.read_text(encoding="utf-8") for path in package_root.rglob("*.py")
+        )
+
+        assert "awt.dev" not in cli_source
+        assert "AWT Cloud" not in cli_source
