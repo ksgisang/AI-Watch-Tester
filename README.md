@@ -568,7 +568,7 @@ Use `aat devqa` when starting from scratch. Use `aat loop -a branch` when you wa
 
 **`--verbosity`** — how many steps run:
 - `detailed` (default): all steps including wait/assert/screenshot
-- `concise`: core actions only (navigate, click, type) — faster
+- `concise`: skips `screenshot` and `assert_screen_changed` steps, and caps every `wait` at 100 ms — faster. Note that waits are shortened, not skipped: a scenario that depends on a long pause behaves differently here than in a default run.
 
 **`--screenshots`** — how many images are saved:
 - `all` (default): after every step

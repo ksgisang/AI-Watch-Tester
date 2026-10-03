@@ -200,7 +200,22 @@ _ACTIONS: dict[ActionType, ActionDoc] = {
         target="optional",
         value="optional",
     ),
-    ActionType.WAIT: ActionDoc("Utility", "Wait", "Milliseconds, e.g. `2000`", value="optional"),
+    ActionType.WAIT: ActionDoc(
+        "Utility",
+        "Pause. The value is **milliseconds**, not seconds — `2000` is two "
+        "seconds, `2` is two milliseconds. Omit it for `1000`",
+        "Milliseconds, e.g. `2000`",
+        value="optional",
+        caveat=(
+            "`value: 4` is four milliseconds, which is almost certainly not "
+            "what was meant. Such a step still tends to pass, because the "
+            "assertions that follow retry on their own — so the mistake hides "
+            "behind a green result instead of announcing itself. Under "
+            "`--verbosity concise` every wait is capped at 100 ms, so a "
+            "scenario that leans on a long pause behaves differently there "
+            "than in a default run."
+        ),
+    ),
     ActionType.SCREENSHOT: ActionDoc("Utility", "Capture the screen"),
     ActionType.SCROLL: ActionDoc(
         "Utility", "Scroll the page", "`x,y,delta` (delta > 0 = down)", value="required"
