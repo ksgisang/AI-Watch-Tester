@@ -168,6 +168,31 @@ async def _box(engine: WebEngine, element_id: str) -> dict[str, float]:
     return box
 
 
+async def _plant(
+    store: LearnedStore,
+    engine: WebEngine,
+    name: str,
+    x: int,
+    y: int,
+    confidence: float = 1.0,
+) -> str:
+    """Plant a remembered position where the executor will actually look for it.
+
+    Positions are keyed by host (AAT-115), so planting one without a host files
+    it where nothing reads -- and a test that planted it would then prove only
+    that an unreachable row is unreachable. The scope is derived from the page
+    the engine is currently on, which is the same expression the executor uses,
+    so these tests exercise the real lookup rather than a default.
+
+    Returns the host it was filed under, for tests that want to assert on it.
+    """
+    from aat.matchers import template_store
+
+    host = template_store.scope_for(await engine.get_url())
+    store.save_state_coords(name, "normal", x, y, confidence=confidence, host=host)
+    return host
+
+
 def _memory(store: LearnedStore, name: str) -> dict[str, Any] | None:
     for row in store.list_state_coords():
         if row["target_name"] == name:
@@ -282,8 +307,12 @@ class TestSelectorBeatsMemory:
         executor = _executor(engine, store, tmp_path)
         await _open(engine, quiz_url, SHORT_PAGE)
         note = await _box(engine, "note")
-        store.save_state_coords(
-            "Nickname", "normal", int(note["x"] + note["w"] / 2), int(note["y"] + note["h"] / 2)
+        await _plant(
+            store,
+            engine,
+            "Nickname",
+            int(note["x"] + note["w"] / 2),
+            int(note["y"] + note["h"] / 2),
         )
 
         result = await executor.execute_step(_type_nickname(selector="#nickname"))
@@ -310,8 +339,12 @@ class TestSelectorBeatsMemory:
         executor = _executor(engine, store, tmp_path)
         await _open(engine, quiz_url, SHORT_PAGE)
         note = await _box(engine, "note")
-        store.save_state_coords(
-            "Nickname", "normal", int(note["x"] + note["w"] / 2), int(note["y"] + note["h"] / 2)
+        await _plant(
+            store,
+            engine,
+            "Nickname",
+            int(note["x"] + note["w"] / 2),
+            int(note["y"] + note["h"] / 2),
         )
         _blind_the_search(engine, executor)
 
@@ -374,13 +407,13 @@ class TestClickWithNoEffect:
         """Planted just above the floor, so a single miss drops it out of use."""
         executor = _executor(engine, store, tmp_path)
         await _open(engine, quiz_url, SHORT_PAGE)
-        store.save_state_coords("Grade it", "normal", 5, 5, confidence=0.7)
+        host = await _plant(store, engine, "Grade it", 5, 5, confidence=0.7)
         _blind_the_search(engine, executor)
 
         result = await executor.execute_step(_click_grade())
 
         assert result.status == StepStatus.WARNING, result.error_message
-        assert store.find_state_coords("Grade it", "normal") is None, (
+        assert store.find_state_coords("Grade it", "normal", host=host) is None, (
             "a position that does nothing is still being offered"
         )
 
@@ -390,7 +423,7 @@ class TestClickWithNoEffect:
         """Clicking empty space must not teach the tool that empty space works."""
         executor = _executor(engine, store, tmp_path)
         await _open(engine, quiz_url, SHORT_PAGE)
-        store.save_state_coords("Grade it", "normal", 5, 5, confidence=0.7)
+        await _plant(store, engine, "Grade it", 5, 5, confidence=0.7)
         _blind_the_search(engine, executor)
 
         await executor.execute_step(_click_grade())
@@ -407,8 +440,12 @@ class TestLearningCanBeTurnedOff:
         executor = _executor(engine, store, tmp_path, learn_coords=False)
         await _open(engine, quiz_url, SHORT_PAGE)
         note = await _box(engine, "note")
-        store.save_state_coords(
-            "Nickname", "normal", int(note["x"] + note["w"] / 2), int(note["y"] + note["h"] / 2)
+        await _plant(
+            store,
+            engine,
+            "Nickname",
+            int(note["x"] + note["w"] / 2),
+            int(note["y"] + note["h"] / 2),
         )
 
         result = await executor.execute_step(_type_nickname())

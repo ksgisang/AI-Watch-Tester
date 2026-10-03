@@ -278,30 +278,22 @@ async def test_a_picture_banked_for_another_host_does_not_heal(
     assert await _clicks(engine) == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Known gap: LearnedStore keys coordinates by target name and page state only, "
-        "with no host, so a position learned on one application answers on another. "
-        "Same defect class as the picture store's missing host key. When this is fixed "
-        "the test will xpass and strict= will fail the suite, which is the point: "
-        "delete the marker then."
-    ),
-)
 @pytest.mark.asyncio
 async def test_a_coordinate_learned_on_another_host_must_not_be_reused(
     engine: WebEngine, quiz_url: str, tmp_path: Path
 ) -> None:
     """The same question as above, asked of the *other* thing a run leaves behind.
 
-    Pictures are scoped by host; remembered positions are not. So the run below
-    refuses the picture, correctly, and then clicks a coordinate it learned on a
-    different host anyway — and reports a pass, because the button happens not to
-    have moved. On two genuinely different applications sharing a widget name
-    that click lands on whatever occupies those pixels.
+    Pictures were scoped by host and remembered positions were not, so the run
+    below refused the picture, correctly, and then clicked a coordinate it had
+    learned on a different host anyway — reporting a pass because the button
+    happened not to have moved. On two genuinely different applications sharing
+    a widget name that click lands on whatever occupies those pixels.
 
     This test is what found it: the host refusal looked like it worked until the
-    learned store was taken out of the way.
+    learned store was taken out of the way. AAT-115 gave ``LearnedStore`` the
+    same host key the picture bank already had, which is what makes the refusal
+    below real rather than accidental.
     """
     loopback = quiz_url
     by_name = quiz_url.replace("127.0.0.1", "localhost")

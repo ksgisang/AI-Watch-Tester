@@ -1040,6 +1040,14 @@ class LearnedElement(BaseModel):
     cropped_image_path: str
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     use_count: int = Field(default=0, ge=0)
+    host: str = Field(
+        default="",
+        description=(
+            "Host the position was learned on. A position is only reused on the "
+            "same host; an empty value means the row predates host scoping and "
+            "is never reused"
+        ),
+    )
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 

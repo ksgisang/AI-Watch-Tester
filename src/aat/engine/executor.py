@@ -991,6 +991,20 @@ class StepExecutor:
             "confidence": confidence,
         }
 
+    def _learned_host(self) -> str:
+        """The scope a remembered position belongs to: the host of the current page.
+
+        The same expression the picture bank uses, deliberately. A position and
+        a picture learned on the same screen must land in the same bucket, or
+        the two stores disagree about which application they are describing --
+        and a coordinate learned on ``127.0.0.1`` gets clicked on ``localhost``,
+        which is the defect this fixes. ``scope_for`` keeps the port, because
+        ``localhost:3000`` and ``localhost:8080`` are routinely two products.
+        """
+        from aat.matchers import template_store
+
+        return template_store.scope_for(self._last_url)
+
     def _settle_pending_bank(self, effect_ok: bool | None) -> None:
         """Write the proposed visual baseline, unless the action did nothing.
 
@@ -1057,6 +1071,7 @@ class StepExecutor:
                 removed = self._learned_store.penalize_coords(
                     name,
                     self._current_page_state,
+                    host=self._learned_host(),
                 )
                 if removed:
                     logger.warning(
@@ -1070,13 +1085,15 @@ class StepExecutor:
         confidence = float(pending["confidence"])
         logger.info("Learning: '%s' at (%d,%d) state=%s", name, x, y, post_state)
         with contextlib.suppress(Exception):
-            self._learned_store.save_or_update_by_name(name, x, y, confidence)
+            host = self._learned_host()
+            self._learned_store.save_or_update_by_name(name, x, y, confidence, host=host)
             self._learned_store.save_state_coords(
                 name,
                 post_state,
                 x,
                 y,
                 confidence,
+                host=host,
             )
 
     async def _find_and_act(self, step: StepConfig) -> MatchResult:
@@ -1492,7 +1509,8 @@ class StepExecutor:
             return None
 
         page_state = await self._detect_page_state()
-        coords = self._learned_store.find_state_coords(target_name, page_state)
+        host = self._learned_host()
+        coords = self._learned_store.find_state_coords(target_name, page_state, host=host)
         if coords:
             lx, ly, lconf = coords
             logger.info(
@@ -1519,8 +1537,9 @@ class StepExecutor:
                     self._pending_learn["from_learned"] = True
                 return result
 
-        # Fallback: try state-agnostic learned coords
-        learned = self._learned_store.find_by_name(target_name)
+        # Fallback: try state-agnostic learned coords -- still host-scoped, because
+        # dropping the page state widens *when* a position applies, not *where*.
+        learned = self._learned_store.find_by_name(target_name, host=host)
         if learned and learned.confidence >= 0.8:
             try:
                 result = await self._act_at_pos(

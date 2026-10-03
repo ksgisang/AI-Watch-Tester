@@ -20,6 +20,22 @@ logger = logging.getLogger(__name__)
 MIN_COORD_CONFIDENCE = 0.5
 COORD_PENALTY = 0.3
 
+#: Scope for a coordinate the caller could not attribute to a host -- a
+#: ``file://`` page, ``about:blank``, or the desktop engine, which has no URL.
+#: Deliberately the same string as :data:`aat.matchers.template_store.UNSCOPED`
+#: so that the two stores a successful run writes to partition identically: a
+#: picture and a position learned on the same screen belong to the same bucket,
+#: and neither answers for a different application.
+UNSCOPED_HOST = "_unscoped"
+
+#: What the migration leaves on rows that predate host scoping. Empty rather
+#: than :data:`UNSCOPED_HOST` on purpose: those two are not the same claim.
+#: ``_unscoped`` means "learned somewhere with no host"; ``''`` means "we do not
+#: know where this was learned", and the only safe thing to do with an unknown
+#: provenance is to never reuse it. Every read passes a non-empty scope, so
+#: these rows are inert -- visible in ``aat learned list``, never clicked.
+LEGACY_HOST = ""
+
 _CREATE_TABLE = """\
 CREATE TABLE IF NOT EXISTS learned_elements (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,6 +48,7 @@ CREATE TABLE IF NOT EXISTS learned_elements (
     cropped_image   TEXT NOT NULL,
     confidence      REAL DEFAULT 1.0,
     use_count       INTEGER DEFAULT 0,
+    host            TEXT NOT NULL DEFAULT '',
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
@@ -105,14 +122,20 @@ CREATE TABLE IF NOT EXISTS state_coords (
     correct_y       INTEGER NOT NULL,
     confidence      REAL DEFAULT 1.0,
     use_count       INTEGER DEFAULT 0,
+    host            TEXT NOT NULL DEFAULT '',
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
 """
 
 _CREATE_IDX_STATE_COORDS = (
-    "CREATE INDEX IF NOT EXISTS idx_state_coords ON state_coords(target_name, page_state);"
+    "CREATE INDEX IF NOT EXISTS idx_state_coords ON state_coords(target_name, page_state, host);"
 )
+
+#: Tables that gained the ``host`` column in AAT-115. Added by ALTER on an
+#: existing database rather than by recreating the table, so that a user's
+#: accumulated learning survives the upgrade -- inert, but inspectable.
+_HOST_SCOPED_TABLES = ("state_coords", "learned_elements")
 
 _CREATE_TABLE_STRATEGIES = """\
 CREATE TABLE IF NOT EXISTS test_strategies (
@@ -144,6 +167,9 @@ def _row_to_element(row: sqlite3.Row) -> LearnedElement:
         cropped_image_path=row["cropped_image"],
         confidence=row["confidence"],
         use_count=row["use_count"],
+        # `in row` would search the row's *values*: sqlite3.Row is a sequence,
+        # not a mapping, so the column names only come from keys().
+        host=row["host"] if "host" in set(row.keys()) else "",
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
     )
@@ -168,13 +194,53 @@ class LearnedStore:
             self._conn.execute(_CREATE_TABLE_MATCH_HISTORY)
             self._conn.execute(_CREATE_IDX_MATCH_HISTORY)
             self._conn.execute(_CREATE_TABLE_STATE_COORDS)
-            self._conn.execute(_CREATE_IDX_STATE_COORDS)
             self._conn.execute(_CREATE_TABLE_STRATEGIES)
             self._conn.execute(_CREATE_IDX_STRATEGIES)
+            # Before any index that names ``host``: CREATE TABLE IF NOT EXISTS is a
+            # no-op on a database that already has the table, so an existing user's
+            # state_coords keeps the old column list and indexing a column that is
+            # not there yet raises -- which would make the learning database refuse
+            # to open at all on upgrade, not merely lose its memory.
+            self._add_host_column()
+            self._conn.execute(_CREATE_IDX_STATE_COORDS)
             self._conn.commit()
         except sqlite3.Error as exc:
             msg = f"Failed to open database: {db_path}"
             raise LearningError(msg) from exc
+
+    def _add_host_column(self) -> None:
+        """Give an existing database the ``host`` column, once.
+
+        Coordinates used to be keyed by target name and page state alone, so a
+        position learned on one application answered a lookup on another --
+        ``127.0.0.1`` and ``localhost`` being the case that found it. Pictures
+        were already scoped by host; positions were the half that was missed.
+
+        Rows that predate the column keep :data:`LEGACY_HOST`, which no read
+        ever asks for. They are not deleted: deleting a user's accumulated
+        learning without being asked is not this function's decision, and the
+        rows are still worth seeing in ``aat learned list``. The warning below
+        fires once per database -- the next open finds the column already
+        there -- and names the command that clears them.
+        """
+        for table in _HOST_SCOPED_TABLES:
+            columns = {
+                str(row["name"]) for row in self._conn.execute(f"PRAGMA table_info({table})")
+            }
+            if "host" in columns:
+                continue
+            self._conn.execute(
+                f"ALTER TABLE {table} ADD COLUMN host TEXT NOT NULL DEFAULT '{LEGACY_HOST}'"
+            )
+            stale = self._conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"]
+            if stale:
+                logger.warning(
+                    "[AWT] %d remembered position(s) in %s predate host scoping and will not "
+                    "be reused -- they will be learned again on the next run. "
+                    "Clear them with: aat learn reset --all",
+                    stale,
+                    table,
+                )
 
     # -- CRUD ----------------------------------------------------------------
 
@@ -189,7 +255,7 @@ class LearnedStore:
                     SET scenario_id=?, step_number=?, target_name=?,
                         screenshot_hash=?, correct_x=?, correct_y=?,
                         cropped_image=?, confidence=?, use_count=?,
-                        updated_at=?
+                        host=?, updated_at=?
                     WHERE id=?
                     """,
                     (
@@ -202,6 +268,7 @@ class LearnedStore:
                         element.cropped_image_path,
                         element.confidence,
                         element.use_count,
+                        element.host,
                         now,
                         element.id,
                     ),
@@ -216,8 +283,8 @@ class LearnedStore:
                 INSERT INTO learned_elements
                     (scenario_id, step_number, target_name, screenshot_hash,
                      correct_x, correct_y, cropped_image, confidence,
-                     use_count, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     use_count, host, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     element.scenario_id,
@@ -229,6 +296,7 @@ class LearnedStore:
                     element.cropped_image_path,
                     element.confidence,
                     element.use_count,
+                    element.host,
                     element.created_at.isoformat(),
                     now,
                 ),
@@ -268,17 +336,26 @@ class LearnedStore:
             msg = f"find_by_target failed: {exc}"
             raise LearningError(msg) from exc
 
-    def find_by_name(self, target_name: str) -> LearnedElement | None:
-        """Find the most recently used element by target name."""
+    def find_by_name(
+        self,
+        target_name: str,
+        host: str = UNSCOPED_HOST,
+    ) -> LearnedElement | None:
+        """Find the most recently used element by target name, on *host*.
+
+        ``host`` is part of the key, not a filter applied afterwards: a
+        position learned on one application is not evidence about another, even
+        when both call the button "Submit".
+        """
         try:
             row = self._conn.execute(
                 """\
                 SELECT * FROM learned_elements
-                WHERE target_name=?
+                WHERE target_name=? AND host=?
                 ORDER BY use_count DESC, updated_at DESC
                 LIMIT 1
                 """,
-                (target_name,),
+                (target_name, host),
             ).fetchone()
             if row is None:
                 return None
@@ -292,16 +369,19 @@ class LearnedStore:
         x: int,
         y: int,
         confidence: float = 1.0,
+        host: str = UNSCOPED_HOST,
     ) -> None:
-        """Save or update learned coordinates by target name."""
+        """Save or update learned coordinates by target name, under *host*."""
         now = datetime.now(UTC).isoformat()
         try:
-            # Duplicate coordinate check: warn if another target has same coords
+            # Duplicate coordinate check: warn if another target has same coords.
+            # Scoped to one host, because two applications having a button at the
+            # same pixel is a coincidence, not a conflict worth reporting.
             dup_row = self._conn.execute(
                 "SELECT target_name FROM learned_elements "
-                "WHERE correct_x=? AND correct_y=? AND target_name!=? "
+                "WHERE correct_x=? AND correct_y=? AND target_name!=? AND host=? "
                 "LIMIT 1",
-                (x, y, target_name),
+                (x, y, target_name, host),
             ).fetchone()
             if dup_row:
                 logger.warning(
@@ -312,7 +392,7 @@ class LearnedStore:
                     dup_row["target_name"],
                 )
 
-            existing = self.find_by_name(target_name)
+            existing = self.find_by_name(target_name, host)
             if existing and existing.id is not None:
                 # Update if coordinates changed
                 if existing.correct_x != x or existing.correct_y != y:
@@ -338,11 +418,11 @@ class LearnedStore:
                     INSERT INTO learned_elements
                         (scenario_id, step_number, target_name,
                          screenshot_hash, correct_x, correct_y,
-                         cropped_image, confidence, use_count,
+                         cropped_image, confidence, use_count, host,
                          created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    ("_auto", 1, target_name, "", x, y, "", confidence, 1, now, now),
+                    ("_auto", 1, target_name, "", x, y, "", confidence, 1, host, now, now),
                 )
                 self._conn.commit()
         except sqlite3.Error:
@@ -580,8 +660,8 @@ class LearnedStore:
                         INSERT OR IGNORE INTO learned_elements
                             (scenario_id, step_number, target_name, screenshot_hash,
                              correct_x, correct_y, cropped_image, confidence,
-                             use_count, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             use_count, host, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             elem.get("scenario_id", ""),
@@ -593,6 +673,10 @@ class LearnedStore:
                             elem.get("cropped_image", ""),
                             elem.get("confidence", 1.0),
                             elem.get("use_count", 0),
+                            # A file exported before host scoping carries no host,
+                            # and guessing one would be inventing provenance. Those
+                            # rows import as LEGACY_HOST: kept, listed, never reused.
+                            elem.get("host", LEGACY_HOST),
                             elem.get("created_at", ""),
                             elem.get("updated_at", ""),
                         ),
@@ -776,11 +860,14 @@ class LearnedStore:
         self,
         target_name: str,
         page_state: str = "normal",
+        host: str = UNSCOPED_HOST,
     ) -> tuple[int, int, float] | None:
-        """Find coordinates for target in given page state.
+        """Find coordinates for target in given page state, on *host*.
 
         Rows whose confidence has decayed below MIN_COORD_CONFIDENCE are
         ignored: a coordinate that stopped working must not keep being tried.
+        Rows carrying :data:`LEGACY_HOST` are ignored for the same reason in a
+        different form -- an unknown origin is not evidence about this screen.
 
         Returns (x, y, confidence) or None.
         """
@@ -789,11 +876,11 @@ class LearnedStore:
                 """\
                 SELECT correct_x, correct_y, confidence
                 FROM state_coords
-                WHERE target_name=? AND page_state=? AND confidence>=?
+                WHERE target_name=? AND page_state=? AND host=? AND confidence>=?
                 ORDER BY use_count DESC
                 LIMIT 1
                 """,
-                (target_name, page_state, MIN_COORD_CONFIDENCE),
+                (target_name, page_state, host, MIN_COORD_CONFIDENCE),
             ).fetchone()
             if row:
                 return row["correct_x"], row["correct_y"], row["confidence"]
@@ -808,14 +895,21 @@ class LearnedStore:
         x: int,
         y: int,
         confidence: float = 1.0,
+        host: str = UNSCOPED_HOST,
     ) -> None:
-        """Save or update coordinates for target + state combination."""
+        """Save or update coordinates for target + state + host combination.
+
+        ``host`` belongs in the update-or-insert lookup, not just in the
+        inserted row: looking up without it would find another host's row and
+        overwrite its position, which both corrupts that host's memory and
+        leaves this host with no row of its own.
+        """
         now = datetime.now(UTC).isoformat()
         try:
             row = self._conn.execute(
                 "SELECT id, correct_x, correct_y FROM state_coords "
-                "WHERE target_name=? AND page_state=?",
-                (target_name, page_state),
+                "WHERE target_name=? AND page_state=? AND host=?",
+                (target_name, page_state, host),
             ).fetchone()
 
             if row:
@@ -835,9 +929,9 @@ class LearnedStore:
                 self._conn.execute(
                     "INSERT INTO state_coords "
                     "(target_name, page_state, correct_x, correct_y, "
-                    "confidence, use_count, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
-                    (target_name, page_state, x, y, confidence, now, now),
+                    "confidence, use_count, host, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                    (target_name, page_state, x, y, confidence, host, now, now),
                 )
             self._conn.commit()
         except sqlite3.Error:
@@ -848,6 +942,7 @@ class LearnedStore:
         target_name: str,
         page_state: str | None = None,
         penalty: float = COORD_PENALTY,
+        host: str = UNSCOPED_HOST,
     ) -> int:
         """Lower the confidence of remembered coordinates that did not work.
 
@@ -855,10 +950,15 @@ class LearnedStore:
         Rows falling below MIN_COORD_CONFIDENCE are deleted, so the next run
         searches for the element again instead of repeating the same mistake.
 
+        Scoped to *host* for the same reason the lookup is: the row that sent
+        the click to the wrong place belongs to this application, and docking
+        another application's memory for it would punish the innocent.
+
         Args:
             target_name: Target whose memory is suspect.
             page_state: Restrict to one page state, or None for every state.
             penalty: Confidence subtracted from each matching row.
+            host: Host whose memory is suspect.
 
         Returns:
             Number of rows deleted.
@@ -868,27 +968,28 @@ class LearnedStore:
             if page_state is None:
                 self._conn.execute(
                     "UPDATE state_coords SET confidence=confidence-?, updated_at=? "
-                    "WHERE target_name=?",
-                    (penalty, now, target_name),
+                    "WHERE target_name=? AND host=?",
+                    (penalty, now, target_name, host),
                 )
             else:
                 self._conn.execute(
                     "UPDATE state_coords SET confidence=confidence-?, updated_at=? "
-                    "WHERE target_name=? AND page_state=?",
-                    (penalty, now, target_name, page_state),
+                    "WHERE target_name=? AND page_state=? AND host=?",
+                    (penalty, now, target_name, page_state, host),
                 )
             cursor = self._conn.execute(
-                "DELETE FROM state_coords WHERE target_name=? AND confidence<?",
-                (target_name, MIN_COORD_CONFIDENCE),
+                "DELETE FROM state_coords WHERE target_name=? AND host=? AND confidence<?",
+                (target_name, host, MIN_COORD_CONFIDENCE),
             )
             deleted = cursor.rowcount or 0
             self._conn.execute(
-                "UPDATE learned_elements SET confidence=confidence-? WHERE target_name=?",
-                (penalty, target_name),
+                "UPDATE learned_elements SET confidence=confidence-? "
+                "WHERE target_name=? AND host=?",
+                (penalty, target_name, host),
             )
             cursor = self._conn.execute(
-                "DELETE FROM learned_elements WHERE target_name=? AND confidence<?",
-                (target_name, MIN_COORD_CONFIDENCE),
+                "DELETE FROM learned_elements WHERE target_name=? AND host=? AND confidence<?",
+                (target_name, host, MIN_COORD_CONFIDENCE),
             )
             deleted += cursor.rowcount or 0
             self._conn.commit()
@@ -898,10 +999,16 @@ class LearnedStore:
         return deleted
 
     def list_state_coords(self) -> list[dict[str, Any]]:
-        """List every remembered coordinate, most-used first."""
+        """List every remembered coordinate, most-used first.
+
+        ``host`` is included because it is part of the key: without it the
+        listing cannot distinguish two applications that happen to name a
+        button the same way, and rows carrying :data:`LEGACY_HOST` would look
+        live when in fact nothing will ever reuse them.
+        """
         try:
             cursor = self._conn.execute(
-                "SELECT target_name, page_state, correct_x, correct_y, "
+                "SELECT target_name, page_state, host, correct_x, correct_y, "
                 "confidence, use_count, updated_at FROM state_coords "
                 "ORDER BY use_count DESC, target_name"
             )
