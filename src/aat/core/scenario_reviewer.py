@@ -190,7 +190,11 @@ class ScenarioReviewer:
             return _s("value")
 
         if action in ("assert_text", "assert"):
-            return _s("value") or _s("expected")
+            # Mirror executor.py: target.text wins, then value. Reading only
+            # `value` left every target.text assertion blank in this panel —
+            # the reviewer must show what the step actually checks.
+            t = step.get("target") or {}
+            return str(t.get("text") or "") or _s("value") or _s("expected")
 
         if action == "assert_screen_changed":
             thresh = step.get("threshold") or step.get("change_threshold")

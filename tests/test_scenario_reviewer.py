@@ -131,6 +131,30 @@ def test_format_find_and_click_shows_label() -> None:
     assert "로그인" in detail
 
 
+def test_format_assert_text_reads_target_text() -> None:
+    """The reviewer must show what an assertion checks.
+
+    Real scenarios put the expected string in target.text (executor.py reads
+    that first). Reading only `value` left this line blank, so the approval
+    panel hid the single most important fact about the step.
+    """
+    r = ScenarioReviewer()
+    step = {"action": "assert_text", "target": {"text": "반가워요"}, "step": 3}
+    assert "반가워요" in r._format_detail(step, "assert_text")
+
+
+def test_format_assert_text_prefers_target_over_value() -> None:
+    r = ScenarioReviewer()
+    step = {"action": "assert_text", "target": {"text": "내 과목"}, "value": "stale", "step": 8}
+    assert r._format_detail(step, "assert_text") == "내 과목"
+
+
+def test_format_assert_text_falls_back_to_value_and_expected() -> None:
+    r = ScenarioReviewer()
+    assert r._format_detail({"action": "assert_text", "value": "환영"}, "assert_text") == "환영"
+    assert r._format_detail({"action": "assert", "expected": "OK"}, "assert") == "OK"
+
+
 # ---------------------------------------------------------------------------
 # _format_step — critical marker
 # ---------------------------------------------------------------------------

@@ -34,8 +34,19 @@ from aat.core.models import (
 )
 
 
-def test_version() -> None:
-    assert __version__ == "1.5.5"
+def test_version_matches_packaging_metadata() -> None:
+    """__version__ must track pyproject.toml.
+
+    Pinning a literal here is what let the two drift: the package said 1.7.1
+    while `aat --version` printed 1.5.5, so every user on the newest release
+    still saw the update banner. Compare the two sources instead.
+    """
+    import tomllib
+    from pathlib import Path
+
+    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    declared = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"]
+    assert __version__ == declared
 
 
 # ── Enum Tests ──
@@ -622,6 +633,47 @@ class TestAnalysisResult:
         )
         assert ar.severity == Severity.CRITICAL
         assert len(ar.related_files) == 1
+
+
+class TestFileChangePath:
+    """`work_dir / change.path` drops work_dir when path is absolute."""
+
+    @pytest.mark.parametrize(
+        "good",
+        [
+            "src/app.py",
+            "a/b/c/deep.ts",
+            "file.json",
+            "src/dir.with.dots/app.py",
+            "..hidden/app.py",  # leading dots in a name, not a '..' segment
+        ],
+    )
+    def test_accepts_relative_paths(self, good: str) -> None:
+        assert FileChange(path=good, original="", modified="").path == good
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "/etc/passwd",
+            "/Users/apple/.ssh/authorized_keys",
+            "../../../.ssh/authorized_keys",
+            "src/../../outside.py",
+            "..",
+            "~/.ssh/config",
+            "~root/.bashrc",
+            "C:\\Windows\\System32\\drivers\\etc\\hosts",
+            "src\\..\\..\\outside.py",  # only PureWindowsPath splits this
+            "\\\\server\\share\\x",
+            "",
+            "   ",
+        ],
+    )
+    def test_rejects_escaping_paths(self, bad: str) -> None:
+        with pytest.raises(ValidationError):
+            FileChange(path=bad, original="", modified="")
+
+    def test_strips_surrounding_whitespace(self) -> None:
+        assert FileChange(path="  src/app.py  ", original="", modified="").path == "src/app.py"
 
 
 class TestFixResult:

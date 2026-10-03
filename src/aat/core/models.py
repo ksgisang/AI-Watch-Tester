@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -912,6 +913,35 @@ class FileChange(BaseModel):
     original: str
     modified: str
     description: str = Field(default="")
+
+    @field_validator("path")
+    @classmethod
+    def _must_stay_inside_project(cls, v: str) -> str:
+        """Keep an AI-supplied path inside the project root.
+
+        ``work_dir / change.path`` discards ``work_dir`` entirely when the
+        right side is absolute, so an unchecked path from a model response
+        reaches any file on disk — in ``auto`` mode without a human looking.
+        """
+        raw = v.strip()
+        if not raw:
+            msg = "file path must not be empty"
+            raise ValueError(msg)
+        if raw.startswith("~"):
+            msg = f"file path must not start with '~': {v!r}"
+            raise ValueError(msg)
+        # Check both flavours even on POSIX: PurePosixPath reads 'C:\\x' and
+        # 'a\\..\\..\\b' as single filenames, so only the Windows flavour sees
+        # the drive anchor and the backslash-separated '..' segments.
+        for flavour in (PurePosixPath, PureWindowsPath):
+            parsed = flavour(raw)
+            if parsed.is_absolute() or parsed.anchor:
+                msg = f"file path must be relative to the project root: {v!r}"
+                raise ValueError(msg)
+            if ".." in parsed.parts:
+                msg = f"file path must not traverse outside the project root: {v!r}"
+                raise ValueError(msg)
+        return raw
 
 
 class AnalysisResult(BaseModel):
