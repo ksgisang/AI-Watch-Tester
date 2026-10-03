@@ -46,7 +46,9 @@ I'm sharing it because I suspect I'm not the only one who got fed up. **If you'v
 
 ## What it does
 
-You give AWT a URL. It opens a real Chrome window, reads the page, writes test steps, runs them, and reports what passed and what failed. If something breaks, the **DevQA Loop** kicks in — AI reads the error, patches the test, and retries automatically (up to 5 times).
+You give AWT a URL. It opens a real Chrome window, reads the page, writes test steps, runs them, and reports what passed and what failed. If something breaks, the **DevQA Loop** kicks in — it re-scans the page, repairs the failing step, and retries automatically (up to 5 times).
+
+**What gets repaired, and what doesn't.** The loop fixes your *test*, not your *app*. `aat devqa` re-matches the failing step's target against a fresh scan — no AI is involved in that part. Writing to your source files is a separate, opt-in thing: `aat loop --approval-mode branch` (commits to a `aat/fix-NNN` branch) or `--approval-mode auto` (writes in place). The default mode, `manual`, shows you the proposed diff and **does not apply it** — see [Approval modes](#approval-modes).
 
 **No test code to write. No recording sessions. No manual selector updates.**
 
@@ -68,6 +70,8 @@ npx skills add ksgisang/awt-skill --skill awt -g
 ```
 
 ### Option 2 — MCP Server (Claude Desktop, Cursor, Windsurf)
+
+**Requires Python 3.11+.** On an older interpreter `pip install` fails with a metadata error that does not mention the version — check `python --version` first.
 
 ```bash
 # Install
@@ -121,7 +125,7 @@ When a step fails, AWT:
 3. Re-scans the page to check if anything moved or changed
 4. Patches the specific failing step and retries
 
-If the failure is a **bug in your source code** (not just a wrong selector), AWT can trace it — finding the route handler, component, or API endpoint that's misbehaving — and suggest or apply a fix.
+If the failure is a **bug in your source code** (not just a wrong selector), AWT can trace it — finding the route handler, component, or API endpoint that's misbehaving — and propose a fix. Whether that fix is ever *written* depends on the approval mode, and the default writes nothing.
 
 ```bash
 # Watch the loop run live
@@ -129,6 +133,22 @@ aat devqa "checkout flow test" --url http://localhost:3000
 
 # Or use it with your AI coding tool (Claude Code, Cursor, Copilot...)
 # "Test the registration page" → AWT scans, generates, runs, fixes
+```
+
+### Approval modes
+
+`aat loop` takes `--approval-mode` (`-a`). This is the switch that decides whether anything touches your files:
+
+| Mode | What happens to your source files |
+|---|---|
+| **`manual`** (default) | **Nothing is written.** You are shown the proposed diff and asked to approve; approving records the decision and the next iteration re-runs the test against your *unchanged* code. Use it to see what AWT would do |
+| `branch` | Checks out `aat/fix-NNN`, writes the changes, commits them, and re-tests on that branch. Your working branch is untouched and you review a real commit |
+| `auto` | Writes directly into your working directory and re-tests. No branch, no commit |
+
+The honest reading of `manual`: it is a **preview**, not a repair. If you approve a diff and the same failure comes back on the next iteration, nothing is broken — the mode did what it says. Pass `-a branch` when you want the fix to actually land.
+
+```bash
+aat loop scenarios/ -a branch      # fix on a throwaway branch, then review the commit
 ```
 
 ---
@@ -316,7 +336,7 @@ already installed; there is no PDF library to add.
 | | Feature | Description |
 |---|---------|-------------|
 | 🤖 | **Zero-code test generation** | Point at a URL — AI generates complete test steps with real selectors |
-| 🔄 | **Self-healing DevQA Loop** | Tests fail? AI fixes and retries automatically (up to 5 attempts) |
+| 🔄 | **Self-healing DevQA Loop** | Tests fail? AWT re-scans, repairs the failing step, and retries (up to 5 attempts). Source-code fixes need `-a branch` — the default mode only previews them |
 | 👁️ | **Visual verification** | Screenshots before/after every action — not just DOM checks |
 | 🌐 | **Real browser** | Chrome with human-like mouse movement and typing speed |
 | 📱 | **Flutter support** | Native CanvasKit + Semantics detection — tests Flutter web apps too |
@@ -340,6 +360,7 @@ AWT works well for me, but it has rough edges I haven't fully solved yet:
 - **The self-healing loop** occasionally fixates on the wrong element. Setting `--max-attempts 3` helps avoid spinning wheels
 - **Complex SPAs** with heavy animation may need `--verbosity=detailed` and a longer wait time
 - **First-run scenario generation** is only as good as the page's accessibility tree — poorly structured HTML gives poor results
+- **`assert_text` matches hidden text.** It checks the DOM first and falls back to OCR, and the DOM text engine still matches elements hidden with `display:none` — so an assertion can pass on a toast or modal the user never saw. Pass `target.selector` and assert on a container you know is rendered when it matters. Conversely, text that exists only in `<title>` never matches, since neither the DOM text engine nor OCR can reach `<head>`
 
 If you hit something broken, please [open an issue](https://github.com/ksgisang/AI-Watch-Tester/issues). I fix reported bugs fast.
 
@@ -501,6 +522,8 @@ The only thing AWT needs from you is a URL and (optionally) a description of wha
 When a web app changes — a button moves, a label changes, a new form field appears — traditional tests break and stay broken until someone manually updates them.
 
 AWT's DevQA Loop re-scans the page after a failure, finds the updated element, and patches the test step automatically. You don't have to touch the test files.
+
+It means the **test** heals, not the app. `aat devqa` does this by re-matching the failing step's target against a fresh scan — a deterministic rule, no AI. Repairing your *source code* is a different feature with its own switch: `aat loop -a branch`. See [Approval modes](#approval-modes) — the default mode shows you the diff and writes nothing.
 </details>
 
 <details>
@@ -532,10 +555,11 @@ make dev && aat dashboard
 |--|-------------|------------|
 | Starting point | Just a description + URL | Existing scenario file |
 | Test generation | Automatic (scans and writes) | Uses your file |
-| Failure fixing | Patches the test YAML | AI patches your **source code** |
+| Failure fixing | Patches the test YAML (rule-based re-match, no AI) | AI proposes a **source code** patch |
+| Is it written to disk? | Yes — the YAML is rewritten | **Only with `-a branch` or `-a auto`.** Default `manual` previews the diff and writes nothing |
 | Best for | First run, quick testing | Iterative dev with code fixes |
 
-Use `aat devqa` when starting from scratch. Use `aat loop` when you want AWT to also fix your application code.
+Use `aat devqa` when starting from scratch. Use `aat loop -a branch` when you want AWT to also fix your application code — plain `aat loop` will show you the fix and leave your files alone.
 </details>
 
 <details>

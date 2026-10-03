@@ -149,7 +149,8 @@ aat run --skill-mode --fast <scenario>
 - [x] **AAT-012** Waiter — 폴링 + 해시 안정화 (4h) — 완료 2026-02-11
 - [x] **AAT-013** TemplateMatcher — cv2.matchTemplate (5h) — 완료 2026-02-11
 - [x] **AAT-014** OCRMatcher — pytesseract (6h) — 완료 2026-02-11
-- [x] **AAT-015** FeatureMatcher — ORB/SIFT (4h) — 완료 2026-02-11
+- [x] **AAT-015** FeatureMatcher — **ORB만** (4h) — 완료 2026-02-11
+  - 2026-10-03 정정: SIFT는 구현되지 않았습니다. `matchers/feature.py:39`는 `cv2.ORB_create`만 호출합니다
 - [x] **AAT-016** HybridMatcher — 체인 오케스트레이터 (4h) — 완료 2026-02-11
 
 ### Phase 3: Executor + CLI (Week 3~4, ~26h)
@@ -179,7 +180,8 @@ aat run --skill-mode --fast <scenario>
 
 - [x] **AAT-050** LearnedStore — SQLite (4h) — 완료 2026-02-11
 - [x] **AAT-051** LearnedMatcher (3h) — 완료 2026-02-11
-- [x] **AAT-052** VisionAIMatcher — stub (2h) — 완료 2026-02-11
+- [x] **AAT-052** VisionAIMatcher — **완전 구현** (2h) — 완료 2026-02-11
+  - 2026-10-03 정정: "stub"이 아닙니다. `matchers/vision_ai.py` 360행에 Claude·OpenAI호환·Gemini 세 경로 + 응답 검증 + 비용 로깅이 들어 있습니다. **문서가 제품을 과소평가한 자리**입니다
 - [x] **AAT-053** README + CONTRIBUTING (4h) — 완료 2026-02-11
 - [x] **AAT-054** 통합 테스트 (6h) — 완료 2026-02-11
 - [x] **AAT-055** CI/CD + 릴리스 준비 (3h) — 완료 2026-02-11
@@ -213,8 +215,11 @@ aat run --skill-mode --fast <scenario>
   - DevQALoop 모드별 핸들러 (`_handle_manual/branch/auto`), `_read_source_files`
   - `--approval-mode/-a` CLI 옵션, `skip_engine_lifecycle`, start_cmd 중복 제거
   - MarkdownReporter 브랜치/커밋 정보 렌더링
-- [x] **AAT-081** DesktopEngine — PyAutoGUI + Playwright 하이브리드 — 완료 2026-02-12
-  - PyAutoGUI (OS-level 마우스/키보드/스크린샷) + Playwright (브라우저 네비게이션)
+- [x] **AAT-081** DesktopEngine — **화면 좌표로 클릭할 수 있으나 입력은 브라우저로 갑니다** — 완료 2026-02-12
+  - 2026-10-03 정정 (경계를 정확히): `desktop.py:92`가 **Playwright 브라우저를 항상 헤드풀로 띄웁니다.** 그 위에서 두 경로가 갈립니다
+  - **할 수 있는 것** — 단계에 `target.image`가 있으면 `find_on_screen` → `click_on_screen`으로 **PyAutoGUI의 OS 수준 클릭**이 나갑니다(`executor.py:1220,1352-1363`). 브라우저 창 밖도 누를 수 있습니다. 전체화면 캡처·마우스 이동·스크롤도 PyAutoGUI입니다
+  - **할 수 없는 것** — 타이핑은 **언제나** `page.keyboard`(`desktop.py:284`)이므로 네이티브 창에 글자를 넣을 수 없고, `navigate`는 브라우저 페이지를 요구합니다. 즉 **"클릭은 OS, 입력은 브라우저"** 인 반쪽 하이브리드입니다
+  - 데스크톱 앱 자동화를 기대하고 고르면 클릭까지는 되고 입력에서 막힙니다
   - ENGINE_REGISTRY 등록, CLI 동적 엔진 선택 (`config.engine.type: web | desktop`)
 
 ### Post-MVP: 웹 대시보드 (AAT-090~091)
