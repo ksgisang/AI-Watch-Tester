@@ -71,48 +71,123 @@ def _check_aat_cli() -> bool:
         return False
 
 
-def _check_playwright() -> bool:
+def _playwright_version() -> str:
+    try:
+        from importlib.metadata import version
+
+        return version("playwright")
+    except Exception:
+        return "unknown"
+
+
+def _configured_browser() -> str:
+    """Which browser the next run will actually launch."""
+    try:
+        return load_config().engine.browser or "chromium"
+    except Exception:
+        return "chromium"
+
+
+def _required_browser_builds(browser: str) -> list[Path] | None:
+    """Ask Playwright which browser builds it needs, by absolute path.
+
+    ``playwright install --dry-run <browser>`` prints an "Install location:"
+    line per required build, each ending in a build number such as
+    ``chromium-1243``. That number is pinned to the installed Playwright
+    version, so it is the only thing worth comparing against the disk.
+
+    Returns ``None`` when Playwright cannot tell us -- older releases have no
+    ``--dry-run`` -- so the caller can fall back and say that it fell back.
+    """
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "--dry-run", browser],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+
+    builds = [
+        Path(line.split("Install location:", 1)[1].strip())
+        for line in proc.stdout.splitlines()
+        if "Install location:" in line
+    ]
+    # ffmpeg is for video recording, which AWT never asks for. Requiring it
+    # would raise an alarm about something that cannot break a test run.
+    builds = [p for p in builds if "ffmpeg" not in p.name]
+    return builds or None
+
+
+def _browser_cache_dirs() -> list[Path]:
+    dirs = [Path.home() / ".cache" / "ms-playwright"]
+    if not _IS_WIN:
+        dirs.append(Path.home() / "Library" / "Caches" / "ms-playwright")
+    return dirs
+
+
+def _check_browser_build(browser: str) -> bool:
+    """Compare the installed builds against the build Playwright requires.
+
+    The old check asked only whether an ``ms-playwright`` directory existed,
+    so any stale build earned a ✓. Upgrading Playwright leaves the old build
+    in place: doctor reported a healthy environment and the first run then
+    died on a missing executable, with identical doctor output before and
+    after the fix. A green light that cannot go red carries no information.
+    """
+    pw_version = _playwright_version()
+    required = _required_browser_builds(browser)
+
+    if required is None:
+        # Last resort: the directory check, named as the guess it is.
+        if any(d.exists() for d in _browser_cache_dirs()):
+            _warn(
+                f"{browser} directory found, but this Playwright ({pw_version}) "
+                "cannot report the build it requires"
+            )
+            _hint(f"playwright install {browser}  # run it anyway to be sure")
+            return True
+        _fail(f"No Playwright browsers installed for {browser}")
+        _hint(f"playwright install {browser}")
+        return False
+
+    missing = [p for p in required if not p.exists()]
+    if not missing:
+        names = ", ".join(p.name for p in required)
+        _ok(f"{browser} build {names} — matches Playwright {pw_version}")
+        return True
+
+    _fail(f"{browser} build required by Playwright {pw_version} is missing")
+    for p in missing:
+        _hint(f"missing: {p.name}")
+    # Name what *is* there. After a Playwright upgrade this is the whole
+    # story, and it is the line that tells the user why a working setup broke.
+    # Look in the directory Playwright itself named, not in a guessed one --
+    # PLAYWRIGHT_BROWSERS_PATH moves the cache, and reporting builds from
+    # somewhere else would contradict the "missing" lines above.
+    cache = missing[0].parent
+    stem = missing[0].name.split("-")[0]
+    if cache.exists():
+        found = sorted(d.name for d in cache.iterdir() if d.name.startswith(f"{stem}-"))
+        if found:
+            _hint(f"found instead, in {cache}: {', '.join(found)}")
+    _hint(f"playwright install {browser}")
+    return False
+
+
+def _check_playwright(browser: str = "chromium") -> bool:
     try:
         import playwright  # noqa: F401
-
-        # Check if browsers are installed
-        subprocess.run(
-            [sys.executable, "-m", "playwright", "install", "--dry-run"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        # dry-run doesn't exist in all versions, just check import
-        _ok("Playwright installed")
     except ImportError:
         _fail("Playwright not installed")
-        _hint("pip install playwright && playwright install chromium")
+        _hint(f"pip install playwright && playwright install {browser}")
         return False
-    except Exception:
-        _ok("Playwright installed")
 
-    # Check if chromium is available
-    try:
-        subprocess.run(
-            [sys.executable, "-m", "playwright", "install", "--help"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        chromium_path = Path.home() / ".cache" / "ms-playwright"
-        if not _IS_WIN:
-            chromium_path_alt = Path.home() / "Library" / "Caches" / "ms-playwright"
-            if chromium_path.exists() or chromium_path_alt.exists():
-                _ok("Chromium browser available")
-                return True
-        if chromium_path.exists():
-            _ok("Chromium browser available")
-            return True
-        _warn("Chromium may not be installed")
-        _hint("playwright install chromium")
-        return True  # Playwright itself is there
-    except Exception:
-        return True
+    _ok(f"Playwright {_playwright_version()} installed")
+    return _check_browser_build(browser)
 
 
 def _check_tesseract() -> bool:
@@ -245,8 +320,8 @@ def doctor_command(
     if not _check_aat_cli():
         issues += 1
 
-    # 3. Playwright
-    if not _check_playwright():
+    # 3. Playwright — against the browser the next run will actually launch
+    if not _check_playwright(_configured_browser()):
         issues += 1
 
     # 4. Tesseract OCR
