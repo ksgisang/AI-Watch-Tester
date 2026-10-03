@@ -47,10 +47,7 @@ def _delete_via_rest_api(email: str) -> None:
     project_id = os.environ.get("FIREBASE_PROJECT_ID", "clasring-dev")
 
     # Look up UID first
-    lookup_url = (
-        f"https://identitytoolkit.googleapis.com/v1/projects/{project_id}"
-        f"/accounts:lookup"
-    )
+    lookup_url = f"https://identitytoolkit.googleapis.com/v1/projects/{project_id}/accounts:lookup"
     payload = json.dumps({"email": [email]}).encode()
     req = urllib.request.Request(
         lookup_url,
@@ -68,10 +65,7 @@ def _delete_via_rest_api(email: str) -> None:
     uid = users[0]["localId"]
 
     # Delete
-    delete_url = (
-        f"https://identitytoolkit.googleapis.com/v1/projects/{project_id}"
-        f"/accounts/{uid}"
-    )
+    delete_url = f"https://identitytoolkit.googleapis.com/v1/projects/{project_id}/accounts/{uid}"
     req2 = urllib.request.Request(
         delete_url,
         method="DELETE",
@@ -92,11 +86,10 @@ def main() -> int:
     print(f"[cleanup] Attempting to delete Firebase user: {email}")
 
     # Try Admin SDK first
-    if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") or os.environ.get(
-        "FIREBASE_CREDENTIALS"
-    ):
+    if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") or os.environ.get("FIREBASE_CREDENTIALS"):
         try:
             import firebase_admin  # noqa: F401
+
             _delete_via_admin_sdk(email)
             return 0
         except ImportError:

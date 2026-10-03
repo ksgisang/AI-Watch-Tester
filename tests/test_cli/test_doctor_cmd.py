@@ -58,9 +58,7 @@ def _stub_dry_run(
 
 
 class TestRequiredBrowserBuilds:
-    def test_parses_install_locations(
-        self, monkeypatch: pytest.MonkeyPatch, cache: Path
-    ) -> None:
+    def test_parses_install_locations(self, monkeypatch: pytest.MonkeyPatch, cache: Path) -> None:
         _stub_dry_run(monkeypatch, _DRY_RUN_OUTPUT.format(cache=cache))
         builds = doctor_cmd._required_browser_builds("chromium")
         assert builds is not None
@@ -69,9 +67,7 @@ class TestRequiredBrowserBuilds:
             "chromium_headless_shell-1208",
         ]
 
-    def test_ffmpeg_is_not_required(
-        self, monkeypatch: pytest.MonkeyPatch, cache: Path
-    ) -> None:
+    def test_ffmpeg_is_not_required(self, monkeypatch: pytest.MonkeyPatch, cache: Path) -> None:
         """AWT never records video, so a missing ffmpeg cannot break a run.
 
         Requiring it would raise an alarm about something harmless, which is
@@ -82,16 +78,12 @@ class TestRequiredBrowserBuilds:
         assert builds is not None
         assert not any("ffmpeg" in p.name for p in builds)
 
-    def test_none_when_playwright_cannot_report(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_none_when_playwright_cannot_report(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Older Playwright has no --dry-run; the caller must fall back."""
         _stub_dry_run(monkeypatch, "unknown option '--dry-run'", returncode=1)
         assert doctor_cmd._required_browser_builds("chromium") is None
 
-    def test_none_when_no_install_locations(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_none_when_no_install_locations(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _stub_dry_run(monkeypatch, "nothing to install\n")
         assert doctor_cmd._required_browser_builds("chromium") is None
 
@@ -197,9 +189,7 @@ class TestCheckBrowserBuild:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         _stub_dry_run(monkeypatch, "", returncode=1)
-        monkeypatch.setattr(
-            doctor_cmd, "_browser_cache_dirs", lambda: [tmp_path / "absent"]
-        )
+        monkeypatch.setattr(doctor_cmd, "_browser_cache_dirs", lambda: [tmp_path / "absent"])
 
         assert doctor_cmd._check_browser_build("chromium") is False
         assert "No Playwright browsers installed" in capsys.readouterr().out
@@ -215,9 +205,7 @@ class TestConfiguredBrowser:
         monkeypatch.setattr(doctor_cmd, "load_config", lambda: cfg)
         assert doctor_cmd._configured_browser() == "firefox"
 
-    def test_defaults_to_chromium_without_a_config(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_defaults_to_chromium_without_a_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def boom() -> None:
             raise RuntimeError("no config")
 

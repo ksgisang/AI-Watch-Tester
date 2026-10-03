@@ -1018,9 +1018,7 @@ async def _run(
             typer.echo(f"  Scenario completed in {scenario_elapsed:.0f}ms")
 
             if report_format:
-                test_results.append(
-                    _build_test_result(scenario, scenario_steps, scenario_elapsed)
-                )
+                test_results.append(_build_test_result(scenario, scenario_steps, scenario_elapsed))
 
             if scenario_failed:
                 failed_scenarios.add(scenario.id)

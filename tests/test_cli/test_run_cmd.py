@@ -286,9 +286,7 @@ class TestUnapprovedExitCode:
         assert _unapproved_exit_code(1) == 0
         assert "cancelled by user" in capsys.readouterr().out.lower()
 
-    def test_no_terminal_to_ask_is_not_a_clean_exit(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_no_terminal_to_ask_is_not_a_clean_exit(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The regression. 0 here is a false green in every pipeline."""
         monkeypatch.setattr(scenario_reviewer, "can_prompt", lambda: False)
 

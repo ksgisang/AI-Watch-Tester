@@ -110,9 +110,7 @@ _ACTIONS: dict[ActionType, ActionDoc] = {
     ActionType.FIND_AND_CLEAR: ActionDoc(
         "Find + keyboard", "Clear the element's content", target="required"
     ),
-    ActionType.CLICK_AT: ActionDoc(
-        "Direct", "Click fixed coordinates", "`x,y`", value="required"
-    ),
+    ActionType.CLICK_AT: ActionDoc("Direct", "Click fixed coordinates", "`x,y`", value="required"),
     ActionType.TYPE_TEXT: ActionDoc(
         "Direct", "Type into whatever has focus", "Text to type", value="required"
     ),
@@ -443,9 +441,7 @@ def _action_groups() -> str:
             if d.caveat:
                 lines += [
                     f"  {chunk}"
-                    for chunk in textwrap.wrap(
-                        d.caveat, width=72, break_long_words=False
-                    )
+                    for chunk in textwrap.wrap(d.caveat, width=72, break_long_words=False)
                 ]
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
@@ -588,8 +584,7 @@ def main() -> int:
     wanted_files = targets()
     if wanted_files is None:
         print(
-            "[SKIP] awt-skill is not checked out "
-            "(git submodule update --init awt-skill to get it)"
+            "[SKIP] awt-skill is not checked out (git submodule update --init awt-skill to get it)"
         )
         return 0
 
@@ -606,9 +601,7 @@ def main() -> int:
 
     if args.check:
         if stale:
-            print(
-                f"[FAIL] out of date: {', '.join(stale)}\n       Run: python {GENERATOR}"
-            )
+            print(f"[FAIL] out of date: {', '.join(stale)}\n       Run: python {GENERATOR}")
             return 1
         print("[PASS] the skill docs match the models")
     return 0
