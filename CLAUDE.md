@@ -16,7 +16,9 @@
 
 AI 기반 DevQA Loop 오케스트레이터. 이미지 매칭으로 UI 테스트를 자동화하고, 실패 시 AI가 코드를 수정하고 재테스트하는 루프를 반복한다.
 
-> ⚠️ 위 한 줄은 지향이고, 2026-10-03 실측 기준 **실제 정체성**은 *"증거를 남기는 결정론적 웹 E2E 러너"*다. 기본 모드 `manual`은 AI 수정안을 파일에 쓰지 않으며, 시각 매칭은 실사용에서 발화하지 않았다. 사용자에게 설명할 때는 실측 쪽을 말한다(보고서 §10-2·§10-4).
+> ⚠️ 위 한 줄은 지향이고, 2026-10-03 실측 기준 **실제 정체성**은 *"증거를 남기는 결정론적 웹 E2E 러너"*다. 기본 모드 `manual`은 AI 수정안을 파일에 쓰지 않는다. 사용자에게 설명할 때는 실측 쪽을 말한다(보고서 §10-2·§10-4).
+>
+> 단 **시각 매칭은 2026-10-03에 고쳤다**(AAT-112). 하늘고 9일 실사용의 "0회 발화"는 기능이 무가치하다는 뜻이 아니라 배선이 다섯 군데 끊겨 있었다는 뜻이었고, 지금은 선택자가 깨지면 이전 실행이 적립한 사진으로 요소를 찾아낸다 — 실제 Chromium에서 선택자를 깨뜨려 측정했다(보고서 §11-15). 이 기능을 "작동하지 않는다"로 설명하지 말 것.
 
 ## ⛔ AWT Testing Workflow (필수 준수)
 
@@ -360,6 +362,22 @@ aat run --skill-mode --fast <scenario>
   - 세 표면 동시 반영: CLI(`aat run`·`aat loop`), 스킬(`SKILL.md`·`cli-reference.md`), MCP(`aat_run`·`aat_run_skill_mode`의 `report_screenshots` 인자)
   - 시험: 상대 경로 통합 시험(역변이로 결함 재현 확인), `build_reporter` 단위 5개(`tests/test_reporters/test_registry.py`), CLI 정책 전달·거부 시험, MCP 조립 시험 2개 추가
 
+### Post-MVP: 자기 치유 — 시각 매칭을 실제로 작동하게 (AAT-112)
+
+- [x] **AAT-112** 선택자가 깨지면 적립한 사진으로 요소를 찾는다 — 완료 2026-10-03
+  - 배경: 하늘고 9일 실사용에서 시각 매칭 **0회 발화**(보고서 §5). 대표님 지시로 과녁이 *주장을 낮추는 것*에서 *기능을 작동시키는 것*으로 바뀌었습니다 — *"서비스 차별점을 없애면 왜 만드는 거야?"* 끊긴 자리는 다섯 군데였습니다 (기록: `docs/awt_project_analysis_and_strategy.md` §11-15)
+  - **③ 라벨 먼저** — `_act_at_pos`가 호출자 열 곳 모두에 `MatchMethod.OCR`을 찍고 있었습니다. `match_history`의 `ocr` 237행은 Tesseract를 거친 적이 없습니다. `MatchMethod.PLAYWRIGHT` 신설 + 각 경로가 자기 출처를 넘깁니다. 측정이 안 되면 나머지를 고쳐도 고쳐졌는지 알 수 없습니다
+  - **① 적립** — DOM 성공 경로가 `bounding_box()`의 `width`·`height`를 버려서 `_auto_save_template`이 즉시 반환했습니다. 추가 스크린샷 0장으로 적립합니다
+  - **② 치유** — `--fast`가 체인 **앞에서** `MatchError`를 던졌습니다(README·스킬·MCP가 모두 권하는 기본 명령입니다). 그리고 적립은 `text or selector`, 조회는 `text or image`로 **열쇠가 달라** 선택자만 지닌 단계에 대해 저장소가 **쓰기 전용**이었습니다 — 바로 치유가 존재하는 대상입니다. `template_store.name_for()` 하나로 통일
+  - **저장소** — `~/.aat/templates/<host>/`로 호스트별 격리, 30일 만료, 호스트당 300장 상한, `aat learn templates list/clear`. 홈 디렉토리에 쌓인 107장 정리
+  - **⑤ 증명** — 실제 Chromium에서 `?id=grade` → `?id=grade-v2`로 선택자만 깨뜨리는 시험(`tests/fixtures/selector_rename_server.py`). **이 시험이 치유가 죽은 코드였음을 찾아냈습니다** — 학습 좌표(우선순위 0.4)가 치유보다 먼저 답했고, 1회차가 사진과 위치를 함께 남기므로 2회차는 위치로 통과하며 치유는 실행되지 않았습니다. 모의 시험 18건은 전부 초록이었습니다. **적립한 사진(0.9)을 학습 좌표(1.0) 앞으로** 옮겼습니다 — 사진은 관측이고 좌표는 추측입니다
+  - **파생 수정 — 학습 좌표를 모든 DOM 경로 뒤로**: AAT-109는 「추측이 관측을 덮어쓰지 못한다」를 선언하면서 **선택자 한 경로에만** 적용해 두었습니다(우선순위 0.4 — 입력란 탐색·글자 검색보다 앞). 사진을 좌표 앞에 두자 좌표가 모든 DOM 경로 뒤로 내려가고, AAT-109 시험 다섯 건이 **DOM이 찾아낸 진짜 버튼을 눌러** 통과했습니다. 순서를 되돌리지 않고 그 다섯 건이 원래 측정하려던 경로에 닿도록 고쳐 썼습니다. **부작용은 라벨뿐입니다** — 전에 `learned`로 통과했던 단계가 `playwright`나 `saved_template`으로 보고합니다(같은 클릭, 더 나은 근거)
+  - **파생 수정 — `_blind_the_search`가 아무것도 가리지 않고 있었음**: 「DOM 경로를 전부 가려 기억한 위치만 남긴다」는 시험 보조 함수가 `find_text_position`을 가렸지만, 같은 작업의 ①이 적립을 위해 도입한 `find_text_box`(실행기가 **먼저** 쓰는 쪽)는 가리지 않았습니다. 그 위의 양성 시험 두 건이 **기억한 위치로 클릭했다고 주장하면서 DOM이 일하는 동안 초록**이었습니다. **시험은 빨개지지 않으면서 속이 빌 수 있습니다** — 탐색 경로를 추가하면 그것을 가리는 쪽도 같이 갱신해야 합니다
+  - 치유 성공은 `MatchMethod.SAVED_TEMPLATE` + 전략 `healed_from_bank`로 분리(치유 발화는 *대본이 낡았다*는 조언이지 매칭 조언이 아닙니다). 치유한 사진은 다시 적립하지 않습니다(잘린 영역이 요소 밖으로 걸어 나갑니다)
+  - **남은 결함(미수정, 기록됨)**: `LearnedStore`는 좌표에 **호스트 구획이 없습니다** — `127.0.0.1`에서 배운 좌표가 `localhost`에서 쓰입니다. `test_a_coordinate_learned_on_another_host_must_not_be_reused`를 `xfail(strict=True)`로 남겨 두었으므로, 고치면 시험이 알려 줍니다
+  - 시험: 실제 Chromium 통합 8건(`tests/integration/test_self_healing.py`, 1건 xfail), 실행기 8건, 체인 9건. 역변이 6종 전부 잡힘
+  - 네 표면 동시 반영: CLI 도움말, `SKILL.md`, `cli-reference.md`·`scenario-schema.md`, MCP
+
 ---
 
 ## 협업 프로젝트 연동 (ClasRing + DSL)
@@ -407,8 +425,8 @@ aat run --skill-mode --fast <scenario>
 
 ## Current Status
 
-- **현재 단계**: PDF 리포트 기능 완료 + 실사용 결함 수정 (AAT-110~111)
-- **완료**: Phase 1~6 (Ultra-MVP) + AAT-060~065 + AAT-070~076 + AAT-080~081 + AAT-090~092 + AAT-093~095 + AAT-100~111 (Post-MVP)
+- **현재 단계**: 자기 치유 완성 — 시각 매칭을 실제로 작동하게 (AAT-112). 진행 중인 전체 수리는 `docs/awt_project_analysis_and_strategy.md`와 `_HOME.md` 대시보드 참조
+- **완료**: Phase 1~6 (Ultra-MVP) + AAT-060~065 + AAT-070~076 + AAT-080~081 + AAT-090~092 + AAT-093~095 + AAT-100~112 (Post-MVP)
 - **블로커**: 없음
 - **Python**: 3.12.12 (.venv), `source .venv/bin/activate`
 - **GitHub**: https://github.com/ksgisang/AI-Watch-Tester (public)
