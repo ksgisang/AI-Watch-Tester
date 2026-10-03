@@ -1,8 +1,15 @@
 """DesktopEngine — PyAutoGUI + Playwright hybrid engine.
 
-Mouse movement and screenshots use PyAutoGUI (OS-level).
-Clicks and keyboard use Playwright (viewport-accurate, IME-safe).
-Navigation uses Playwright.
+A headful Playwright browser is always launched, and two paths run on top of it:
+
+- PyAutoGUI (OS-level): full-screen capture, mouse movement, scroll, and the
+  ``*_on_screen`` click methods — which the executor uses when a step gives
+  ``target.image``, so those clicks can land outside the browser window.
+- Playwright: viewport clicks, all keyboard input (IME-safe), and navigation.
+
+Keyboard is the boundary. Text always goes to ``page.keyboard``, so a native
+window can be clicked but not typed into: this is a half hybrid, not a desktop
+automation engine.
 """
 
 from __future__ import annotations

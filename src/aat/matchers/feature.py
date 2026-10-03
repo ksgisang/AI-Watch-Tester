@@ -1,4 +1,8 @@
-"""FeatureMatcher — ORB/SIFT feature point matching."""
+"""FeatureMatcher — ORB feature point matching.
+
+ORB only. SIFT is not implemented; earlier docs said "ORB/SIFT", which promised
+a rotation- and scale-robustness this matcher does not have.
+"""
 
 from __future__ import annotations
 

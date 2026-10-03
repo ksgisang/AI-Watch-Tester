@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import textwrap
 import typing
 from dataclasses import dataclass
 from pathlib import Path
@@ -76,6 +77,10 @@ class ActionDoc:
     value_format: str = "—"
     target: str = "unused"  # required | optional | unused
     value: str = "unused"
+    # A measured surprise about this action, too long for a table cell. Shown
+    # only in the grouped bullet list. Keep `summary` self-sufficient: an AI
+    # that reads nothing but the table must still not be misled by it.
+    caveat: str = ""
 
 
 _ACTIONS: dict[ActionType, ActionDoc] = {
@@ -122,10 +127,20 @@ _ACTIONS: dict[ActionType, ActionDoc] = {
     ),
     ActionType.ASSERT_TEXT: ActionDoc(
         "Assert",
-        "Check that text is on screen (DOM first, OCR fallback)",
+        "Check that text is in the page — DOM first, OCR fallback. "
+        "Hidden (`display:none`) text still matches",
         "Text to look for, if `target.text` is not used",
         target="required",
         value="optional",
+        caveat=(
+            "Measured, not assumed: the DOM text engine matches anywhere in "
+            "`<body>` and does not filter on visibility, so an assertion can "
+            "pass on a toast or modal the user never saw — pass "
+            "`target.selector` and assert on a container you know is rendered "
+            "when that matters. Text that lives only in `<title>` or other "
+            "`<head>` metadata never matches, because neither the DOM text "
+            "engine nor OCR can reach it."
+        ),
     ),
     ActionType.ASSERT_SCREEN_CHANGED: ActionDoc(
         "Assert", "Check the screen changed by at least `threshold`"
@@ -404,7 +419,18 @@ def _action_groups() -> str:
         if not members:
             continue
         lines = [f"**{group}**", ""]
-        lines += [f"- `{a.value}` — {d.summary}" for a, d in members]
+        for a, d in members:
+            # The caveat continues the same markdown paragraph, so the summary
+            # needs the sentence-ending the table does not want.
+            stop = "." if d.caveat and not d.summary.endswith(".") else ""
+            lines.append(f"- `{a.value}` — {d.summary}{stop}")
+            if d.caveat:
+                lines += [
+                    f"  {chunk}"
+                    for chunk in textwrap.wrap(
+                        d.caveat, width=72, break_long_words=False
+                    )
+                ]
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
 
