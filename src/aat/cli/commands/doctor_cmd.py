@@ -190,6 +190,73 @@ def _check_playwright(browser: str = "chromium") -> bool:
     return _check_browser_build(browser)
 
 
+def _configured_ocr_languages() -> list[str]:
+    """Which language packs the next run will ask Tesseract for."""
+    try:
+        return list(load_config().matching.ocr_languages)
+    except Exception:
+        return ["eng", "kor"]
+
+
+def _installed_tesseract_languages() -> set[str] | None:
+    """What ``tesseract --list-langs`` reports, or None if it cannot be asked."""
+    try:
+        result = subprocess.run(
+            ["tesseract", "--list-langs"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return None
+
+    # First line is a header ("List of available languages..."); the rest are
+    # one code per line. Older builds print the list on stderr.
+    text = result.stdout or result.stderr or ""
+    lines = [line.strip() for line in text.splitlines()[1:]]
+    found = {line for line in lines if line and " " not in line}
+    return found or None
+
+
+def _check_tesseract_languages() -> None:
+    """Warn when a configured language has no traineddata on this machine.
+
+    Tesseract installs with English only on every platform we document, and a
+    missing pack is not an error you can see: ``image_to_string`` raises, the
+    OCR fallback catches it, and the step reports the text as not visible. The
+    page is fine, the assertion is fine, and the diagnosis blames the page.
+
+    This is not hypothetical -- AWT's own CI reproduced it. The runner installed
+    ``tesseract-ocr`` without ``tesseract-ocr-kor``, and the five tests that
+    prove the Korean OCR fallback works failed with "not visible on page", the
+    same sentence a user would get. ``doctor`` said Tesseract was fine, because
+    it only asked whether the binary existed.
+
+    A warning, not a failure: English-only is a correct setup for an
+    English-only app, and a red light there would be noise.
+    """
+    configured = _configured_ocr_languages()
+    installed = _installed_tesseract_languages()
+    if installed is None:
+        return
+
+    missing = [lang for lang in configured if lang not in installed]
+    if not missing:
+        return
+
+    _warn(
+        f"Tesseract has no data for: {', '.join(missing)} "
+        "(configured in matching.ocr_languages)"
+    )
+    _hint("Without it, canvas text in that language reads as 'not visible on page'")
+    if _IS_MAC:
+        _hint("brew install tesseract-lang")
+    elif _IS_LINUX:
+        _hint(f"sudo apt install {' '.join(f'tesseract-ocr-{lang}' for lang in missing)}")
+    else:
+        _hint("Install the language data: https://github.com/tesseract-ocr/tessdata")
+
+
 def _check_tesseract() -> bool:
     tess = shutil.which("tesseract")
     if tess:
@@ -202,10 +269,10 @@ def _check_tesseract() -> bool:
             )
             version = result.stdout.split("\n")[0] if result.stdout else "unknown"
             _ok(f"Tesseract OCR — {version}")
-            return True
         except Exception:
             _ok("Tesseract OCR found")
-            return True
+        _check_tesseract_languages()
+        return True
 
     _fail("Tesseract OCR not found")
     if _IS_MAC:

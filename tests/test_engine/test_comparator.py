@@ -248,6 +248,35 @@ _KOREAN_CANVAS_PNG = (
 )
 
 
+def _has_korean_traineddata() -> bool:
+    """Whether this machine can read Korean at all.
+
+    ``tesseract-ocr`` installs English-only on every platform AWT documents;
+    Korean is a separate package. AWT's own CI proved the consequence: the five
+    tests below failed with ``Text '학원 관리 시스템' not visible on page`` --
+    the exact sentence a user would get -- because the runner had the binary
+    and not the data. The fix was to install the pack in CI *and* to have
+    ``aat doctor`` say so, since neither the step nor the diagnosis could tell
+    a missing language pack from a broken page.
+
+    This skip exists for contributors, not for CI: a red suite that tells
+    someone their code is wrong when their apt list is incomplete teaches them
+    to ignore the suite.
+    """
+    try:
+        import pytesseract
+
+        return "kor" in pytesseract.get_languages(config="")
+    except Exception:
+        return False
+
+
+requires_korean_ocr = pytest.mark.skipif(
+    not _has_korean_traineddata(),
+    reason="Korean traineddata missing (apt: tesseract-ocr-kor, brew: tesseract-lang)",
+)
+
+
 class CanvasEngine(MockEngine):
     """Engine whose DOM is empty but whose screenshot carries the text.
 
@@ -268,10 +297,11 @@ class TestOCRFallbackOnCanvasText:
     Read with AWT's pre-AAT-116 behaviour -- plain greyscale, no upscale, no
     ``lang``, Tesseract's default PSM -- it yields the empty string. Every
     assertion below would therefore have failed before the fix, which is the
-    point: these are not tests of OCR, they are tests that the four faults
+    point: these are not tests of OCR, they are tests that the three faults
     stay fixed.
     """
 
+    @requires_korean_ocr
     @pytest.mark.asyncio
     async def test_korean_canvas_text_is_found(self) -> None:
         comparator = Comparator(["eng", "kor"])
@@ -288,7 +318,7 @@ class TestOCRFallbackOnCanvasText:
 
     @pytest.mark.asyncio
     async def test_english_only_cannot_read_korean(self) -> None:
-        """Pins the first of the four faults.
+        """Pins the first of the three faults.
 
         ``Comparator`` used to call Tesseract with no ``lang`` at all, i.e.
         English. If someone removes the language plumbing again, this test is
@@ -300,6 +330,7 @@ class TestOCRFallbackOnCanvasText:
         with pytest.raises(StepExecutionError):
             await comparator.check(expected, CanvasEngine())
 
+    @requires_korean_ocr
     @pytest.mark.asyncio
     async def test_whitespace_differences_do_not_matter(self) -> None:
         """Tesseract spaces CJK as it pleases: '계 정 이' for '계정이'.
@@ -311,6 +342,7 @@ class TestOCRFallbackOnCanvasText:
         expected = ExpectedResult(type=AssertType.TEXT_VISIBLE, value="학원관리시스템")
         await comparator.check(expected, CanvasEngine())
 
+    @requires_korean_ocr
     @pytest.mark.asyncio
     async def test_default_languages_include_korean(self) -> None:
         """A bare ``Comparator()`` must not silently run as English-only.
@@ -343,6 +375,7 @@ class TestOCRDoesNotReadAWTsOwnOverlay:
     So the bar is hidden for the duration of the capture, and put back.
     """
 
+    @requires_korean_ocr
     @pytest.mark.asyncio
     async def test_overlay_is_hidden_then_restored(self) -> None:
         page = MagicMock()
@@ -370,6 +403,7 @@ class TestOCRDoesNotReadAWTsOwnOverlay:
             await comparator.check(expected, engine)
         assert page.evaluate.call_count == 2
 
+    @requires_korean_ocr
     @pytest.mark.asyncio
     async def test_page_without_overlay_support_still_works(self) -> None:
         """A DesktopEngine or a closed page must not break the fallback."""

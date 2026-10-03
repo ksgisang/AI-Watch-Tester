@@ -211,3 +211,104 @@ class TestConfiguredBrowser:
 
         monkeypatch.setattr(doctor_cmd, "load_config", boom)
         assert doctor_cmd._configured_browser() == "chromium"
+
+
+class TestTesseractLanguageCheck:
+    """The green light that could not go red, again — this time for OCR.
+
+    ``_check_tesseract`` asked only whether the binary existed. Tesseract
+    installs English-only everywhere AWT documents, so a user testing a Korean
+    canvas app got a ✓ from doctor and ``Text '...' not visible on page`` from
+    the run, with the diagnosis blaming the page. AWT's own CI reproduced it
+    exactly: the runner had ``tesseract-ocr`` without ``tesseract-ocr-kor``.
+    """
+
+    def test_missing_language_is_reported(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            doctor_cmd, "_installed_tesseract_languages", lambda: {"eng", "osd"}
+        )
+        monkeypatch.setattr(doctor_cmd, "_configured_ocr_languages", lambda: ["eng", "kor"])
+        lines: list[str] = []
+        monkeypatch.setattr(doctor_cmd, "_warn", lines.append)
+        monkeypatch.setattr(doctor_cmd, "_hint", lines.append)
+
+        doctor_cmd._check_tesseract_languages()
+
+        assert any("kor" in line for line in lines)
+        assert any("not visible on page" in line for line in lines), (
+            "the warning must name the symptom, or the user cannot connect it "
+            "to the failure they are actually looking at"
+        )
+
+    def test_nothing_is_said_when_every_language_is_present(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Silence is the healthy case. A warning on a correct setup is noise."""
+        monkeypatch.setattr(
+            doctor_cmd, "_installed_tesseract_languages", lambda: {"eng", "kor"}
+        )
+        monkeypatch.setattr(doctor_cmd, "_configured_ocr_languages", lambda: ["eng", "kor"])
+        lines: list[str] = []
+        monkeypatch.setattr(doctor_cmd, "_warn", lines.append)
+        monkeypatch.setattr(doctor_cmd, "_hint", lines.append)
+
+        doctor_cmd._check_tesseract_languages()
+
+        assert lines == []
+
+    def test_an_unaskable_tesseract_says_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Guessing is worse than silence here.
+
+        If ``--list-langs`` cannot be read, the packs may well be installed;
+        warning anyway would send users to install something they have.
+        """
+        monkeypatch.setattr(doctor_cmd, "_installed_tesseract_languages", lambda: None)
+        monkeypatch.setattr(doctor_cmd, "_configured_ocr_languages", lambda: ["eng", "kor"])
+        lines: list[str] = []
+        monkeypatch.setattr(doctor_cmd, "_warn", lines.append)
+        monkeypatch.setattr(doctor_cmd, "_hint", lines.append)
+
+        doctor_cmd._check_tesseract_languages()
+
+        assert lines == []
+
+    def test_language_list_is_parsed_without_its_header(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The first line of ``--list-langs`` is prose, not a language code."""
+        _stub_dry_run(monkeypatch, "List of available languages in ...:\neng\nkor\nosd\n")
+        assert doctor_cmd._installed_tesseract_languages() == {"eng", "kor", "osd"}
+
+    def test_a_configured_language_comes_from_the_config(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Checking a hard-coded pair would miss whatever the user set."""
+        from aat.core.models import Config
+
+        cfg = Config()
+        cfg.matching.ocr_languages = ["eng", "jpn"]
+        monkeypatch.setattr(doctor_cmd, "load_config", lambda: cfg)
+        assert doctor_cmd._configured_ocr_languages() == ["eng", "jpn"]
+
+    def test_the_tesseract_check_still_passes_without_the_packs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A missing pack is a warning, not a failure.
+
+        English-only is a correct setup for an English-only app, and counting
+        it as an issue would make ``doctor`` exit non-zero for people with
+        nothing wrong.
+        """
+        monkeypatch.setattr(doctor_cmd.shutil, "which", lambda _n: "/usr/bin/tesseract")
+        _stub_dry_run(monkeypatch, "tesseract 5.5.0\n")
+        monkeypatch.setattr(
+            doctor_cmd, "_installed_tesseract_languages", lambda: {"eng", "osd"}
+        )
+        monkeypatch.setattr(doctor_cmd, "_configured_ocr_languages", lambda: ["eng", "kor"])
+        lines: list[str] = []
+        monkeypatch.setattr(doctor_cmd, "_ok", lines.append)
+        monkeypatch.setattr(doctor_cmd, "_warn", lines.append)
+        monkeypatch.setattr(doctor_cmd, "_hint", lines.append)
+
+        assert doctor_cmd._check_tesseract() is True
+        assert any("kor" in line for line in lines), "the warning must still be printed"
