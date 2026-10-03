@@ -57,6 +57,8 @@ Each scenario must follow this EXACT format:
   {"type": "text_visible", "value": "expected text"}
 Valid types: "text_visible", "text_equals", "url_contains".
 Leave as empty array [] if no specific assertion is needed.
+These are checked after the last step. A string entry is NOT checked -- it is
+reported as a warning and the run exits non-zero, so write objects or nothing.
 
 Each step MUST have "step" (integer from 1) and "description" (non-empty).
 

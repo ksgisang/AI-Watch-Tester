@@ -519,11 +519,20 @@ class DevQALoop:
         all_steps: list[StepResult] = []
         total_elapsed = 0.0
 
+        from aat.engine.comparator import evaluate_scenario_expectations
+
         for scenario in scenarios:
             for step_config in scenario.steps:
                 step_result = await self._executor.execute_step(step_config)
                 all_steps.append(step_result)
                 total_elapsed += step_result.elapsed_ms
+
+            # The same check `aat run` performs, through the same evaluator.
+            # A scenario that reports differently depending on which command
+            # ran it is worse than one that does not check at all.
+            for exp_result in await evaluate_scenario_expectations(scenario, self._engine):
+                all_steps.append(exp_result)
+                total_elapsed += exp_result.elapsed_ms
 
         passed_count = sum(1 for s in all_steps if s.status == StepStatus.PASSED)
         failed_count = sum(

@@ -552,7 +552,9 @@ async def _run(
     if config.url:
         _base_vars["url"] = config.url.rstrip("/")
     scenarios = _topo_sort(load_scenarios(path, variables=_base_vars or None))
-    total_scenario_steps = sum(len(s.steps) for s in scenarios)
+    # Scenario-level expectations are checks that run and get reported, so they
+    # belong in the denominator the progress counter divides by.
+    total_scenario_steps = sum(len(s.steps) + len(s.expected_result) for s in scenarios)
 
     # ------------------------------------------------------------------ #
     # Audit logging — record every execution attempt (Layer 3)            #
@@ -1013,6 +1015,51 @@ async def _run(
                     except Exception:
                         pass  # diagnosis is best-effort
 
+            # --- Scenario-level expected_result ---
+            # Before teardown, deliberately: teardown deletes the very rows and
+            # pages an expectation is written to look at.
+            from aat.engine.comparator import evaluate_scenario_expectations
+
+            for exp_result in await evaluate_scenario_expectations(
+                scenario, engine, skipped=critical_failure
+            ):
+                scenario_steps.append(exp_result)
+                total_steps += 1
+                all_results.append(
+                    {
+                        "scenario": scenario.id,
+                        "step": str(exp_result.step),
+                        "action": exp_result.action.value,
+                        "description": exp_result.description,
+                        "status": exp_result.status.value,
+                        "error": exp_result.error_message or "",
+                    }
+                )
+
+                if exp_result.status == StepStatus.PASSED:
+                    total_passed += 1
+                    icon, label = "✅", typer.style("PASSED", fg=typer.colors.GREEN)
+                elif exp_result.status == StepStatus.SKIPPED:
+                    total_skipped += 1
+                    icon, label = "⏭️", typer.style("SKIPPED", fg=typer.colors.YELLOW)
+                elif exp_result.status == StepStatus.WARNING:
+                    total_warned += 1
+                    warnings.append(
+                        f"{scenario.id} {exp_result.description}: {exp_result.error_message}"
+                    )
+                    icon, label = "⚠️", typer.style("WARNING", fg=typer.colors.YELLOW)
+                else:
+                    total_failed += 1
+                    scenario_failed = True
+                    icon, label = "❌", typer.style("FAILED", fg=typer.colors.RED)
+
+                if skill_mode:
+                    typer.echo(f"[AWT] {icon} {exp_result.description}")
+                else:
+                    typer.echo(f"  {exp_result.description}: {label}")
+                if exp_result.error_message:
+                    typer.echo(f"    {exp_result.error_message}")
+
             # --- Teardown ---
             if scenario.teardown and not skip_teardown:
                 from aat.core.teardown import TeardownExecutor
@@ -1092,15 +1139,16 @@ async def _run(
     if warnings:
         typer.echo(
             typer.style(
-                "\nWarnings — these steps ran but changed nothing on screen:",
+                "\nWarnings — these ran but verified nothing:",
                 fg=typer.colors.YELLOW,
             )
         )
         for w in warnings:
             typer.echo(typer.style(f"  ⚠ {w}", fg=typer.colors.YELLOW))
         typer.echo(
-            "  A click that moves nothing usually means it missed its target. "
-            "Check the screenshots for those steps."
+            "  A click that moves nothing usually means it missed its target — "
+            "check the screenshots for those steps. An expectation written as a "
+            "sentence was never checked at all — give it a type and a value."
         )
 
     # -- Reports --------------------------------------------------------------
@@ -1132,7 +1180,7 @@ async def _run(
             warn_lines = [
                 "",
                 "=== AWT SKILL VERIFY ===",
-                f"STATUS: WARNINGS ({total_warned} of {total_steps} steps changed nothing)",
+                f"STATUS: WARNINGS ({total_warned} of {total_steps} checks verified nothing)",
                 f"SCENARIO: {scenarios_path}",
             ]
             if final_screenshot_path:
@@ -1141,7 +1189,8 @@ async def _run(
             warn_lines += [
                 "ACTION: Do not report this run as passed. A step that changed "
                 "nothing usually clicked the wrong place — check its screenshot "
-                "and the target it was given.",
+                "and the target it was given. An expected_result written as a "
+                "sentence was never checked — rewrite it with a type and a value.",
                 "========================",
                 "",
             ]

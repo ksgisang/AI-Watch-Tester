@@ -27,6 +27,12 @@ Pinned here:
     red, because it had been reporting that users could see something they
     could not. The controls next to it pin the other direction -- visible text
     still passes, including a visible copy standing behind a hidden one.
+  * a scenario's `expected_result` is evaluated, after the last step and before
+    teardown. It had been loaded, validated and read by nobody, which is this
+    file's theme in its purest form. An entry written as prose is reported as
+    a warning rather than checked, because the loader reshapes a sentence into
+    a `text_visible` against that sentence and checking it would fail the
+    product for the author's wording.
 """
 
 from __future__ import annotations
@@ -41,11 +47,12 @@ from aat.core.models import (
     AssertType,
     EngineConfig,
     MatchingConfig,
+    Scenario,
     StepConfig,
     StepStatus,
     TargetSpec,
 )
-from aat.engine.comparator import Comparator
+from aat.engine.comparator import Comparator, evaluate_scenario_expectations
 from aat.engine.executor import StepExecutor
 from aat.engine.humanizer import Humanizer
 from aat.engine.waiter import Waiter
@@ -586,53 +593,157 @@ class TestTheReportNamesTheRightStep:
         assert "#question" in (result.error_message or "")
 
 
-class TestScenarioLevelExpectedResultIsDead:
-    """`expected_result` is loaded, validated, and then read by nobody.
+class TestScenarioLevelExpectedResult:
+    """`expected_result` is checked now, and says so when it cannot be.
 
-    The field is declared on :class:`~aat.core.models.Scenario`, has a
-    validator that coerces free-text items into ``text_visible``, is shown in
-    the shipped ``scenario-template.yaml``, and three AI adapter prompts
-    instruct the model to fill it. No executor ever evaluates it, so every
-    assertion written there is discarded and the scenario reports success
-    without the check having run. That is the unit's theme in its purest form
-    and worse than the substring problem: a substring match at least checks
-    something.
+    The field was declared on :class:`~aat.core.models.Scenario`, coerced by a
+    validator, shown in the shipped template and requested by three AI adapter
+    prompts -- and read by no executor. Every assertion written there was
+    discarded and the scenario reported success without the check having run:
+    the unit's theme in its purest form, and worse than the substring problem,
+    because a substring match at least checks something.
 
-    Not switched on here, because switching it on fails scenarios that pass
-    today. The coercion turns an item like ``"User sees welcome message"`` into
-    a ``text_visible`` assertion against that whole English sentence, and
-    AI-generated scenarios are full of exactly that prose -- so the field would
-    have to be cleaned out of existing files first. A behaviour change of that
-    size is 대표님's call, so it is pinned the way the host-scoping gap is:
-    `strict=True`, which tells whoever implements it to come back and delete
-    the marker.
-
-    Documented meanwhile on the two surfaces that promised otherwise:
-    `references/scenario-schema.md` said "checked after the last step" and now
-    says it is ignored, and the template now says not to use it.
+    The reason it stayed dead was the coercion: an entry like ``"User sees the
+    welcome message"`` becomes a ``text_visible`` against that whole English
+    sentence, so simply switching evaluation on would have failed every
+    AI-generated scenario for its wording rather than for the product. The
+    coercion now marks what it reshaped, and a reshaped entry is reported as a
+    warning -- the check did not happen, which is the true answer. The third
+    reading, passing it silently, is the defect this closes.
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Scenario.expected_result is never evaluated; wiring it up is a behaviour change",
-    )
-    def test_something_in_the_product_reads_the_field(self) -> None:
-        """Asserted by searching the source, because the defect *is* the absence.
+    @staticmethod
+    def _scenario(expected: list[object], *, steps: list[StepConfig] | None = None) -> Scenario:
+        return Scenario(
+            id="SC-001",
+            name="scenario-level expectations",
+            steps=steps
+            or [
+                StepConfig(
+                    step=1,
+                    action=ActionType.WAIT,
+                    value="1",
+                    description="stand still",
+                )
+            ],
+            expected_result=expected,  # type: ignore[arg-type]
+        )
 
-        There is no evaluator to call and no runner to drive -- `run_cmd` loops
-        over steps inline -- so the only executable form of "nothing reads
-        this" is that nothing mentions it. Declaration and generation sites are
-        excluded: the model has to declare the field, and the adapters only
-        ask an AI to produce it. What is missing is a consumer.
+    @pytest.mark.asyncio
+    async def test_a_typed_expectation_is_checked_and_can_pass(
+        self, engine: WebEngine, base_url: str
+    ) -> None:
+        await engine.navigate(f"{base_url}/?render=clean")
+        scenario = self._scenario([{"type": "text_visible", "value": WORD}])
+
+        results = await evaluate_scenario_expectations(scenario, engine)
+
+        assert [r.status for r in results] == [StepStatus.PASSED]
+
+    @pytest.mark.asyncio
+    async def test_a_typed_expectation_that_is_wrong_fails(
+        self, engine: WebEngine, base_url: str
+    ) -> None:
+        """The whole point: a false claim in this field now turns the run red."""
+        await engine.navigate(f"{base_url}/?render=clean")
+        scenario = self._scenario([{"type": "text_visible", "value": "엉뚱한 글자"}])
+
+        results = await evaluate_scenario_expectations(scenario, engine)
+
+        assert results[0].status == StepStatus.FAILED
+        assert "엉뚱한 글자" in (results[0].error_message or "")
+
+    @pytest.mark.asyncio
+    async def test_prose_is_warned_about_rather_than_checked(
+        self, engine: WebEngine, base_url: str
+    ) -> None:
+        """A sentence describes an outcome; it is not a value to look for.
+
+        Failing it would fail the product for the author's wording, and
+        passing it would be the original defect wearing a different hat.
+        """
+        await engine.navigate(f"{base_url}/?render=clean")
+        scenario = self._scenario(["User sees the welcome message"])
+
+        results = await evaluate_scenario_expectations(scenario, engine)
+
+        assert results[0].status == StepStatus.WARNING
+        assert "nothing was checked" in (results[0].error_message or "")
+
+    @pytest.mark.asyncio
+    async def test_a_scenario_that_stopped_early_skips_its_expectations(
+        self, engine: WebEngine, base_url: str
+    ) -> None:
+        """A critical failure leaves the browser somewhere nobody meant it to be.
+
+        Judging an expectation against that page answers a question nobody
+        asked, so it is reported as skipped -- the same answer the step loop
+        gives the steps it never reached.
+        """
+        await engine.navigate(f"{base_url}/?render=clean")
+        scenario = self._scenario([{"type": "text_visible", "value": WORD}])
+
+        results = await evaluate_scenario_expectations(scenario, engine, skipped=True)
+
+        assert results[0].status == StepStatus.SKIPPED
+
+    @pytest.mark.asyncio
+    async def test_expectations_are_numbered_after_the_last_step(
+        self, engine: WebEngine, base_url: str
+    ) -> None:
+        """They share a report with the steps, so they must not restart at 1."""
+        await engine.navigate(f"{base_url}/?render=clean")
+        steps = [
+            StepConfig(step=n, action=ActionType.WAIT, value="1", description=f"wait {n}")
+            for n in (1, 2, 3)
+        ]
+        scenario = self._scenario(
+            [{"type": "text_visible", "value": WORD}, {"type": "text_visible", "value": WORD}],
+            steps=steps,
+        )
+
+        results = await evaluate_scenario_expectations(scenario, engine)
+
+        assert [r.step for r in results] == [4, 5]
+        assert all(r.action == ActionType.ASSERT for r in results)
+
+    @pytest.mark.asyncio
+    async def test_an_empty_field_produces_nothing(self, engine: WebEngine, base_url: str) -> None:
+        """Most scenarios leave it empty; they must not gain a phantom step."""
+        await engine.navigate(f"{base_url}/?render=clean")
+
+        assert await evaluate_scenario_expectations(self._scenario([]), engine) == []
+
+    def test_the_coercion_marks_what_it_reshaped(self) -> None:
+        """Without this flag the evaluator cannot tell prose from an assertion.
+
+        A string and ``{"type": "text_visible", "value": <same string>}`` arrive
+        at the model as the same object otherwise, and the difference decides
+        between warning and checking.
+        """
+        scenario = self._scenario(
+            ["User sees the welcome message", {"type": "text_visible", "value": WORD}]
+        )
+
+        assert [e.from_prose for e in scenario.expected_result] == [True, False]
+
+    def test_both_runners_call_the_evaluator(self) -> None:
+        """The successor to the strict `xfail` that pinned "nothing reads this".
+
+        Asserted by searching the source because the defect was an absence,
+        and because the two call sites sit inside long async bodies that need
+        a live browser and an approved run to reach -- the approval gate is
+        not something a test may walk around. A grep cannot prove the call
+        happens at the right moment, which the evaluator's own tests above
+        cover; what it can prove is that neither runner quietly drops the
+        field again, which is exactly how it died the first time.
         """
         src = Path(__file__).resolve().parents[2] / "src" / "aat"
-        writers = {src / "core" / "models.py"}
-        writers |= set((src / "adapters").glob("*.py"))
-
-        readers = [
+        callers = {
             path.relative_to(src)
             for path in src.rglob("*.py")
-            if path not in writers and "expected_result" in path.read_text(encoding="utf-8")
-        ]
+            if "evaluate_scenario_expectations(" in path.read_text(encoding="utf-8")
+        }
 
-        assert readers, "no module outside models.py and adapters/ reads expected_result"
+        assert Path("cli/commands/run_cmd.py") in callers, "aat run does not check expected_result"
+        assert Path("core/loop.py") in callers, "aat loop does not check expected_result"

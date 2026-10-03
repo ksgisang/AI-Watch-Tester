@@ -421,6 +421,14 @@ class ExpectedResult(BaseModel):
         default=0.0, ge=0.0, le=1.0, description="Allowed deviation for image/screen comparisons"
     )
     case_insensitive: bool = Field(default=False, description="Ignore letter case when comparing")
+    from_prose: bool = Field(
+        default=False,
+        description=(
+            "Set by the loader when the entry was written as a plain sentence instead "
+            "of a typed assertion. Such an entry is reported as a warning rather than "
+            "checked: the sentence describes an outcome, it is not a value to look for"
+        ),
+    )
 
 
 class FindMethod(StrEnum):
@@ -818,8 +826,9 @@ class Scenario(BaseModel):
     expected_result: list[ExpectedResult] = Field(
         default_factory=list,
         description=(
-            "**Parsed and then ignored — nothing evaluates it.** "
-            "Put assertions in `steps:` instead. See the section below"
+            "Assertions checked once, after the last step and before teardown. "
+            "An entry written as a plain sentence is reported as a warning "
+            "instead of checked. See the section below"
         ),
     )
     variables: dict[str, str] = Field(
@@ -874,6 +883,13 @@ class Scenario(BaseModel):
 
         AI sometimes returns plain strings like "User sees welcome message"
         instead of proper ExpectedResult objects.
+
+        ``from_prose`` is what keeps the coercion honest. Shaped into a
+        ``text_visible`` and then checked, the sentence above would demand that
+        those exact English words appear on the page -- which they do not, so
+        the scenario would fail for a reason that has nothing to do with the
+        product. The flag lets the evaluator say "nothing was checked here"
+        instead of inventing an assertion the author never wrote.
         """
         if v is None:
             return []
@@ -887,6 +903,7 @@ class Scenario(BaseModel):
                         "type": "text_visible",
                         "value": item,
                         "tolerance": 0.0,
+                        "from_prose": True,
                     }
                 )
             elif isinstance(item, dict):

@@ -7,16 +7,17 @@ against the current state of the test engine.
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
 
 from aat.core.exceptions import StepExecutionError
-from aat.core.models import AssertType, ExpectedResult
+from aat.core.models import ActionType, AssertType, ExpectedResult, StepResult, StepStatus
 
 if TYPE_CHECKING:
-    from aat.core.models import StepConfig
+    from aat.core.models import Scenario, StepConfig
     from aat.engine.base import BaseEngine
 
 
@@ -310,3 +311,109 @@ class Comparator:
         img2 = cv2.resize(img2, (img1.shape[1], img1.shape[0]))
         result = cv2.matchTemplate(img1, img2, cv2.TM_CCORR_NORMED)
         return float(result[0][0])
+
+
+# ─── Scenario-level expected_result ──────────────────────────
+
+
+PROSE_WARNING = (
+    "written as a sentence, not an assertion, so nothing was checked — "
+    "give it a `type:` and a `value:`, or move it into an `assert` step"
+)
+
+_SKIPPED_REASON = "the scenario stopped early, so the expectations were never reached"
+
+
+async def evaluate_scenario_expectations(
+    scenario: Scenario,
+    engine: BaseEngine,
+    *,
+    skipped: bool = False,
+    comparator: Comparator | None = None,
+) -> list[StepResult]:
+    """Check a scenario's ``expected_result`` entries and report each one.
+
+    The field is declared on the model, offered by the shipped template and
+    requested by three AI adapter prompts, and until now no executor read it:
+    every assertion written there was discarded and the scenario reported
+    success without the check having run. This is the consumer.
+
+    Each entry comes back as a :class:`StepResult` so it reaches the console,
+    ``last_run.json`` and the report by the same road as a step -- an
+    expectation that failed is evidence, and evidence that only exists in one
+    of the three places is the kind of gap this field was.
+
+    Numbered after the last real step rather than from 1, because the two
+    share a report and a reader counting down the steps should not meet a
+    "step 1" at the bottom.
+
+    *skipped* is for a scenario that stopped early: a critical failure leaves
+    the browser somewhere the author never meant it to be, and an expectation
+    judged against that page answers a question nobody asked. The step loop
+    already skips the rest of the steps in that case; this follows it.
+
+    An entry whose ``from_prose`` flag is set is reported as a **warning**
+    rather than checked. Passing it would be the original defect wearing a
+    different hat -- a check that did not happen, reported green -- and
+    failing it would fail the product for the author's wording.
+    """
+    if not scenario.expected_result:
+        return []
+
+    checker = comparator or Comparator()
+    first_number = max((s.step for s in scenario.steps), default=0) + 1
+    results: list[StepResult] = []
+
+    for offset, expected in enumerate(scenario.expected_result):
+        description = f"expected_result[{offset}]: {expected.type.value} {expected.value!r}"
+        number = first_number + offset
+
+        if skipped:
+            results.append(
+                StepResult(
+                    step=number,
+                    action=ActionType.ASSERT,
+                    status=StepStatus.SKIPPED,
+                    description=description,
+                    error_message=_SKIPPED_REASON,
+                )
+            )
+            continue
+
+        if expected.from_prose:
+            results.append(
+                StepResult(
+                    step=number,
+                    action=ActionType.ASSERT,
+                    status=StepStatus.WARNING,
+                    description=description,
+                    error_message=PROSE_WARNING,
+                )
+            )
+            continue
+
+        started = time.monotonic()
+        status = StepStatus.PASSED
+        error: str | None = None
+        try:
+            # No selector: a scenario-level expectation has no target to scope
+            # to, so `text_equals` here compares the whole page. That is the
+            # documented behaviour of the unscoped form, not an oversight.
+            await checker.check(expected, engine)
+        except StepExecutionError as e:
+            status, error = StepStatus.FAILED, e.raw_message
+        except Exception as e:  # noqa: BLE001 — an expectation must not kill the run
+            status, error = StepStatus.ERROR, f"{type(e).__name__}: {e}"
+
+        results.append(
+            StepResult(
+                step=number,
+                action=ActionType.ASSERT,
+                status=status,
+                description=description,
+                error_message=error,
+                elapsed_ms=(time.monotonic() - started) * 1000,
+            )
+        )
+
+    return results
