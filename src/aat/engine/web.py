@@ -310,6 +310,24 @@ class WebEngine(BaseEngine):
         """Return visible text of current page."""
         return await self.page.inner_text("body")
 
+    async def get_element_text(self, selector: str) -> str | None:
+        """Visible text of the first element matching ``selector``, or ``None``.
+
+        ``None`` means no element matched, which is a different answer from an
+        element that matched and is empty (``""``). Callers asserting on text
+        need to tell those apart: the first is a stale scenario, the second is
+        a page that rendered nothing.
+
+        Not on :class:`~aat.engine.base.BaseEngine`. Scoping to a selector is a
+        DOM capability, so callers probe for it the same way they probe for
+        :meth:`find_text_box` -- an engine driving a native window has nothing
+        truthful to return here.
+        """
+        locator = self.page.locator(selector).first
+        if await locator.count() == 0:
+            return None
+        return await locator.inner_text()
+
     async def find_text_position(self, text: str) -> tuple[int, int] | None:
         """Centre of the element matching ``text``, or ``None``.
 

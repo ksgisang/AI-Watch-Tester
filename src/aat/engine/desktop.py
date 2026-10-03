@@ -331,6 +331,18 @@ class DesktopEngine(BaseEngine):
         """Return visible text of current page from Playwright."""
         return await self.page.inner_text("body")
 
+    async def get_element_text(self, selector: str) -> str | None:
+        """Visible text of the first element matching ``selector``, or ``None``.
+
+        This engine clicks through the OS but reads through the browser page it
+        owns, so a DOM selector is answerable here for the same reason
+        :meth:`get_page_text` is. ``None`` means nothing matched.
+        """
+        locator = self.page.locator(selector).first
+        if await locator.count() == 0:
+            return None
+        return await locator.inner_text()
+
     async def find_text_position(self, text: str) -> tuple[int, int] | None:
         """Find element on page, prioritizing input fields over labels.
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json as _json
 import os
 import time
 from pathlib import Path
@@ -125,8 +126,21 @@ def _scenario_to_yaml(scenario: Scenario) -> str:
 
 
 def _js_str(s: str) -> str:
-    """Escape string for JS injection."""
-    return "'" + s.replace("\\", "\\\\").replace("'", "\\'") + "'"
+    """Render ``s`` as a JS string literal.
+
+    Hand-rolled escaping used to cover the backslash and the quote and stop
+    there, which leaves every line terminator intact -- and a raw newline
+    inside a quoted JS string is a syntax error, not a newline. Any scenario
+    whose step description wrapped onto a second line therefore killed the
+    overlay, and the caller suppresses the error, so the only symptom was a
+    progress banner that silently stopped counting.
+
+    ``json.dumps`` is the right tool: valid JSON string syntax is valid JS
+    string syntax, and with the default ``ensure_ascii`` every character
+    outside ASCII leaves as ``\\uXXXX`` -- which also covers U+2028 and U+2029,
+    the two characters JS treats as line terminators but JSON does not.
+    """
+    return _json.dumps(s)
 
 
 async def _overlay_init(page: object) -> None:
@@ -1163,8 +1177,6 @@ async def _run(
 
 
 # -- Skill-mode helpers ----------------------------------------------------
-
-import json as _json  # noqa: E402
 
 
 def _save_skill_attempt(

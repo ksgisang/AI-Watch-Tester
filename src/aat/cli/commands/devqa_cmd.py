@@ -760,7 +760,31 @@ def _fix_scenario(
     fail_info: dict[str, Any],
     attempt: int,
 ) -> str:
-    """Fix scenario based on failure info and fresh scan data."""
+    """Fix scenario based on failure info and fresh scan data.
+
+    Narrower than its name suggests, and the limit is worth stating: the
+    rematch is driven by :func:`_find_matching_elements`, which keeps elements
+    whose fresh label *contains* the text the scenario asked for. A label that
+    grew ("Log in" -> "Log in now") is found; a label that was replaced
+    ("Login" -> "Sign in") is not, and a genuine rename is the usual reason a
+    step stops working. When nothing matches, the scenario comes back
+    unchanged and the retry fails the same way -- which reads as the fixer
+    having tried and failed rather than having found nothing to try.
+
+    The annotation is written as ``(auto-fixed attempt N)`` and only once.
+    It used to be ``# Fixed attempt N``, written with ``+=``, which was wrong
+    in three ways of descending severity. It was appended again on every
+    attempt, so a step that kept failing accumulated the note (live defect,
+    reachable with ``--max-attempts 3``). The ``#`` reads as a YAML comment
+    while in fact being part of the ``description`` value, so the annotation
+    shows up in reports as if it were part of what the step does. And ``+=``
+    assumes the key exists: ``description`` is required by
+    :class:`~aat.core.models.StepConfig` and every step :func:`_generate_scenario`
+    builds does set it, so nothing in devqa's own path can trip this -- but the
+    function takes raw YAML, so a hand-edited or otherwise-generated file would
+    have raised ``KeyError`` on the one branch where the fixer had found
+    something, after the user had already approved the run.
+    """
     import yaml
 
     try:
@@ -790,7 +814,10 @@ def _fix_scenario(
             target["text"] = best["label"]
             if best.get("selector") and best["source"] == "dom":
                 target["selector"] = best["selector"]
-            step["description"] += f" # Fixed attempt {attempt}"
+            # Idempotent, and tolerant of a missing key -- see the docstring.
+            note = f"(auto-fixed attempt {attempt})"
+            previous = step.get("description") or ""
+            step["description"] = previous if note in previous else f"{previous} {note}".strip()
         break
 
     return yaml.safe_dump(

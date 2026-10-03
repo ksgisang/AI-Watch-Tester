@@ -98,11 +98,23 @@ class TestComparatorTextEquals:
 
     @pytest.mark.asyncio
     async def test_text_equals_fail(self) -> None:
+        """The message names what was compared and what was found.
+
+        It used to say only "Text does not match 'Goodbye'", which reads as if
+        the page lacked the text. With no selector the comparison is against
+        the entire visible page, so the usual answer is that the page had the
+        text plus everything else -- and the reader cannot tell those apart
+        without seeing the actual value.
+        """
         comparator = Comparator()
         engine = MockEngine(page_text="Hello World")
         expected = ExpectedResult(type=AssertType.TEXT_EQUALS, value="Goodbye")
-        with pytest.raises(StepExecutionError, match="does not match"):
+        with pytest.raises(StepExecutionError) as exc:
             await comparator.check(expected, engine)
+        message = str(exc.value)
+        assert "the whole page" in message
+        assert "Goodbye" in message
+        assert "Hello World" in message
 
 
 class TestComparatorTextEqualsCaseInsensitive:
@@ -126,8 +138,9 @@ class TestComparatorTextEqualsCaseInsensitive:
             value="goodbye",
             case_insensitive=True,
         )
-        with pytest.raises(StepExecutionError, match="does not match"):
+        with pytest.raises(StepExecutionError) as exc:
             await comparator.check(expected, engine)
+        assert "goodbye" in str(exc.value)
 
 
 class TestComparatorUrlContains:

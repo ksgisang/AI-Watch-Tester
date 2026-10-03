@@ -23,12 +23,20 @@ if TYPE_CHECKING:
 class Comparator:
     """Compare expected results against actual engine state."""
 
-    async def check(self, expected: ExpectedResult, engine: BaseEngine) -> None:
+    async def check(
+        self,
+        expected: ExpectedResult,
+        engine: BaseEngine,
+        selector: str | None = None,
+    ) -> None:
         """Verify an expected result. Raises StepExecutionError on failure.
 
         Args:
             expected: Expected result assertion.
             engine: BaseEngine instance for querying current state.
+            selector: CSS selector to scope the assertion to, when the step
+                named one. Only ``text_equals`` reads it -- see that branch for
+                why, and why ``text_visible`` deliberately ignores it.
         """
         if expected.type == AssertType.TEXT_VISIBLE:
             # 1. Try DOM text first
@@ -52,14 +60,49 @@ class Comparator:
                 )
 
         elif expected.type == AssertType.TEXT_EQUALS:
-            page_text = await engine.get_page_text()
-            if expected.case_insensitive:
-                matched = expected.value.lower() == page_text.strip().lower()
+            # Scoped to the step's selector when it has one, and the whole page
+            # otherwise. The unscoped form is kept for compatibility but it is
+            # very nearly unusable: `get_page_text` returns `inner_text("body")`,
+            # so it demands that the entire visible page equal the value. Three
+            # AI adapter prompts offer `text_equals` as a valid assert type, so
+            # scenarios do get generated with it -- and with no selector they
+            # fail no matter what the page says.
+            #
+            # Scoping it is what makes the type do the job only it can do.
+            # `assert_text` and `text_visible` are both substring matches, so
+            # neither can catch "the expected text is present, surrounded by
+            # junk" -- a template leaking its own markup around the right words
+            # passes every one of them. An exact match against one element is
+            # the check that fails there, which is why the selector lands here
+            # and not on `text_visible`: substring-matching the whole page is
+            # what `text_visible` is *for*, and narrowing it would turn passing
+            # scenarios red.
+            actual: str | None
+            if selector is not None and hasattr(engine, "get_element_text"):
+                actual = await engine.get_element_text(selector)  # type: ignore[attr-defined]
+                if actual is None:
+                    raise StepExecutionError(
+                        f"No element matched selector {selector!r}",
+                        step=0,
+                        action="assert",
+                    )
+                where = f"selector {selector!r}"
             else:
-                matched = expected.value == page_text.strip()
+                actual = await engine.get_page_text()
+                where = "the whole page"
+
+            stripped = actual.strip()
+            if expected.case_insensitive:
+                matched = expected.value.lower() == stripped.lower()
+            else:
+                matched = expected.value == stripped
             if not matched:
+                # Naming what was compared against matters more here than
+                # anywhere else: the old message was "Text does not match 'X'",
+                # which reads as if the page lacked the text when the real
+                # answer was usually that it had the text plus everything else.
                 raise StepExecutionError(
-                    f"Text does not match '{expected.value}'",
+                    f"Text in {where} does not equal {expected.value!r}: got {stripped[:200]!r}",
                     step=0,
                     action="assert",
                 )
@@ -114,6 +157,32 @@ class Comparator:
                     action="assert",
                 )
 
+    async def _check_as_step(
+        self,
+        expected: ExpectedResult,
+        engine: BaseEngine,
+        selector: str | None,
+        step_number: int,
+    ) -> None:
+        """Run :meth:`check` and label any failure with the real step number.
+
+        Every ``raise`` in :meth:`check` passes ``step=0``, because ``check``
+        takes an :class:`ExpectedResult` and has never been told which step it
+        belongs to. ``StepExecutionError`` builds its message from that, so a
+        failed assertion on step 7 reported itself as ``Step 0 (assert): ...``
+        -- in the console, in ``last_run.json`` and in the PDF report. For a
+        product whose stated job is leaving evidence behind, pointing the reader
+        at a step that does not exist is the wrong kind of evidence.
+
+        Re-raising here rather than threading a step number through all eight
+        raise sites: ``raw_message`` exists for exactly this, and the assertion
+        logic stays a function of the expectation and the page.
+        """
+        try:
+            await self.check(expected, engine, selector)
+        except StepExecutionError as e:
+            raise StepExecutionError(e.raw_message, step=step_number, action=e.action) from e
+
     async def check_assert(self, step: StepConfig, engine: BaseEngine) -> None:
         """Assert action handler.
 
@@ -122,14 +191,19 @@ class Comparator:
         so that ``assert_type: url_contains`` is not silently ignored when
         expected[0].type defaults to text_visible.
 
+        ``step.target.selector`` is passed through to :meth:`check`, which uses
+        it to scope ``text_equals`` to one element.
+
         Args:
             step: StepConfig with assert info.
             engine: BaseEngine instance.
         """
+        selector = step.target.selector if step.target else None
+
         # Format 1 (inline): assert_type + value — highest priority
         if step.assert_type is not None and step.value is not None:
             expected = ExpectedResult(type=step.assert_type, value=step.value)
-            await self.check(expected, engine)
+            await self._check_as_step(expected, engine, selector, step.step)
             return
 
         # Format 2: expected list (override type if assert_type is set)
@@ -142,7 +216,7 @@ class Comparator:
                         tolerance=exp.tolerance,
                         case_insensitive=exp.case_insensitive,
                     )
-                await self.check(exp, engine)
+                await self._check_as_step(exp, engine, selector, step.step)
             return
 
         raise StepExecutionError(

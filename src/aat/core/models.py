@@ -816,7 +816,11 @@ class Scenario(BaseModel):
         return []
 
     expected_result: list[ExpectedResult] = Field(
-        default_factory=list, description="Scenario-level assertions checked after the last step"
+        default_factory=list,
+        description=(
+            "**Parsed and then ignored — nothing evaluates it.** "
+            "Put assertions in `steps:` instead. See the section below"
+        ),
     )
     variables: dict[str, str] = Field(
         default_factory=dict, description="Alias of vars, kept for older scenario files"
