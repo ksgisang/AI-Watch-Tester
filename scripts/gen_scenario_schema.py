@@ -255,6 +255,10 @@ _MATCH_METHODS: dict[MatchMethod, tuple[str, str]] = {
     MatchMethod.LEARNED: ("SQLite lookup", "Matches that already worked once"),
     MatchMethod.SEMANTICS: ("Flutter Semantics", "Flutter CanvasKit apps"),
     MatchMethod.TEMPLATE: ("cv2.matchTemplate", "Exact visual matching"),
+    MatchMethod.SAVED_TEMPLATE: (
+        "cv2.matchTemplate on a banked picture",
+        "Self-healing: the selector broke and an earlier run's picture found the element",
+    ),
     MatchMethod.OCR: ("pytesseract + CLAHE", "Finding elements by their text"),
     MatchMethod.FEATURE: ("ORB keypoints", "Rotation- and scale-invariant matching"),
     MatchMethod.VISION_AI: ("Claude / OpenAI / Gemini Vision", "Canvas text, complex UIs"),

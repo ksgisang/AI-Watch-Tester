@@ -254,7 +254,11 @@ def run_command(
     fast: bool = typer.Option(
         False,
         "--fast",
-        help="Enable fast mode: strictly use DOM matching, skip Vision/OCR fallbacks.",
+        help=(
+            "Enable fast mode: DOM matching, skipping OCR and Vision AI. "
+            "If the selector breaks, one deterministic attempt is still made "
+            "from the picture an earlier run banked for that element."
+        ),
     ),
     verbosity: str | None = typer.Option(
         None,
