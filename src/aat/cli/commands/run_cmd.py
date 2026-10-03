@@ -623,7 +623,7 @@ async def _run(
     hybrid = HybridMatcher(matchers, config.matching, learned_store=learned_store)
     humanizer = Humanizer(config.humanizer)
     waiter = Waiter()
-    comparator = Comparator()
+    comparator = Comparator(config.matching.ocr_languages)
 
     # Initialize AI adapter for step verification (if enabled)
     ai_adapter = None

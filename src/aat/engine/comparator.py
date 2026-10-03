@@ -7,7 +7,10 @@ against the current state of the test engine.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import logging
 import time
+from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 import cv2
@@ -20,9 +23,39 @@ if TYPE_CHECKING:
     from aat.core.models import Scenario, StepConfig
     from aat.engine.base import BaseEngine
 
+logger = logging.getLogger(__name__)
+
+# Tesseract's default (PSM 3, full auto) read the bottom of a Flutter login
+# card and nothing else -- it missed both target phrases in all four
+# image/language combinations measured. PSM 6 was the only mode that hit in
+# every one of them, so it goes first; 4 and 11 each recover cases 6 misses.
+_OCR_PSM_MODES = (6, 4, 11)
+
+# Mirrors ``MatchingConfig.ocr_languages``. Duplicated as a literal rather than
+# imported so that constructing a bare ``Comparator()`` -- which eight call
+# sites still do -- reads Korean instead of silently running as English.
+_DEFAULT_OCR_LANGUAGES = ("eng", "kor")
+
+
+def _collapse_whitespace(value: str, case_insensitive: bool) -> str:
+    """Strip every run of whitespace, for comparing OCR output to an expectation."""
+    collapsed = "".join(value.split())
+    return collapsed.lower() if case_insensitive else collapsed
+
 
 class Comparator:
     """Compare expected results against actual engine state."""
+
+    def __init__(self, ocr_languages: list[str] | None = None) -> None:
+        """
+        Args:
+            ocr_languages: Tesseract languages for the ``text_visible`` OCR
+                fallback. Pass ``config.matching.ocr_languages`` so a user who
+                configured the setting actually gets it; the default is the
+                same list the model declares, so callers that pass nothing are
+                no worse off.
+        """
+        self._ocr_languages = list(ocr_languages or _DEFAULT_OCR_LANGUAGES)
 
     async def check(
         self,
@@ -52,6 +85,12 @@ class Comparator:
                 found = await self._ocr_text_check(
                     engine, expected.value, expected.case_insensitive
                 )
+                if found:
+                    logger.info(
+                        "text_visible %r satisfied by OCR, not the DOM "
+                        "(canvas-rendered text)",
+                        expected.value,
+                    )
 
             if not found:
                 raise StepExecutionError(
@@ -226,27 +265,138 @@ class Comparator:
             action="assert",
         )
 
-    @staticmethod
     async def _ocr_text_check(
+        self,
         engine: BaseEngine,
         text: str,
         case_insensitive: bool = False,
     ) -> bool:
-        """Fallback: check text via OCR on screenshot (for Canvas/Flutter)."""
+        """Fallback: check text via OCR on screenshot (for Canvas/Flutter).
+
+        Measured against a real Flutter CanvasKit login screen, this path had
+        three faults, and fixing any two of them still read nothing:
+
+        1. No ``lang``, so Tesseract ran as English and returned noise
+           (``AIAO| YOAIL}R?``) for Korean. ``MatchingConfig.ocr_languages``
+           already defaulted to ``eng + kor`` and ``OCRMatcher`` honoured it --
+           this one path ignored the setting the user had configured.
+        2. Tesseract's default page segmentation (PSM 3) skipped the whole
+           centre of the card and found neither target phrase in any
+           image/language combination measured. PSM 6/4/11 read it.
+        3. Even once read, ``'학원 관리 시스템' in '학원관리시스템'`` is False.
+           Tesseract inserts and drops spaces freely in CJK, so both sides are
+           whitespace-collapsed before comparing.
+
+        ``preprocess_for_ocr`` is tried too, but as a *second* image rather
+        than a fix: on the same screenshot it rescued one phrase (hit at PSM
+        4/6/11 instead of 6 alone) and cost the other (6 alone instead of
+        4/6/11). It is a trade, not an improvement, so the cheap plain
+        greyscale -- a quarter of the pixels, and half the OCR time measured
+        -- goes first and the upscaled variant only runs if nothing matched.
+
+        Looser whitespace is deliberate here and nowhere else: this runs only
+        after the DOM check has already failed, so the alternative to a fuzzy
+        match is no match at all.
+        """
         try:
             import pytesseract  # type: ignore[import-untyped]
-
-            screenshot = await engine.screenshot()
-            img_arr = np.frombuffer(screenshot, dtype=np.uint8)
-            img = cv2.imdecode(img_arr, cv2.IMREAD_GRAYSCALE)
-            if img is None:
-                return False
-            ocr_text: str = pytesseract.image_to_string(img)
-            if case_insensitive:
-                return text.lower() in ocr_text.lower()
-            return text in ocr_text
-        except Exception:
+        except ImportError:
+            logger.debug("pytesseract not installed; skipping OCR fallback")
             return False
+
+        screenshot = await self._screenshot_without_overlay(engine)
+        if screenshot is None:
+            return False
+
+        img = cv2.imdecode(np.frombuffer(screenshot, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            return False
+
+        needle = _collapse_whitespace(text, case_insensitive)
+        if not needle:
+            return False
+
+        for variant in self._image_variants(img):
+            for lang in self._ocr_language_candidates():
+                for psm in _OCR_PSM_MODES:
+                    try:
+                        raw: str = pytesseract.image_to_string(
+                            variant, lang=lang, config=f"--oem 3 --psm {psm}"
+                        )
+                    except Exception as e:
+                        # A missing traineddata file fails identically for
+                        # every PSM, so move on to the next language instead
+                        # of paying for three identical failures.
+                        logger.debug("OCR fallback failed for lang=%s: %s", lang, e)
+                        break
+                    if needle in _collapse_whitespace(raw, case_insensitive):
+                        logger.debug(
+                            "OCR fallback matched with lang=%s psm=%d", lang, psm
+                        )
+                        return True
+        return False
+
+    @staticmethod
+    def _image_variants(img: np.ndarray) -> Iterator[np.ndarray]:
+        """Plain greyscale first, then the enhanced-and-upscaled version.
+
+        Lazy on purpose: the second variant costs a 2x resize plus CLAHE and a
+        convolution, and on a page where the first one matches, that work is
+        never done.
+        """
+        yield cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+        from aat.matchers.ocr import preprocess_for_ocr
+
+        yield preprocess_for_ocr(img)
+
+    def _ocr_language_candidates(self) -> list[str]:
+        """Configured languages first, then plain English as a safety net.
+
+        If the user has no ``kor.traineddata`` installed, asking for
+        ``eng+kor`` raises and would otherwise lose the English reading this
+        path used to manage. Falling back keeps the fix from being a
+        regression for anyone with a bare Tesseract install.
+        """
+        joined = "+".join(self._ocr_languages)
+        return [joined] if joined == "eng" else [joined, "eng"]
+
+    @staticmethod
+    async def _screenshot_without_overlay(engine: BaseEngine) -> bytes | None:
+        """Screenshot with AWT's own progress bar hidden.
+
+        ``aat run`` paints a ``#awt-overlay`` bar carrying the step
+        description, and a failing assert repaints it with the message
+        ``Text '<expected>' not visible on page``. OCR reading that bar would
+        find the expected text in AWT's own complaint and report the
+        assertion as passed -- a false pass manufactured by the tool. Hiding
+        the bar for the duration of the capture is what keeps this fallback
+        honest.
+        """
+        page = getattr(engine, "page", None)
+        hidden = False
+        if page is not None:
+            try:
+                await page.evaluate(
+                    "() => { const b = document.getElementById('awt-overlay');"
+                    " if (b) { b.dataset.awtPrevDisplay = b.style.display;"
+                    " b.style.display = 'none'; return true; } return false; }"
+                )
+                hidden = True
+            except Exception as e:
+                logger.debug("Could not hide AWT overlay before OCR: %s", e)
+        try:
+            return await engine.screenshot()
+        except Exception as e:
+            logger.debug("Screenshot failed during OCR fallback: %s", e)
+            return None
+        finally:
+            if hidden and page is not None:
+                with contextlib.suppress(Exception):
+                    await page.evaluate(
+                        "() => { const b = document.getElementById('awt-overlay');"
+                        " if (b) { b.style.display = b.dataset.awtPrevDisplay || ''; } }"
+                    )
 
     @staticmethod
     async def _wait_for_url(

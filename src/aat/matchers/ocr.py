@@ -21,6 +21,35 @@ logger = logging.getLogger(__name__)
 _DEFAULT_CONFIG = MatchingConfig()
 
 
+def preprocess_for_ocr(screen_bgr: np.ndarray) -> np.ndarray:
+    """Prepare a BGR screenshot for Tesseract.
+
+    Canvas-rendered text (Flutter CanvasKit, WebGL) is anti-aliased pixels
+    rather than glyphs, and small grey-on-white labels are the first thing
+    Tesseract drops. CLAHE lifts the contrast, the sharpen kernel restores the
+    edges anti-aliasing softened, and the 2x upscale buys Tesseract the pixel
+    height it wants.
+
+    This lives here, outside ``OCRMatcher``, because the Comparator's
+    ``text_visible`` fallback needs exactly the same preparation. It ran for
+    months with none of it -- plain greyscale, no upscale -- which is one of
+    the four reasons that fallback never once read a Korean Flutter screen.
+    """
+    gray = cv2.cvtColor(screen_bgr, cv2.COLOR_BGR2GRAY)
+
+    # 1. CLAHE with stronger contrast (clipLimit=3.0 for Canvas text)
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    gray = clahe.apply(gray)
+
+    # 2. Sharpening filter (enhances edges of pixel-rendered text)
+    sharpen_kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32)
+    gray = cv2.filter2D(gray, -1, sharpen_kernel)
+
+    # 3. Upscale 2x for small text
+    h_img, w_img = gray.shape
+    return cv2.resize(gray, (w_img * 2, h_img * 2), interpolation=cv2.INTER_CUBIC)
+
+
 class OCRMatcher(BaseMatcher):
     """Find text on screen using Tesseract OCR.
 
@@ -61,19 +90,7 @@ class OCRMatcher(BaseMatcher):
             return None
 
         # Preprocessing — enhanced for Canvas/CanvasKit rendered text
-        gray = cv2.cvtColor(screen_bgr, cv2.COLOR_BGR2GRAY)
-
-        # 1. CLAHE with stronger contrast (clipLimit=3.0 for Canvas text)
-        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-        gray = clahe.apply(gray)
-
-        # 2. Sharpening filter (enhances edges of pixel-rendered text)
-        sharpen_kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32)
-        gray = cv2.filter2D(gray, -1, sharpen_kernel)
-
-        # 3. Upscale 2x for small text
-        h_img, w_img = gray.shape
-        gray = cv2.resize(gray, (w_img * 2, h_img * 2), interpolation=cv2.INTER_CUBIC)
+        gray = preprocess_for_ocr(screen_bgr)
 
         lang = "+".join(self._config.ocr_languages)
 

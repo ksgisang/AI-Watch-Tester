@@ -1355,7 +1355,7 @@ async def _execute_run(
         # Assemble executor
         humanizer = Humanizer(_current_config.humanizer)
         waiter = Waiter()
-        comparator = Comparator()
+        comparator = Comparator(_current_config.matching.ocr_languages)
         screenshot_dir = Path(_current_config.data_dir) / "screenshots"
         screenshot_dir.mkdir(parents=True, exist_ok=True)
         executor = StepExecutor(
@@ -1493,7 +1493,7 @@ async def _execute_loop(
 
         humanizer = Humanizer(config.humanizer)
         waiter = Waiter()
-        comparator = Comparator()
+        comparator = Comparator(config.matching.ocr_languages)
         executor = StepExecutor(engine, hybrid, humanizer, waiter, comparator)
 
         adapter_cls = ADAPTER_REGISTRY.get(config.ai.provider)
@@ -1749,7 +1749,7 @@ async def _execute_oneclick(url: str) -> None:
         # Assemble executor
         humanizer = Humanizer(_current_config.humanizer)
         waiter = Waiter()
-        comparator = Comparator()
+        comparator = Comparator(_current_config.matching.ocr_languages)
         screenshot_dir = Path(_current_config.data_dir) / "screenshots"
         screenshot_dir.mkdir(parents=True, exist_ok=True)
         executor = StepExecutor(

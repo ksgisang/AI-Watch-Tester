@@ -153,7 +153,7 @@ async def _snapshot(
         hybrid = HybridMatcher(matchers, config.matching)
         humanizer = Humanizer(config.humanizer)
         waiter = Waiter()
-        comparator = Comparator()
+        comparator = Comparator(config.matching.ocr_languages)
 
         ss_dir = Path(config.data_dir) / "screenshots"
         ss_dir.mkdir(parents=True, exist_ok=True)

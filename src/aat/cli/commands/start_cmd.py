@@ -300,7 +300,7 @@ async def _start_guided(config_path: str | None) -> None:
 
     humanizer = Humanizer(config.humanizer)
     waiter = Waiter()
-    comparator = Comparator()
+    comparator = Comparator(config.matching.ocr_languages)
     executor = StepExecutor(engine, hybrid, humanizer, waiter, comparator)
 
     adapter_cls = ADAPTER_REGISTRY[provider]

@@ -347,7 +347,7 @@ async def _loop(
     # Assemble executor
     humanizer = Humanizer(config.humanizer)
     waiter = Waiter()
-    comparator = Comparator()
+    comparator = Comparator(config.matching.ocr_languages)
     executor = StepExecutor(
         engine,
         hybrid,
