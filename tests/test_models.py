@@ -88,9 +88,19 @@ class TestAssertType:
 
 class TestMatchMethod:
     def test_all_values(self) -> None:
-        assert len(MatchMethod) == 6
+        assert len(MatchMethod) == 7
         assert MatchMethod.LEARNED == "learned"
         assert MatchMethod.VISION_AI == "vision_ai"
+
+    def test_playwright_keeps_the_label_match_history_already_uses(self) -> None:
+        """The DOM paths used to label themselves ``ocr``.
+
+        The value must stay ``"playwright"``: ``_record_step`` writes it for
+        targetless steps and ``_classify_strategy`` reads the same string to
+        decide what advice to print, so renaming it would split the history
+        into two names for one strategy.
+        """
+        assert MatchMethod.PLAYWRIGHT == "playwright"
 
     def test_chain_order(self) -> None:
         order = [MatchMethod.TEMPLATE, MatchMethod.OCR]

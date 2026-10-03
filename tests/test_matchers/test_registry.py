@@ -78,6 +78,22 @@ class TestBuildMatchers:
         # or keeps it and still believes it does something.
         assert "step executor" in caplog.text
 
+    def test_playwright_entry_is_reported(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """``playwright`` became a MatchMethod so match_history could tell a
+        selector hit from a visual one. That made it newly writable in
+        ``chain_order``, where it means nothing — DOM lookup always runs first,
+        inside the executor. Saying so beats dropping it in silence.
+        """
+        cfg = MatchingConfig(chain_order=[MatchMethod.PLAYWRIGHT, MatchMethod.TEMPLATE])
+        with caplog.at_level(logging.WARNING, logger="aat.matchers"):
+            matchers = build_matchers(cfg, include_vision=False)
+
+        assert _names(matchers) == ["template"]
+        assert "playwright" in caplog.text
+        assert "step executor" in caplog.text
+
     def test_semantics_entry_is_reported(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:

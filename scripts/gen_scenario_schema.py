@@ -253,6 +253,7 @@ _FIND_METHODS: dict[FindMethod, str] = {
 }
 
 _MATCH_METHODS: dict[MatchMethod, tuple[str, str]] = {
+    MatchMethod.PLAYWRIGHT: ("DOM locator", "Selectors and visible text (reported, not chosen)"),
     MatchMethod.LEARNED: ("SQLite lookup", "Matches that already worked once"),
     MatchMethod.SEMANTICS: ("Flutter Semantics", "Flutter CanvasKit apps"),
     MatchMethod.TEMPLATE: ("cv2.matchTemplate", "Exact visual matching"),
@@ -513,6 +514,10 @@ With `fallback: true` (the default), a failed specific method falls back to the
 full chain. `semantics` is activated automatically on Flutter CanvasKit apps.
 
 ## MatchMethod (target-level)
+
+What a report says *found* the element. `playwright`, `learned` and
+`semantics` are produced by the step executor before the matcher chain runs, so
+they appear in results but are not things you pick; `chain_order` ignores them.
 
 | Value | Algorithm | Best for |
 |---|---|---|

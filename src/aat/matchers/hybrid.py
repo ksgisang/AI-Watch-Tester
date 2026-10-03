@@ -418,8 +418,16 @@ class HybridMatcher(BaseMatcher):
 
     @staticmethod
     def _method_to_tier(method: MatchMethod) -> int:
-        """Map MatchMethod to tier number for logging/stats."""
+        """Map MatchMethod to tier number for logging/stats.
+
+        Tier 0 is the step executor's own DOM work, which happens before the
+        chain is consulted. Every member is listed so the map is a complete
+        statement rather than a silent fallthrough -- a new method that nobody
+        classified would otherwise be filed under tier 0 and read as a DOM hit.
+        """
         tier_map = {
+            MatchMethod.PLAYWRIGHT: 0,
+            MatchMethod.SEMANTICS: 0,
             MatchMethod.LEARNED: 1,
             MatchMethod.TEMPLATE: 1,
             MatchMethod.OCR: 2,

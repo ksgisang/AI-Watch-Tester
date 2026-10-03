@@ -254,3 +254,30 @@ class TestErrorHandling:
 class TestName:
     def test_name_is_hybrid(self) -> None:
         assert HybridMatcher([]).name == "hybrid"
+
+
+class TestMethodToTier:
+    """Tier 0 is the executor's own DOM work, before the chain is consulted.
+
+    The map used to fall through to 0 for anything it had not classified, so a
+    method nobody tiered would be filed alongside DOM hits and read as one.
+    """
+
+    @pytest.mark.parametrize(
+        ("method", "tier"),
+        [
+            (MatchMethod.PLAYWRIGHT, 0),
+            (MatchMethod.SEMANTICS, 0),
+            (MatchMethod.LEARNED, 1),
+            (MatchMethod.TEMPLATE, 1),
+            (MatchMethod.OCR, 2),
+            (MatchMethod.FEATURE, 2),
+            (MatchMethod.VISION_AI, 3),
+        ],
+    )
+    def test_every_method_has_a_tier(self, method: MatchMethod, tier: int) -> None:
+        assert HybridMatcher._method_to_tier(method) == tier
+
+    def test_no_method_is_left_unclassified(self) -> None:
+        """Parametrising above is only exhaustive if it covers the enum."""
+        assert len(list(MatchMethod)) == 7

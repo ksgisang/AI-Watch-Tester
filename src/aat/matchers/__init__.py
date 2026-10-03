@@ -28,6 +28,11 @@ MATCHER_REGISTRY: dict[str, type[BaseMatcher]] = {
 # A `chain_order` entry that names no matcher, and why — so the warning can say
 # where the work actually happens instead of only that something was dropped.
 _NOT_MATCHERS: dict[str, str] = {
+    "playwright": (
+        "DOM lookup is the step executor's first move and always runs before "
+        "the chain. It is a MatchMethod so match_history can tell a selector "
+        "hit from a visual one; listing it here does nothing"
+    ),
     "learned": (
         "learned coordinates are applied by the step executor, not by the "
         "matcher chain, and deliberately rank below an explicit selector "

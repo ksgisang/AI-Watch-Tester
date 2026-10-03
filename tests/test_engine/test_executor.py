@@ -21,6 +21,7 @@ from aat.core.models import (
     ActionType,
     AssertType,
     ExpectedResult,
+    MatchMethod,
     MatchResult,
     StepConfig,
     StepStatus,
@@ -1547,3 +1548,198 @@ class TestNavigationEffect:
         self, requested: str, landed: str
     ) -> None:
         assert StepExecutor._url_key(requested) not in StepExecutor._url_key(landed)
+
+
+# ─── Match provenance labels ─────────────────────────────────
+
+
+def _page_with_one_element(
+    box: dict[str, float] | None = None,
+) -> MagicMock:
+    """A page whose locator resolves to exactly one element with a box."""
+    loc = MagicMock()
+    loc.count = AsyncMock(return_value=1)
+    loc.scroll_into_view_if_needed = AsyncMock()
+    loc.bounding_box = AsyncMock(
+        return_value=box or {"x": 100.0, "y": 200.0, "width": 80.0, "height": 40.0}
+    )
+    loc.click = AsyncMock()
+    base = MagicMock(first=loc)
+    base.filter = MagicMock(return_value=MagicMock(first=loc))
+    page = MagicMock()
+    page.locator = MagicMock(return_value=base)
+    return page
+
+
+class TestMatchProvenanceLabel:
+    """Every way of finding a target must report *which* way it was.
+
+    ``_act_at_pos`` used to stamp ``MatchMethod.OCR`` on its result no matter
+    who called it. A CSS selector hit, a learned coordinate and the matcher
+    chain's own verdict were all recorded as ``ocr`` in ``match_history`` —
+    which is how 237 rows came to name a matcher that never ran, and why
+    "visual matching saved this run" was not a measurable claim. These tests
+    pin each caller to its own label, because a number nobody can trust is
+    worse than no number.
+    """
+
+    @pytest.mark.asyncio
+    async def test_css_selector_hit_is_labelled_playwright(
+        self, executor: StepExecutor, mock_engine: MagicMock
+    ) -> None:
+        mock_engine.page = _page_with_one_element()
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(selector="#submit"))
+
+        result = await executor.execute_step(step)
+
+        assert result.status == StepStatus.PASSED
+        assert result.match_result is not None
+        assert result.match_result.method == MatchMethod.PLAYWRIGHT
+
+    @pytest.mark.asyncio
+    async def test_text_search_hit_is_labelled_playwright(
+        self, executor: StepExecutor, mock_engine: MagicMock
+    ) -> None:
+        del mock_engine.page  # skip the selector and semantics paths
+        mock_engine.find_text_position = AsyncMock(return_value=(150, 250))
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(text="Submit"))
+
+        result = await executor.execute_step(step)
+
+        assert result.match_result is not None
+        assert result.match_result.method == MatchMethod.PLAYWRIGHT
+
+    @pytest.mark.asyncio
+    async def test_force_click_fallback_is_labelled_playwright(
+        self, executor: StepExecutor, mock_engine: MagicMock
+    ) -> None:
+        """A JS click through a locator is still DOM work, not OCR."""
+        del mock_engine.page
+        mock_engine.find_text_position = AsyncMock(return_value=None)
+        mock_engine.force_click_by_text = AsyncMock(return_value=True)
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(text="Submit"))
+
+        result = await executor.execute_step(step)
+
+        assert result.match_result is not None
+        assert result.match_result.method == MatchMethod.PLAYWRIGHT
+
+    @pytest.mark.asyncio
+    async def test_flutter_semantics_hit_is_labelled_semantics(
+        self, executor: StepExecutor, mock_engine: MagicMock
+    ) -> None:
+        """SEMANTICS names no matcher, but it names a real strategy.
+
+        Labelling it ``ocr`` hid the one lookup that makes CanvasKit apps
+        testable at all.
+        """
+        mock_engine.page = MagicMock()
+        executor._find_by_flutter_semantics = AsyncMock(return_value=(10, 20))  # type: ignore[method-assign]
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(text="Submit"))
+
+        result = await executor.execute_step(step)
+
+        assert result.match_result is not None
+        assert result.match_result.method == MatchMethod.SEMANTICS
+
+    @pytest.mark.asyncio
+    async def test_learned_coordinates_are_labelled_learned(
+        self, executor: StepExecutor, mock_engine: MagicMock
+    ) -> None:
+        """Learned coordinates are a guess from an earlier run, not a match.
+
+        Reading them as ``ocr`` made AAT-109's whole failure mode — a stale
+        coordinate clicking nothing — invisible in the history.
+        """
+        del mock_engine.page
+        store = MagicMock()
+        store.find_state_coords = MagicMock(return_value=(300, 400, 0.9))
+        store.get_strategies = MagicMock(return_value=[])
+        store.get_target_failure_count = MagicMock(return_value=0)
+        executor._learned_store = store
+
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(text="Submit"))
+        result = await executor.execute_step(step)
+
+        assert result.match_result is not None
+        assert result.match_result.method == MatchMethod.LEARNED
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "method",
+        [
+            MatchMethod.TEMPLATE,
+            MatchMethod.OCR,
+            MatchMethod.FEATURE,
+            MatchMethod.VISION_AI,
+        ],
+    )
+    async def test_the_chain_verdict_survives_the_action(
+        self,
+        executor: StepExecutor,
+        mock_engine: MagicMock,
+        mock_matcher: MagicMock,
+        method: MatchMethod,
+    ) -> None:
+        """The defect that made the visual stack unmeasurable.
+
+        ``_act_at_pos`` overwrote the chain's verdict, so a template or vision
+        hit was indistinguishable from a selector hit. Parametrised over every
+        chain method because the bug was in the handoff, not in any one matcher.
+        """
+        del mock_engine.page
+        mock_matcher.find = AsyncMock(
+            return_value=MatchResult(found=True, x=50, y=60, confidence=0.9, method=method)
+        )
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(image="button.png"))
+
+        result = await executor.execute_step(step)
+
+        assert result.status == StepStatus.PASSED
+        assert result.match_result is not None
+        assert result.match_result.method == method
+
+    @pytest.mark.asyncio
+    async def test_the_label_reaches_match_history(
+        self, executor: StepExecutor, mock_engine: MagicMock, mock_matcher: MagicMock
+    ) -> None:
+        """The label is only worth fixing if it lands in the store.
+
+        ``match_history`` is the only evidence of which strategy carries the
+        suite, so this asserts the end of the wire, not the middle.
+        """
+        del mock_engine.page
+        store = MagicMock()
+        store.find_state_coords = MagicMock(return_value=None)
+        store.find_by_name = MagicMock(return_value=None)
+        store.get_strategies = MagicMock(return_value=[])
+        store.get_target_failure_count = MagicMock(return_value=0)
+        executor._learned_store = store
+        mock_matcher.find = AsyncMock(
+            return_value=MatchResult(
+                found=True, x=50, y=60, confidence=0.9, method=MatchMethod.VISION_AI
+            )
+        )
+        step = make_step(ActionType.FIND_AND_CLICK, target=TargetSpec(image="button.png"))
+
+        await executor.execute_step(step)
+
+        assert store.record_match.call_args.kwargs["method"] == "vision_ai"
+
+    @pytest.mark.asyncio
+    async def test_targetless_step_records_playwright(
+        self, executor: StepExecutor, mock_engine: MagicMock
+    ) -> None:
+        """navigate/wait/assert carry no match result; the engine acted.
+
+        Taken from the enum rather than a bare literal so this default and
+        ``MatchMethod`` cannot drift apart — ``_classify_strategy`` reads the
+        same string to decide what advice to give.
+        """
+        store = MagicMock()
+        executor._learned_store = store
+        step = make_step(ActionType.NAVIGATE, value="https://example.com/next")
+
+        await executor.execute_step(step)
+
+        assert store.record_match.call_args.kwargs["method"] == MatchMethod.PLAYWRIGHT.value

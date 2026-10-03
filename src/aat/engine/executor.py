@@ -22,6 +22,7 @@ from aat.core.exceptions import CriticalStepError, MatchError, StepExecutionErro
 from aat.core.models import (
     FIND_ACTIONS,
     ActionType,
+    MatchMethod,
     ScreenRegion,
     StepResult,
     StepStatus,
@@ -749,9 +750,23 @@ class StepExecutor:
         x: int,
         y: int,
         confidence: float = 1.0,
+        *,
+        method: MatchMethod | None = None,
     ) -> MatchResult:
-        """Execute find_and_* action at given position, return MatchResult."""
-        from aat.core.models import MatchMethod, MatchResult
+        """Execute find_and_* action at given position, return MatchResult.
+
+        ``method`` is how the caller found the position, and it must be the
+        caller's own truth. This used to be hardcoded to ``MatchMethod.OCR``
+        for every caller — selector hits, learned coordinates and the matcher
+        chain's own verdict all came back labelled ``ocr``, so
+        ``match_history`` could not distinguish a CSS selector from a template
+        match. Defaults to ``PLAYWRIGHT`` because most callers here resolve the
+        target through a DOM locator.
+        """
+        from aat.core.models import MatchResult
+
+        if method is None:
+            method = MatchMethod.PLAYWRIGHT
 
         # Handle iframe direct click (x=-1 sentinel from _find_text_with_synonyms)
         iframe_loc = getattr(self, "_iframe_locator", None)
@@ -784,7 +799,7 @@ class StepExecutor:
                     x=bx,
                     y=by,
                     confidence=confidence,
-                    method=MatchMethod.OCR,
+                    method=method,
                 )
             except Exception as e:
                 logger.warning("[AWT] iframe action failed: %s", e)
@@ -829,7 +844,7 @@ class StepExecutor:
             x=x,
             y=y,
             confidence=confidence,
-            method=MatchMethod.OCR,
+            method=method,
         )
         if step.action in (
             ActionType.FIND_AND_CLICK,
@@ -1115,6 +1130,7 @@ class StepExecutor:
                         lx,
                         ly,
                         confidence=lconf,
+                        method=MatchMethod.LEARNED,
                     )
                 except Exception:
                     logger.info(
@@ -1136,6 +1152,7 @@ class StepExecutor:
                         learned.correct_x,
                         learned.correct_y,
                         confidence=learned.confidence,
+                        method=MatchMethod.LEARNED,
                     )
                 except Exception:
                     logger.info("Learned coords failed, falling through")
@@ -1172,15 +1189,19 @@ class StepExecutor:
         ):
             pos = await self._find_by_flutter_semantics(target.text)
             if pos is not None:
-                from aat.core.models import MatchMethod, MatchResult
-
                 logger.info(
                     "Found '%s' via Flutter Semantics at (%d, %d)",
                     target.text,
                     pos[0],
                     pos[1],
                 )
-                return await self._act_at_pos(step, pos[0], pos[1], confidence=0.95)
+                return await self._act_at_pos(
+                    step,
+                    pos[0],
+                    pos[1],
+                    confidence=0.95,
+                    method=MatchMethod.SEMANTICS,
+                )
 
         # Try Playwright native text search first (no screenshot needed)
         if target.text and hasattr(self._engine, "find_text_position"):
@@ -1197,7 +1218,7 @@ class StepExecutor:
 
             # Fallback 3: JS force click via locator (bypasses sticky headers)
             if hasattr(self._engine, "force_click_by_text"):
-                from aat.core.models import MatchMethod, MatchResult
+                from aat.core.models import MatchResult
 
                 texts_to_try = [target.text] + _SYNONYMS.get(target.text.lower(), [])
                 for t in texts_to_try:
@@ -1207,7 +1228,7 @@ class StepExecutor:
                             x=0,
                             y=0,
                             confidence=0.8,
-                            method=MatchMethod.OCR,
+                            method=MatchMethod.PLAYWRIGHT,
                         )
                         if step.action == ActionType.FIND_AND_TYPE:
                             await self._do_type(step.value or "", step.humanize)
@@ -1221,7 +1242,7 @@ class StepExecutor:
             confidence = target.confidence or 0.8
             coords = await self._engine.find_on_screen(target.image, confidence)
             if coords is not None:
-                from aat.core.models import MatchMethod, MatchResult
+                from aat.core.models import MatchResult
 
                 sx, sy = coords
                 result = MatchResult(
@@ -1302,12 +1323,15 @@ class StepExecutor:
         abs_x = match_result.x + region_offset_x
         abs_y = match_result.y + region_offset_y
 
-        # Perform action at matched location
+        # Perform action at matched location. The chain's verdict is the whole
+        # point of having run it — passing it on is what makes "the visual path
+        # found this, not the selector" a countable fact in match_history.
         return await self._act_at_pos(
             step,
             abs_x,
             abs_y,
             match_result.confidence,
+            method=match_result.method,
         )
 
     async def _do_click(
@@ -2418,7 +2442,11 @@ class StepExecutor:
                 target_name = step.value or step.description
 
             is_success = result.status == StepStatus.PASSED
-            method = "playwright"
+            # Steps with no target (navigate, wait, assert) carry no match
+            # result — the engine's own action is the whole story. Taken from
+            # the enum so this default and MatchMethod cannot drift apart;
+            # _classify_strategy below reads the same string.
+            method = MatchMethod.PLAYWRIGHT.value
             confidence = 1.0
             if result.match_result and result.match_result.found:
                 method = result.match_result.method.value

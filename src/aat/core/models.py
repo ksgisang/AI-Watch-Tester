@@ -97,14 +97,25 @@ class AssertType(StrEnum):
 
 
 class MatchMethod(StrEnum):
-    """Image matching algorithm.
+    """How a target was located.
 
-    ``LEARNED`` and ``SEMANTICS`` name no matcher. They are kept so configs
-    that still list them in ``chain_order`` load rather than fail validation;
-    ``build_matchers`` then logs what actually handles that work instead of
-    dropping the entry in silence.
+    Not every member names a matcher. ``PLAYWRIGHT``, ``LEARNED`` and
+    ``SEMANTICS`` are produced by the step executor, which resolves a target
+    before the matcher chain is ever consulted. They are members because the
+    label on a ``MatchResult`` is what ``_record_step`` writes to
+    ``match_history``, and that history is the only evidence of which strategy
+    is carrying the suite. ``build_matchers`` logs what actually handles the
+    work if one of them turns up in ``chain_order``.
+
+    ``PLAYWRIGHT`` exists because the three DOM paths in the executor used to
+    label themselves ``OCR``. 237 rows in ``match_history`` read ``ocr`` for
+    matches that never touched Tesseract, and the chain's own verdict at
+    ``_act_at_pos`` was overwritten with ``OCR`` too — so a template or vision
+    hit was indistinguishable from a selector hit. Measurement that cannot tell
+    strategies apart cannot show that any of them works.
     """
 
+    PLAYWRIGHT = "playwright"
     LEARNED = "learned"
     SEMANTICS = "semantics"
     TEMPLATE = "template"
