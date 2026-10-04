@@ -29,7 +29,7 @@ from playwright.async_api import (
 )
 
 from aat.core.exceptions import EngineError
-from aat.core.models import EngineConfig
+from aat.core.models import EngineConfig, ScreenshotSpace
 from aat.engine.base import BaseEngine
 
 if TYPE_CHECKING:
@@ -68,6 +68,9 @@ class DesktopEngine(BaseEngine):
         self._window_offset_x: int = 0
         self._window_offset_y: int = 0
         self._device_pixel_ratio: float = 1.0
+        # Screenshot pixels per logical screen point — measured on first use,
+        # never guessed. See _screenshot_scale().
+        self._shot_scale: float | None = None
 
     @property
     def page(self) -> Page:
@@ -192,6 +195,78 @@ class DesktopEngine(BaseEngine):
     def _viewport_to_screen(self, x: int, y: int) -> tuple[int, int]:
         """Convert Playwright viewport coordinates to OS screen coordinates."""
         return (x + self._window_offset_x, y + self._window_offset_y)
+
+    # ------------------------------------------------------------------
+    # Coordinate spaces — see BaseEngine for why this is the engine's job
+    # ------------------------------------------------------------------
+
+    @property
+    def screenshot_space(self) -> ScreenshotSpace:
+        """Screen, not viewport: :meth:`screenshot` captures the whole display."""
+        return ScreenshotSpace.SCREEN
+
+    def _screenshot_scale(self) -> float:
+        """Screenshot pixels per logical screen point, measured once.
+
+        Measured rather than derived from ``window.devicePixelRatio``, which is
+        the wrong number twice over: it is the *page's* ratio, so browser zoom
+        moves it while the display's backing scale stays put, and a headful
+        browser is free to sit on a different monitor than the one the ratio
+        describes.
+
+        Measured on this machine while fixing it: ``pag.size()`` reported
+        1680x1050 and ``pag.screenshot()`` returned 3360x2100. Every coordinate
+        read out of a screenshot was therefore twice the value PyAutoGUI's
+        pointer API expects, which is why the one path that did click through
+        the OS -- an image target resolved by ``find_on_screen`` -- missed by
+        half the screen on any HiDPI display.
+
+        Falls back to 1.0 when the two axes disagree, which is what a capture
+        spanning several monitors looks like. A wrong scale silently clicks the
+        wrong place; an unscaled one at least fails the way it failed before.
+        """
+        if self._shot_scale is not None:
+            return self._shot_scale
+
+        scale = 1.0
+        try:
+            logical = self.pag.size()
+            shot_w, shot_h = self.pag.screenshot().size
+            sx = shot_w / float(logical[0])
+            sy = shot_h / float(logical[1])
+            if 0.5 <= sx <= 4.0 and abs(sx - sy) <= 0.01 * sx:
+                scale = sx
+            else:
+                _log.warning(
+                    "Screenshot scale is not uniform (x=%.3f, y=%.3f) — assuming 1.0. "
+                    "A capture spanning several displays looks like this.",
+                    sx,
+                    sy,
+                )
+        except Exception:
+            _log.debug("Could not measure screenshot scale; assuming 1.0", exc_info=True)
+
+        self._shot_scale = scale
+        _log.debug("Screenshot scale: %.3f px per logical point", scale)
+        return scale
+
+    def screenshot_to_click(self, x: int, y: int) -> tuple[int, int]:
+        """Screenshot pixels to logical screen points for the OS pointer."""
+        scale = self._screenshot_scale()
+        if scale <= 0:
+            return (x, y)
+        return (int(x / scale), int(y / scale))
+
+    def viewport_to_screenshot(self, x: float, y: float) -> tuple[float, float]:
+        """Viewport CSS pixels to screenshot pixels.
+
+        Assumes the browser is at 100% zoom, which is how this engine launches
+        it and nothing here changes it. ``window.screenX`` is reported in CSS
+        pixels, so a zoomed page would shift the window offset too.
+        """
+        sx, sy = self._viewport_to_screen(int(x), int(y))
+        scale = self._screenshot_scale()
+        return (sx * scale, sy * scale)
 
     # ------------------------------------------------------------------
     # Screenshot — PyAutoGUI (OS-level full screen)

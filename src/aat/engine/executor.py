@@ -24,6 +24,7 @@ from aat.core.models import (
     ActionType,
     MatchMethod,
     ScreenRegion,
+    ScreenshotSpace,
     StepResult,
     StepStatus,
     compute_region_bounds,
@@ -833,6 +834,7 @@ class StepExecutor:
         *,
         method: MatchMethod | None = None,
         box: dict[str, float] | None = None,
+        in_screenshot_space: bool = False,
     ) -> MatchResult:
         """Execute find_and_* action at given position, return MatchResult.
 
@@ -848,6 +850,15 @@ class StepExecutor:
         it. It is what makes self-healing possible: the crop is banked *before*
         the action, while the element still looks the way it looked when the
         selector worked.
+
+        ``in_screenshot_space`` says that ``x``/``y`` were read out of
+        ``engine.screenshot()`` rather than resolved through the DOM. On an
+        engine that screenshots its own viewport the two are the same and the
+        flag changes nothing; on one that captures the whole display they are
+        not, and passing those pixels to ``click()`` clicks the wrong place
+        while reporting a match. Callers that got their point from the matcher
+        chain, from a banked picture, or from an OS-level image search must set
+        it -- it is not inferable here, which is precisely why it was wrong.
         """
         from aat.core.models import MatchResult
 
@@ -859,7 +870,7 @@ class StepExecutor:
         # no longer looks like the thing a future run will be looking for.
         # Nothing is written yet — see _settle_pending_bank().
         if box is not None:
-            self._propose_bank(step, box, method, confidence)
+            self._propose_bank(step, box, method, confidence, from_dom=not in_screenshot_space)
 
         # Handle iframe direct click (x=-1 sentinel from _find_text_with_synonyms)
         iframe_loc = getattr(self, "_iframe_locator", None)
@@ -906,7 +917,12 @@ class StepExecutor:
             viewport_h = int(getattr(vw, "viewport_height", 720)) if vw else 720
         except (TypeError, ValueError):
             viewport_w, viewport_h = 1280, 720
-        if x < 0 or y < 0 or x > viewport_w or y > viewport_h:
+        # Both warnings below measure against the viewport, so neither means
+        # anything for a point read out of a full-screen capture: every such
+        # point is "outside the viewport" and most of the display is in its
+        # "left 20%". Firing them there trains the reader to skip them.
+        warn_against_viewport = not in_screenshot_space
+        if warn_against_viewport and (x < 0 or y < 0 or x > viewport_w or y > viewport_h):
             logger.warning(
                 "Element at (%d, %d) is outside viewport (%dx%d). "
                 "This may be a hidden element (e.g., Flutter invisible input). "
@@ -919,7 +935,7 @@ class StepExecutor:
 
         # Nav-zone warning: clicks in the left 20% are likely navigation
         # panel hits, not main content — common False Positive source.
-        if 0 <= x <= viewport_w and 0 <= y <= viewport_h:
+        if warn_against_viewport and 0 <= x <= viewport_w and 0 <= y <= viewport_h:
             nav_boundary = viewport_w * 0.2
             if x < nav_boundary:
                 logger.warning(
@@ -944,25 +960,48 @@ class StepExecutor:
             ActionType.FIND_AND_DOUBLE_CLICK,
             ActionType.FIND_AND_RIGHT_CLICK,
         ):
-            await self._do_click(
+            await self._click_resolved(
                 x,
                 y,
                 step.humanize,
+                in_screenshot_space=in_screenshot_space,
                 double=(step.action == ActionType.FIND_AND_DOUBLE_CLICK),
                 right=(step.action == ActionType.FIND_AND_RIGHT_CLICK),
             )
         elif step.action == ActionType.FIND_AND_TYPE:
-            await self._do_click(x, y, step.humanize)
+            await self._click_resolved(
+                x,
+                y,
+                step.humanize,
+                in_screenshot_space=in_screenshot_space,
+            )
             await self._do_type(step.value or "", step.humanize)
         elif step.action == ActionType.FIND_AND_CLEAR:
-            await self._do_click(x, y, step.humanize)
+            await self._click_resolved(
+                x,
+                y,
+                step.humanize,
+                in_screenshot_space=in_screenshot_space,
+            )
             await self._engine.key_combo("Control", "a")
             await self._engine.press_key("Delete")
 
         # Remember the coordinates *provisionally*. Nothing is written to the
         # learning store until post-action verification shows the click had an
         # effect — see _settle_pending_learn().
-        if self._learned_store and self._learn_allowed(step) and x > 0 and y > 0:
+        #
+        # Not when the position came out of a screen-space capture. The store
+        # has one column pair for a position and `_act_on_learned_coords`
+        # replays it through `click()`, which is viewport coordinates — so a
+        # screen-space position written here comes back as a click somewhere
+        # else entirely. Two spaces in one column is how AAT-109's silent
+        # mis-click gets reintroduced, so the position is dropped rather than
+        # stored ambiguously.
+        foreign_space = (
+            in_screenshot_space and self._screenshot_space() is not ScreenshotSpace.VIEWPORT
+        )
+        may_learn = self._learned_store and self._learn_allowed(step) and not foreign_space
+        if may_learn and x > 0 and y > 0:
             t_name = ""
             if step.target:
                 t_name = step.target.text or step.target.selector or ""
@@ -994,6 +1033,8 @@ class StepExecutor:
         box: dict[str, float],
         method: MatchMethod,
         confidence: float,
+        *,
+        from_dom: bool = True,
     ) -> None:
         """Note the crop that *would* become this target's visual baseline.
 
@@ -1003,6 +1044,13 @@ class StepExecutor:
         from it reproduces the wrong click and calls it a pass. So this follows
         AAT-109's rule for coordinates: propose now, write only once
         verification has seen the action do something.
+
+        ``from_dom`` says the rectangle came from ``bounding_box()`` and is
+        therefore in CSS pixels, while ``screenshot`` is in whatever space the
+        engine captures. On a screen-space engine those disagree twice over --
+        by the window's position on the display and by the display's pixel
+        scale -- so the crop has to be converted or it cuts out some unrelated
+        part of the screen and banks it as "what this element looks like".
         """
         if not self._learn_allowed(step):
             return
@@ -1016,13 +1064,42 @@ class StepExecutor:
         name = template_store.name_for(step.target)
         if not name:
             return
+        crop = dict(box)
+        if from_dom and self._screenshot_space() is not ScreenshotSpace.VIEWPORT:
+            converted = self._box_to_screenshot(crop)
+            if converted is None:
+                return
+            crop = converted
         self._pending_bank = {
             "name": name,
             "screenshot": screenshot,
-            "box": dict(box),
+            "box": crop,
             "method": method.value,
             "confidence": confidence,
         }
+
+    def _box_to_screenshot(self, box: dict[str, float]) -> dict[str, float] | None:
+        """A CSS-pixel rectangle in the engine's screenshot pixels.
+
+        Both corners go through the engine's conversion rather than the origin
+        plus a scale factor, so the width and height pick up the scale without
+        this function having to know what it is. Returns ``None`` if the
+        conversion collapses the rectangle, because banking a zero-area crop
+        would store a picture of nothing and then fail to match it forever.
+        """
+        try:
+            x0, y0 = self._engine.viewport_to_screenshot(box["x"], box["y"])
+            x1, y1 = self._engine.viewport_to_screenshot(
+                box["x"] + box["width"],
+                box["y"] + box["height"],
+            )
+        except Exception:
+            logger.debug("Could not convert a box to screenshot space", exc_info=True)
+            return None
+        width, height = x1 - x0, y1 - y0
+        if width <= 0 or height <= 0:
+            return None
+        return {"x": x0, "y": y0, "width": width, "height": height}
 
     def _learned_host(self) -> str:
         """The scope a remembered position belongs to: the host of the current page.
@@ -1375,7 +1452,13 @@ class StepExecutor:
             if coords is not None:
                 from aat.core.models import MatchResult
 
-                sx, sy = coords
+                # `find_on_screen` locates the template inside a full-screen
+                # capture, so its answer is in screenshot pixels. The OS
+                # pointer takes logical points. On a HiDPI display those differ
+                # by the backing scale -- measured 2.0 on this machine -- so
+                # every such click has been landing at twice the intended
+                # offset from the corner of the screen and reporting a match.
+                sx, sy = self._screenshot_to_click(*coords)
                 result = MatchResult(
                     found=True,
                     x=sx,
@@ -1493,6 +1576,7 @@ class StepExecutor:
             abs_y,
             match_result.confidence,
             method=match_result.method,
+            in_screenshot_space=True,
         )
 
     def _crop_to_region(
@@ -1638,7 +1722,64 @@ class StepExecutor:
             result.y + offset_y,
             result.confidence,
             method=result.method,
+            in_screenshot_space=True,
         )
+
+    def _screenshot_space(self) -> ScreenshotSpace:
+        """Which space this engine's ``screenshot()`` pixels are measured in.
+
+        Read through ``getattr`` because every test double and third-party
+        engine predates the attribute, and an engine that does not declare a
+        space screenshots its own viewport -- which is what the default says.
+        """
+        space = getattr(self._engine, "screenshot_space", ScreenshotSpace.VIEWPORT)
+        return space if isinstance(space, ScreenshotSpace) else ScreenshotSpace.VIEWPORT
+
+    def _screenshot_to_click(self, x: int, y: int) -> tuple[int, int]:
+        """``engine.screenshot_to_click``, tolerant of an engine that lacks it.
+
+        Same reason as :meth:`_screenshot_space`: the conversion arrived after
+        the engines did, and an engine that cannot answer is an engine whose
+        screenshot is already in click coordinates.
+        """
+        convert = getattr(self._engine, "screenshot_to_click", None)
+        if convert is None:
+            return (x, y)
+        try:
+            cx, cy = convert(x, y)
+        except Exception:
+            logger.debug("screenshot_to_click failed; using the raw point", exc_info=True)
+            return (x, y)
+        return (int(cx), int(cy))
+
+    async def _click_resolved(
+        self,
+        x: int,
+        y: int,
+        humanize: bool,
+        *,
+        in_screenshot_space: bool,
+        double: bool = False,
+        right: bool = False,
+    ) -> None:
+        """Click a point, routing it by the space it was measured in.
+
+        A point resolved through the DOM is in viewport coordinates and goes to
+        ``click()``. A point read out of a screen-space capture is neither --
+        it is in physical screenshot pixels, whose origin is the corner of the
+        display and whose scale is the display's backing factor. It has to be
+        converted, and then it has to go to the OS pointer rather than to the
+        page, because nothing guarantees it falls inside the viewport at all.
+
+        For an engine that screenshots its own viewport both branches do the
+        same thing, which is why this was invisible: the only engine where the
+        spaces differ is the one almost nobody runs.
+        """
+        if in_screenshot_space and self._screenshot_space() is not ScreenshotSpace.VIEWPORT:
+            cx, cy = self._screenshot_to_click(x, y)
+            await self._do_click_screen(cx, cy, humanize, double=double, right=right)
+            return
+        await self._do_click(x, y, humanize, double=double, right=right)
 
     async def _do_click(
         self,

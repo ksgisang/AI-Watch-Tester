@@ -96,6 +96,28 @@ class AssertType(StrEnum):
     SCREENSHOT_MATCH = "screenshot_match"
 
 
+class ScreenshotSpace(StrEnum):
+    """Which coordinate space an engine's ``screenshot()`` pixels are measured in.
+
+    Two spaces exist and they are not interchangeable. ``VIEWPORT`` means a
+    pixel of the screenshot is a CSS pixel of the page, so a point found in the
+    image can be handed straight to ``click()``. ``SCREEN`` means the capture
+    covers the whole display at its physical resolution: the origin is the
+    corner of the screen rather than of the page, and on a HiDPI display one
+    logical point is several pixels wide.
+
+    This exists because nothing named the difference, so the executor treated
+    every screenshot as viewport-space. On ``DesktopEngine`` -- whose
+    ``screenshot()`` is a full-screen PyAutoGUI capture -- that sent screen
+    pixels to ``page.mouse.click`` as if they were CSS pixels. The click landed
+    somewhere else and the step reported a match, which is the worst available
+    outcome: a false pass with a screenshot to back it up.
+    """
+
+    VIEWPORT = "viewport"
+    SCREEN = "screen"
+
+
 class MatchMethod(StrEnum):
     """How a target was located.
 

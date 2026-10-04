@@ -9,9 +9,55 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from pathlib import Path  # noqa: TC003
 
+from aat.core.models import ScreenshotSpace
+
 
 class BaseEngine(ABC):
     """Test engine abstract interface."""
+
+    # -- Coordinate spaces -------------------------------------------------
+    #
+    # ``click()`` takes viewport coordinates. ``screenshot()`` returns
+    # whatever pixels the engine can capture, which for an engine driving the
+    # OS is the whole display at its physical resolution. Those are different
+    # spaces, and a point found in the second is not a valid argument to the
+    # first.
+    #
+    # The conversion has to be the engine's answer rather than the executor's,
+    # because the engine is the only object that knows where its window sits
+    # on the display and how many physical pixels a logical point is worth.
+    # The defaults below are the identity, which is correct for any engine
+    # that screenshots its own viewport -- so an engine that does not think
+    # about this gets the behaviour it already had.
+
+    @property
+    def screenshot_space(self) -> ScreenshotSpace:
+        """Which space the pixels of :meth:`screenshot` are measured in.
+
+        Defaults to the viewport. Override it when ``screenshot()`` captures
+        something wider than the page, and override the two conversions below
+        with it -- a space declared without a conversion is worse than no
+        declaration, because callers will start trusting it.
+        """
+        return ScreenshotSpace.VIEWPORT
+
+    def screenshot_to_click(self, x: int, y: int) -> tuple[int, int]:
+        """Convert a point found in :meth:`screenshot` to click coordinates.
+
+        For a screen-space engine the result is in logical screen points --
+        what the OS pointer API expects -- not viewport coordinates, because
+        there is no viewport the point is guaranteed to fall inside.
+        """
+        return (x, y)
+
+    def viewport_to_screenshot(self, x: float, y: float) -> tuple[float, float]:
+        """Convert a viewport (CSS pixel) point to :meth:`screenshot` pixels.
+
+        The direction needed when a DOM lookup produced the element's
+        rectangle and something has to be cut out of the screenshot at that
+        spot -- banking a picture for self-healing, for instance.
+        """
+        return (x, y)
 
     @abstractmethod
     async def start(self) -> None:
