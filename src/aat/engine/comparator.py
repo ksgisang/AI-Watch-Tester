@@ -10,7 +10,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from typing import TYPE_CHECKING
 
 import cv2
@@ -18,6 +18,7 @@ import numpy as np
 
 from aat.core.exceptions import StepExecutionError
 from aat.core.models import ActionType, AssertType, ExpectedResult, StepResult, StepStatus
+from aat.engine.sweep import sweep_viewports
 
 if TYPE_CHECKING:
     from aat.core.models import Scenario, StepConfig
@@ -30,6 +31,12 @@ logger = logging.getLogger(__name__)
 # image/language combinations measured. PSM 6 was the only mode that hit in
 # every one of them, so it goes first; 4 and 11 each recover cases 6 misses.
 _OCR_PSM_MODES = (6, 4, 11)
+
+# How many screens down the ``text_visible`` OCR fallback looks. Lower than the
+# sweep's own default because the cap here is set by Tesseract's price, not by
+# how far pages scroll: each missing frame costs up to two image variants x two
+# languages x three PSM modes, at roughly half a second each.
+_OCR_SWEEP_SCREENS = 4
 
 # Mirrors ``MatchingConfig.ocr_languages``. Duplicated as a literal rather than
 # imported so that constructing a bare ``Comparator()`` -- which eight call
@@ -87,8 +94,7 @@ class Comparator:
                 )
                 if found:
                     logger.info(
-                        "text_visible %r satisfied by OCR, not the DOM "
-                        "(canvas-rendered text)",
+                        "text_visible %r satisfied by OCR, not the DOM (canvas-rendered text)",
                         expected.value,
                     )
 
@@ -297,23 +303,56 @@ class Comparator:
         Looser whitespace is deliberate here and nowhere else: this runs only
         after the DOM check has already failed, so the alternative to a fuzzy
         match is no match at all.
+
+        It reads this screen and then each screen further down. A canvas app's
+        text is in the pixels and nowhere else, so text below the fold was
+        invisible to this check and the assert failed about a page that was
+        showing exactly what it was asked to show -- one scroll away.
         """
         try:
-            import pytesseract  # type: ignore[import-untyped]
+            # `type: ignore` has to come first: mypy does not see one that
+            # follows another comment on the same line, and the import is only
+            # here to find out whether the package is installed at all.
+            import pytesseract  # type: ignore[import-untyped] # noqa: F401
         except ImportError:
             logger.debug("pytesseract not installed; skipping OCR fallback")
             return False
 
-        screenshot = await self._screenshot_without_overlay(engine)
-        if screenshot is None:
-            return False
-
-        img = cv2.imdecode(np.frombuffer(screenshot, dtype=np.uint8), cv2.IMREAD_COLOR)
-        if img is None:
-            return False
-
         needle = _collapse_whitespace(text, case_insensitive)
         if not needle:
+            return False
+
+        async def probe(frame: bytes) -> bool | None:
+            # ``None`` means "not in this frame, keep going"; the sweep stops
+            # on any non-None, so a False would end it after one screen.
+            return self._frame_contains_text(frame, needle, case_insensitive) or None
+
+        # The overlay stays hidden for the whole sweep rather than per capture.
+        # The sweep takes its own screenshots and knows nothing about
+        # ``#awt-overlay``, and a failing assert paints the expected text into
+        # that bar verbatim -- so a single unhidden frame is enough to
+        # manufacture a pass out of AWT's own complaint.
+        async with self._overlay_hidden(engine):
+            hit = await sweep_viewports(engine, probe, max_screens=_OCR_SWEEP_SCREENS)
+        return hit is True
+
+    def _frame_contains_text(
+        self,
+        screenshot: bytes | None,
+        needle: str,
+        case_insensitive: bool,
+    ) -> bool:
+        """Whether one captured frame reads as containing *needle*.
+
+        Split out of :meth:`_ocr_text_check` so the sweep can hand it one
+        frame at a time. ``needle`` arrives already whitespace-collapsed.
+        """
+        import pytesseract  # type: ignore[import-untyped,import-not-found]
+
+        if not screenshot:
+            return False
+        img = cv2.imdecode(np.frombuffer(screenshot, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
             return False
 
         for variant in self._image_variants(img):
@@ -330,9 +369,7 @@ class Comparator:
                         logger.debug("OCR fallback failed for lang=%s: %s", lang, e)
                         break
                     if needle in _collapse_whitespace(raw, case_insensitive):
-                        logger.debug(
-                            "OCR fallback matched with lang=%s psm=%d", lang, psm
-                        )
+                        logger.debug("OCR fallback matched with lang=%s psm=%d", lang, psm)
                         return True
         return False
 
@@ -362,16 +399,19 @@ class Comparator:
         return [joined] if joined == "eng" else [joined, "eng"]
 
     @staticmethod
-    async def _screenshot_without_overlay(engine: BaseEngine) -> bytes | None:
-        """Screenshot with AWT's own progress bar hidden.
+    @contextlib.asynccontextmanager
+    async def _overlay_hidden(engine: BaseEngine) -> AsyncIterator[None]:
+        """Hold AWT's own progress bar hidden for the duration of the block.
 
         ``aat run`` paints a ``#awt-overlay`` bar carrying the step
         description, and a failing assert repaints it with the message
         ``Text '<expected>' not visible on page``. OCR reading that bar would
         find the expected text in AWT's own complaint and report the
-        assertion as passed -- a false pass manufactured by the tool. Hiding
-        the bar for the duration of the capture is what keeps this fallback
-        honest.
+        assertion as passed -- a false pass manufactured by the tool.
+
+        A context manager rather than a wrapper around one capture because the
+        OCR check now sweeps: it takes several screenshots through code that
+        knows nothing about the overlay, and one unhidden frame is enough.
         """
         page = getattr(engine, "page", None)
         hidden = False
@@ -386,10 +426,7 @@ class Comparator:
             except Exception as e:
                 logger.debug("Could not hide AWT overlay before OCR: %s", e)
         try:
-            return await engine.screenshot()
-        except Exception as e:
-            logger.debug("Screenshot failed during OCR fallback: %s", e)
-            return None
+            yield
         finally:
             if hidden and page is not None:
                 with contextlib.suppress(Exception):
@@ -397,6 +434,16 @@ class Comparator:
                         "() => { const b = document.getElementById('awt-overlay');"
                         " if (b) { b.style.display = b.dataset.awtPrevDisplay || ''; } }"
                     )
+
+    @classmethod
+    async def _screenshot_without_overlay(cls, engine: BaseEngine) -> bytes | None:
+        """One capture with the overlay hidden, for callers that want just one."""
+        async with cls._overlay_hidden(engine):
+            try:
+                return await engine.screenshot()
+            except Exception as e:
+                logger.debug("Screenshot failed during OCR fallback: %s", e)
+                return None
 
     @staticmethod
     async def _wait_for_url(

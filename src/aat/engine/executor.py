@@ -29,6 +29,7 @@ from aat.core.models import (
     StepStatus,
     compute_region_bounds,
 )
+from aat.engine.sweep import sweep_viewports
 
 if TYPE_CHECKING:
     from aat.core.models import MatchResult, StepConfig, TargetSpec
@@ -1528,14 +1529,15 @@ class StepExecutor:
             msg = f"[Fast Mode] Target '{target_desc}' not found in DOM{region_hint}"
             raise MatchError(msg)
 
-        # Fallback: screenshot + 3-tier matcher pipeline
-        screenshot = await self._engine.screenshot()
-        search_screenshot, region_offset_x, region_offset_y = self._crop_to_region(
-            step,
-            screenshot,
-        )
-
-        # Use find_with_options if HybridMatcher (3-tier system)
+        # Fallback: screenshot + 3-tier matcher pipeline, repeated down the page.
+        #
+        # Every screenshot this product takes is the viewport, so before the
+        # sweep a target below the fold was simply absent from the only picture
+        # the chain ever got to look at -- and the report said "not found"
+        # about a page that was perfectly fine. The sweep looks at this screen
+        # first, so a target already on screen costs exactly what it did
+        # before; the scrolling is only ever paid for by a lookup that was
+        # going to fail anyway.
         from aat.matchers.hybrid import HybridMatcher
 
         if isinstance(self._matcher, HybridMatcher):
@@ -1546,24 +1548,41 @@ class StepExecutor:
             from aat.matchers import template_store
 
             self._matcher.template_scope = template_store.scope_for(self._last_url)
-            match_result = await self._matcher.find_with_options(
-                target,
-                search_screenshot,
-                method=step.method.value,
-                fallback=step.fallback,
-                learn=self._learn_allowed(step),
-            )
-        else:
-            match_result = await self._matcher.find(target, search_screenshot)
 
-        if match_result is None or not match_result.found:
+        async def probe(frame: bytes) -> tuple[MatchResult, int, int] | None:
+            search, off_x, off_y = self._crop_to_region(step, frame)
+            if isinstance(self._matcher, HybridMatcher):
+                result = await self._matcher.find_with_options(
+                    target,
+                    search,
+                    method=step.method.value,
+                    fallback=step.fallback,
+                    learn=self._learn_allowed(step),
+                )
+            else:
+                result = await self._matcher.find(target, search)
+            if result is None or not result.found:
+                return None
+            return result, off_x, off_y
+
+        swept = await sweep_viewports(
+            self._engine,
+            probe,
+            settle_s=_get_preset(self._engine)["ui_settle"],
+        )
+
+        if swept is None:
             target_desc = target.image or target.text or "unknown"
             rgn = step.region
             region_hint = f" (region={rgn.value})" if rgn != ScreenRegion.FULL else ""
             msg = f"Target '{target_desc}' not found{region_hint}"
             raise MatchError(msg)
 
-        # Adjust coordinates back to full viewport if region was cropped
+        match_result, region_offset_x, region_offset_y = swept
+
+        # Adjust coordinates back to full viewport if region was cropped. The
+        # page is still sitting at the scroll position the match was found at,
+        # which is what makes these viewport coordinates true right now.
         abs_x = match_result.x + region_offset_x
         abs_y = match_result.y + region_offset_y
 
@@ -1704,16 +1723,33 @@ class StepExecutor:
             return None
 
         self._matcher.template_scope = scope
+        matcher = self._matcher
         try:
-            screenshot = await self._engine.screenshot()
-            search_screenshot, offset_x, offset_y = self._crop_to_region(step, screenshot)
-            result = await self._matcher.find_saved_template(target, search_screenshot)
+
+            async def probe(frame: bytes) -> tuple[MatchResult, int, int] | None:
+                search, off_x, off_y = self._crop_to_region(step, frame)
+                found = await matcher.find_saved_template(target, search)
+                if found is None or not found.found:
+                    return None
+                return found, off_x, off_y
+
+            # Healing looks below the fold for the same reason the chain does:
+            # a stale selector and an element that scrolled off screen are the
+            # same failure from the DOM's side, and the banked picture is the
+            # only thing that can tell them apart.
+            swept = await sweep_viewports(
+                self._engine,
+                probe,
+                settle_s=_get_preset(self._engine)["ui_settle"],
+            )
         except Exception:
             logger.debug("Healing '%s' from a banked picture failed", name, exc_info=True)
             return None
-        if result is None or not result.found:
-            logger.info("No banked picture matched '%s' on the current screen", name)
+        if swept is None:
+            logger.info("No banked picture matched '%s' anywhere on the page", name)
             return None
+
+        result, offset_x, offset_y = swept
 
         logger.info("Healed '%s' from a banked picture — the selector is stale", name)
         return await self._act_at_pos(

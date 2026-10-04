@@ -401,7 +401,15 @@ class TestOCRDoesNotReadAWTsOwnOverlay:
         expected = ExpectedResult(type=AssertType.TEXT_VISIBLE, value="결제 완료")
         with pytest.raises(StepExecutionError):
             await comparator.check(expected, engine)
-        assert page.evaluate.call_count == 2
+
+        # The hide must bracket everything in between -- which on the failure
+        # path now includes the sweep looking further down the page, so this
+        # asserts the bracket rather than a call count. Counting would make
+        # the test fail for any sweep at all, including a correct one.
+        scripts = [c.args[0] for c in page.evaluate.call_args_list]
+        assert "display = 'none'" in scripts[0]
+        assert "awtPrevDisplay" in scripts[-1]
+        assert sum("display = 'none'" in s for s in scripts) == 1, "hidden once"
 
     @requires_korean_ocr
     @pytest.mark.asyncio
