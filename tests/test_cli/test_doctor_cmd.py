@@ -224,9 +224,7 @@ class TestTesseractLanguageCheck:
     """
 
     def test_missing_language_is_reported(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            doctor_cmd, "_installed_tesseract_languages", lambda: {"eng", "osd"}
-        )
+        monkeypatch.setattr(doctor_cmd, "_installed_tesseract_languages", lambda: {"eng", "osd"})
         monkeypatch.setattr(doctor_cmd, "_configured_ocr_languages", lambda: ["eng", "kor"])
         lines: list[str] = []
         monkeypatch.setattr(doctor_cmd, "_warn", lines.append)
@@ -244,9 +242,7 @@ class TestTesseractLanguageCheck:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Silence is the healthy case. A warning on a correct setup is noise."""
-        monkeypatch.setattr(
-            doctor_cmd, "_installed_tesseract_languages", lambda: {"eng", "kor"}
-        )
+        monkeypatch.setattr(doctor_cmd, "_installed_tesseract_languages", lambda: {"eng", "kor"})
         monkeypatch.setattr(doctor_cmd, "_configured_ocr_languages", lambda: ["eng", "kor"])
         lines: list[str] = []
         monkeypatch.setattr(doctor_cmd, "_warn", lines.append)
@@ -301,9 +297,7 @@ class TestTesseractLanguageCheck:
         """
         monkeypatch.setattr(doctor_cmd.shutil, "which", lambda _n: "/usr/bin/tesseract")
         _stub_dry_run(monkeypatch, "tesseract 5.5.0\n")
-        monkeypatch.setattr(
-            doctor_cmd, "_installed_tesseract_languages", lambda: {"eng", "osd"}
-        )
+        monkeypatch.setattr(doctor_cmd, "_installed_tesseract_languages", lambda: {"eng", "osd"})
         monkeypatch.setattr(doctor_cmd, "_configured_ocr_languages", lambda: ["eng", "kor"])
         lines: list[str] = []
         monkeypatch.setattr(doctor_cmd, "_ok", lines.append)

@@ -92,10 +92,7 @@ class TestWaitForFonts:
     async def test_gives_up_when_no_font_is_ever_requested(self) -> None:
         """A Flutter app that bundles its fonts must not pay the full timeout."""
         page = ProbePage([{"total": 0, "done": 0}])
-        assert (
-            await wait_for_fonts(page, timeout=30.0, settle=0.0, appear_timeout=0.3)
-            is False
-        )
+        assert await wait_for_fonts(page, timeout=30.0, settle=0.0, appear_timeout=0.3) is False
         assert page.calls <= 4, "should stop at appear_timeout, not at timeout"
 
     @pytest.mark.asyncio

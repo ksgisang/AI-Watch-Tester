@@ -243,8 +243,7 @@ class TestCompareScreenshots:
 # -- OCR fallback for canvas-rendered text (AAT-116) ------------------------
 
 _KOREAN_CANVAS_PNG = (
-    Path(__file__).resolve().parents[1] / "fixtures" / "images"
-    / "flutter_canvaskit_korean.png"
+    Path(__file__).resolve().parents[1] / "fixtures" / "images" / "flutter_canvaskit_korean.png"
 )
 
 

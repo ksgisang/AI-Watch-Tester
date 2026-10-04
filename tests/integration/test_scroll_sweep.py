@@ -146,9 +146,7 @@ def _has_yellow_band(shot: bytes) -> bool:
     return bool(np.count_nonzero(_yellow_mask(img)) > 2_000)
 
 
-async def _crop_the_target_then_return_to_the_top(
-    engine: WebEngine, tmp_path: Path
-) -> Path:
+async def _crop_the_target_then_return_to_the_top(engine: WebEngine, tmp_path: Path) -> Path:
     """Scroll down, cut a picture of the target out of the screen, scroll back.
 
     This is how the chain gets a target the DOM cannot answer. An image target
@@ -405,9 +403,7 @@ class TestTextVisibleReachesBelowTheFold:
 
     @pytest.mark.asyncio
     @requires_tesseract
-    async def test_the_ocr_sweep_stops_at_its_cap(
-        self, engine: WebEngine, base_url: str
-    ) -> None:
+    async def test_the_ocr_sweep_stops_at_its_cap(self, engine: WebEngine, base_url: str) -> None:
         """Pixel-only text far enough down is *not* found, by design.
 
         The OCR path is capped lower than the matcher chain because each

@@ -245,8 +245,7 @@ def _check_tesseract_languages() -> None:
         return
 
     _warn(
-        f"Tesseract has no data for: {', '.join(missing)} "
-        "(configured in matching.ocr_languages)"
+        f"Tesseract has no data for: {', '.join(missing)} (configured in matching.ocr_languages)"
     )
     _hint("Without it, canvas text in that language reads as 'not visible on page'")
     if _IS_MAC:
