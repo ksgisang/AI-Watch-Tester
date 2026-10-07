@@ -20,6 +20,7 @@ from playwright.async_api import (
 from aat.core.exceptions import EngineError
 from aat.core.models import EngineConfig
 from aat.engine.base import BaseEngine
+from aat.engine.overlay import overlay_hidden
 
 
 def _as_box(rect: Any) -> dict[str, float]:
@@ -165,9 +166,16 @@ class WebEngine(BaseEngine):
                     await old_context.close()
 
     async def screenshot(self) -> bytes:
-        """Capture current page as PNG bytes."""
+        """Capture current page as PNG bytes, without AWT's own progress bar.
+
+        The bar is hidden here rather than at the ~25 call sites because the
+        rule has no exceptions: it exists for the human watching the live
+        window, and every capture is AWT reading its own target back. See
+        ``engine/overlay.py`` for what goes wrong when it leaks into pixels.
+        """
         try:
-            return await self.page.screenshot(type="png", full_page=False)
+            async with overlay_hidden(self.page):
+                return await self.page.screenshot(type="png", full_page=False)
         except Exception as e:
             msg = f"Screenshot failed: {e}"
             raise EngineError(msg) from e
@@ -432,7 +440,8 @@ class WebEngine(BaseEngine):
         return False
 
     async def save_screenshot(self, path: Path) -> Path:
-        """Save screenshot to file and return path."""
+        """Save screenshot to file and return path (progress bar hidden)."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        await self.page.screenshot(path=str(path), type="png", full_page=False)
+        async with overlay_hidden(self.page):
+            await self.page.screenshot(path=str(path), type="png", full_page=False)
         return path

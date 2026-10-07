@@ -31,6 +31,7 @@ from playwright.async_api import (
 from aat.core.exceptions import EngineError
 from aat.core.models import EngineConfig, ScreenshotSpace
 from aat.engine.base import BaseEngine
+from aat.engine.overlay import overlay_hidden
 
 if TYPE_CHECKING:
     import types
@@ -273,9 +274,15 @@ class DesktopEngine(BaseEngine):
     # ------------------------------------------------------------------
 
     async def screenshot(self) -> bytes:
-        """Capture full screen as PNG bytes via PyAutoGUI."""
+        """Capture full screen as PNG bytes via PyAutoGUI.
+
+        The browser window is part of the screen, so AWT's own progress bar is
+        part of the capture -- hidden here for the same reasons as in
+        ``WebEngine`` (see ``engine/overlay.py``).
+        """
         try:
-            img = await asyncio.to_thread(self.pag.screenshot)
+            async with overlay_hidden(self._page):
+                img = await asyncio.to_thread(self.pag.screenshot)
             buf = io.BytesIO()
             img.save(buf, format="PNG")
             return buf.getvalue()
@@ -284,9 +291,10 @@ class DesktopEngine(BaseEngine):
             raise EngineError(msg) from e
 
     async def save_screenshot(self, path: Path) -> Path:
-        """Save full screen screenshot to file via PyAutoGUI."""
+        """Save full screen screenshot to file via PyAutoGUI (bar hidden)."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        await asyncio.to_thread(self.pag.screenshot, str(path))
+        async with overlay_hidden(self._page):
+            await asyncio.to_thread(self.pag.screenshot, str(path))
         return path
 
     # ------------------------------------------------------------------

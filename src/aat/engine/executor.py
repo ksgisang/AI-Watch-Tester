@@ -99,6 +99,38 @@ _SCREENSHOT_WORTHY_ACTIONS: frozenset[ActionType] = frozenset(
 # thresholds, which a focus ring or a checkbox tick still clears.
 _NO_EFFECT_RATIO = 0.001
 
+# What the element that received the keystrokes has to say for itself.
+# Asked of ``document.activeElement`` by default, so the answer is the same
+# whichever of the six find routes resolved the target. Pass a selector to ask
+# about a named element instead -- needed because a *disabled* field never takes
+# focus, so after typing at its coordinates ``activeElement`` is still the body
+# and the only way to learn the field refused the input is to go look at it.
+_TYPED_VALUE_PROBE_JS = """
+(selector) => {
+  const el = selector ? document.querySelector(selector) : document.activeElement;
+  if (!el || el === document.body || el === document.documentElement) {
+    return { kind: 'none' };
+  }
+  const tag = (el.tagName || '').toLowerCase();
+  if (tag === 'select') {
+    const opt = el.options ? el.options[el.selectedIndex] : null;
+    return { kind: 'select', selected: opt ? (opt.label || opt.text || '') : '' };
+  }
+  if (tag === 'input' || tag === 'textarea') {
+    return {
+      kind: 'field',
+      readOnly: !!el.readOnly,
+      disabled: !!el.disabled,
+      value: typeof el.value === 'string' ? el.value : null,
+    };
+  }
+  if (el.isContentEditable) {
+    return { kind: 'editable', value: el.innerText || '' };
+  }
+  return { kind: 'other', tag: tag };
+}
+"""
+
 # Steps skipped entirely in concise verbosity mode
 _CONCISE_SKIP_ACTIONS: frozenset[ActionType] = frozenset(
     {
@@ -234,6 +266,13 @@ class StepExecutor:
         # The element crop waiting for the same proof, destined for the
         # template store rather than SQLite. See _propose_bank().
         self._pending_bank: dict[str, Any] | None = None
+        # Why the last action is being reported WARNING instead of PASSED.
+        # Set by whichever verifier found the action ineffective, because the
+        # reason differs by action: a click that moved no pixel and a
+        # find_and_type that landed in a <select> are both "no effect", and
+        # telling the reader it "probably missed its target" sends them looking
+        # for a coordinate bug that is not there.
+        self._no_effect_reason: str | None = None
         self._iframe_locator: Any = None  # for iframe direct click
         self._iframe_frame: Any = None
         self._found_frame: Any = None  # frame where if_visible found target
@@ -256,6 +295,7 @@ class StepExecutor:
 
         self._pending_learn = None
         self._pending_bank = None
+        self._no_effect_reason = None
 
         try:
             # 0. Resolve runtime variables in step fields
@@ -327,6 +367,8 @@ class StepExecutor:
                 effect_ok = True
             elif step.action == ActionType.NAVIGATE:
                 effect_ok = await self._verify_navigation_effect(step)
+            elif step.action == ActionType.FIND_AND_TYPE:
+                effect_ok = await self._verify_typed_value(step)
             elif self._should_verify_change(step):
                 effect_ok = await self._verify_click_effect(step)
 
@@ -365,8 +407,11 @@ class StepExecutor:
                 status=(StepStatus.WARNING if no_effect else StepStatus.PASSED),
                 description=step.description,
                 error_message=(
-                    "the click produced no visible change on screen — "
-                    "it probably missed its target"
+                    (
+                        self._no_effect_reason
+                        or "the click produced no visible change on screen — "
+                        "it probably missed its target"
+                    )
                     if no_effect
                     else None
                 ),
@@ -2998,8 +3043,14 @@ class StepExecutor:
 
     # Actions reported as WARNING when they demonstrably had no effect.
     # A click that moves no pixel did nothing; a navigate that never left the
-    # previous URL did nothing. Both are measured by the right instrument now,
-    # so both are worth carrying out of the log.
+    # previous URL did nothing; a find_and_type whose field is still empty put
+    # the text nowhere. Each is measured by the right instrument -- pixels,
+    # URL, and the field's own value -- so each is worth carrying out of the log.
+    #
+    # find_and_type was the gap AAT-109 left: its principle is "verify the
+    # effect before calling it a pass", and it was applied to clicks and
+    # navigation while input only ever verified that *an element was found*.
+    # A step that clicked a <select> and typed into it reported PASSED.
     _WARN_ON_NO_EFFECT: frozenset[ActionType] = frozenset(
         {
             ActionType.NAVIGATE,
@@ -3007,6 +3058,7 @@ class StepExecutor:
             ActionType.FIND_AND_DOUBLE_CLICK,
             ActionType.FIND_AND_RIGHT_CLICK,
             ActionType.CLICK_AT,
+            ActionType.FIND_AND_TYPE,
         }
     )
 
@@ -3413,6 +3465,131 @@ class StepExecutor:
             raise StepExecutionError(msg, step=step.step, action=step.action.value)
         logger.warning("[AWT] %s", msg)
         return False
+
+    async def _verify_typed_value(self, step: StepConfig) -> bool | None:
+        """Read the field back and say whether the text actually landed.
+
+        ``find_and_type`` resolves a target, clicks the point, and types on the
+        keyboard. Nothing ever read the result, so the step reported PASSED as
+        long as *an element was found* -- which is how a scenario typing a
+        school name into a ``<select>`` reported 22 of 24 steps passed while
+        the form it was filling never got the value.
+
+        The probe asks ``document.activeElement``, not the locator, because
+        that is what received the keystrokes no matter which of the six find
+        routes resolved the target (selector, input-field search, Semantics,
+        text search, matcher chain, banked template).
+
+        Deliberately quiet where it cannot tell. Returning ``False`` turns a
+        step yellow and the exit code to 3, so each rule has to be one that
+        cannot be true of a working app:
+
+        * ``<select>`` -- typing cannot enter text into one. Certain.
+        * ``readonly`` / ``disabled`` -- the field refuses input by definition.
+        * still empty after typing something -- the text went nowhere.
+
+        What it does **not** do is compare the value against what was typed.
+        Masked phone fields, ``maxlength``, uppercase transforms and currency
+        formatting all legitimately hold something other than the keystrokes,
+        and warning on those would teach the reader to ignore warnings.
+
+        The empty-value rule is also skipped on Flutter pages. There the
+        focused ``<input>`` is an IME shim, not the app's model of record: its
+        value says nothing about whether CanvasKit received the text, and
+        AAT-118 measured ``find_and_type`` reaching every field on a real
+        CanvasKit app. The ``<select>`` and ``readonly`` rules still apply --
+        those are facts about the DOM either way.
+
+        Returns:
+            True if the value is there, False if it demonstrably is not,
+            None if there was nothing to read.
+        """
+        typed = step.value or ""
+        page = getattr(self._engine, "page", None)
+        if page is None or not typed:
+            return None
+
+        info = await self._probe_typed_target(page, None)
+        if info is None:
+            return None
+
+        kind = info.get("kind")
+        # Focus is on the body or on a non-editable node. Usually that means
+        # nothing measurable -- but it is also what a *disabled* field looks
+        # like, since a disabled element cannot be focused. If the step named a
+        # selector, go ask that element directly.
+        if kind in ("none", "other"):
+            selector = step.target.selector if step.target else None
+            named = await self._probe_typed_target(page, selector) if selector else None
+            if named is None or named.get("kind") in ("none", "other"):
+                return None
+            # Only the definitive refusals are read off the named element. Its
+            # value is not: if focus moved away the page did something, and
+            # calling the named field "still empty" would be a guess about
+            # which of the two the author meant.
+            if named.get("kind") == "field" and not (
+                named.get("disabled") or named.get("readOnly")
+            ):
+                return None
+            info, kind = named, named.get("kind")
+
+        reason: str | None = None
+
+        if kind == "select":
+            selected = str(info.get("selected") or "")
+            reason = (
+                f"the target is a <select>, so typing {typed!r} did not enter text "
+                f"(it is now showing {selected!r}) — "
+                "use `action: select_option` with `target.selector` instead"
+            )
+        elif kind == "field" and info.get("disabled"):
+            reason = f"the field is disabled, so {typed!r} was not entered"
+        elif kind == "field" and info.get("readOnly"):
+            reason = f"the field is readonly, so {typed!r} was not entered"
+        elif kind in ("field", "editable"):
+            value = info.get("value")
+            if isinstance(value, str) and value == "":
+                if await self._is_flutter_shim(page):
+                    return None
+                reason = (
+                    f"the field is still empty after typing {typed!r} — "
+                    "the keystrokes went somewhere else"
+                )
+
+        if reason is None:
+            return True
+
+        if step.critical:
+            msg = step.message or reason
+            logger.error("[AWT] CRITICAL: %s", msg)
+            raise StepExecutionError(msg, step=step.step, action=step.action.value)
+        logger.warning("[AWT] %s", reason)
+        self._no_effect_reason = reason
+        return False
+
+    @staticmethod
+    async def _probe_typed_target(page: Any, selector: str | None) -> dict[str, Any] | None:
+        """Classify the element that received (or refused) the keystrokes.
+
+        ``None`` means the question could not be asked -- a probe must never be
+        the reason a step fails.
+        """
+        try:
+            info = await page.evaluate(_TYPED_VALUE_PROBE_JS, selector)
+        except Exception as e:  # noqa: BLE001 - a probe must not fail the step
+            logger.debug("Could not read the typed value back (selector=%s): %s", selector, e)
+            return None
+        return info if isinstance(info, dict) else None
+
+    async def _is_flutter_shim(self, page: Any) -> bool:
+        """Whether an empty focused field is Flutter's IME shim rather than a bug."""
+        try:
+            from aat.engine.flutter_semantics import is_flutter_page
+
+            return await is_flutter_page(page)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Could not decide whether this is a Flutter page: %s", e)
+            return False
 
     async def _verify_click_effect(self, step: StepConfig) -> bool | None:
         """Verify every click caused a screen change.

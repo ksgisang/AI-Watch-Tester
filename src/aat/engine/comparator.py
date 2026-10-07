@@ -18,6 +18,7 @@ import numpy as np
 
 from aat.core.exceptions import StepExecutionError
 from aat.core.models import ActionType, AssertType, ExpectedResult, StepResult, StepStatus
+from aat.engine.overlay import overlay_hidden
 from aat.engine.sweep import sweep_viewports
 
 if TYPE_CHECKING:
@@ -412,28 +413,18 @@ class Comparator:
         A context manager rather than a wrapper around one capture because the
         OCR check now sweeps: it takes several screenshots through code that
         knows nothing about the overlay, and one unhidden frame is enough.
+
+        ``WebEngine.screenshot`` now hides the bar on its own, so this is the
+        outer of two nested guards. It is kept rather than deleted because the
+        sweep also scrolls and settles between captures, and because an engine
+        that forgets to hide (a stub, a future engine) should not be able to
+        reintroduce the false pass. Nesting is safe: the depth counter in
+        ``engine/overlay.py`` is what makes the inner restore a no-op instead of
+        putting back the ``none`` the outer guard had just written.
         """
         page = getattr(engine, "page", None)
-        hidden = False
-        if page is not None:
-            try:
-                await page.evaluate(
-                    "() => { const b = document.getElementById('awt-overlay');"
-                    " if (b) { b.dataset.awtPrevDisplay = b.style.display;"
-                    " b.style.display = 'none'; return true; } return false; }"
-                )
-                hidden = True
-            except Exception as e:
-                logger.debug("Could not hide AWT overlay before OCR: %s", e)
-        try:
+        async with overlay_hidden(page):
             yield
-        finally:
-            if hidden and page is not None:
-                with contextlib.suppress(Exception):
-                    await page.evaluate(
-                        "() => { const b = document.getElementById('awt-overlay');"
-                        " if (b) { b.style.display = b.dataset.awtPrevDisplay || ''; } }"
-                    )
 
     @classmethod
     async def _screenshot_without_overlay(cls, engine: BaseEngine) -> bytes | None:
