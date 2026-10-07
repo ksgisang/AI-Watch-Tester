@@ -14,6 +14,7 @@ on the only path where it had anything to fix.
 
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 
@@ -21,8 +22,10 @@ import pytest
 import yaml
 
 from aat.cli.commands.devqa_cmd import (
+    _devqa,
     _find_matching_elements,
     _fix_scenario,
+    _print_devqa_verdict,
     _read_last_failure,
 )
 from aat.cli.commands.run_cmd import _js_str, _scenario_to_yaml, _topo_sort
@@ -401,3 +404,130 @@ class TestReadLastFailure:
         (tmp_path / "last_run.json").write_text("{not json", encoding="utf-8")
 
         assert _read_last_failure(tmp_path) == {}
+
+
+class TestDevqaVerdict:
+    """The closing summary `aat devqa` prints (AAT-122).
+
+    `devqa` never edits source. Everything it rewrites is the scenario's own
+    locators, so the plain register has to say that in those words -- a reader
+    told "AWT fixed it" would reasonably believe their site had been changed.
+    """
+
+    def _capture(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+        *,
+        passed: bool,
+        attempts: int = 1,
+        scenario_edits: int = 0,
+    ) -> str:
+        _print_devqa_verdict(
+            passed=passed,
+            attempts=attempts,
+            scenario_edits=scenario_edits,
+            data_dir=tmp_path,
+        )
+        return capsys.readouterr().out
+
+    def test_a_clean_pass_claims_no_repair(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        out = self._capture(capsys, tmp_path, passed=True)
+
+        assert "The test passed. Nothing needed to change." in out
+        assert "Rewrote" not in out
+
+    def test_a_rewrite_is_described_as_a_test_change_not_a_site_fix(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        out = self._capture(capsys, tmp_path, passed=True, attempts=2, scenario_edits=1)
+
+        assert "Rewrote the test itself once" in out
+        assert "not the page being wrong" in out
+
+    def test_the_rewrite_count_is_disclosed_not_rounded_to_one(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """Three rewrites to reach green is worth knowing about."""
+        out = self._capture(capsys, tmp_path, passed=True, attempts=4, scenario_edits=3)
+
+        assert "Rewrote the test itself 3 times" in out
+
+    def test_a_failure_hands_the_problem_back_with_the_failing_step(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        (tmp_path / "last_run.json").write_text(
+            json.dumps(
+                {
+                    "results": [
+                        {
+                            "step": 4,
+                            "status": "failed",
+                            "action": "find_and_click",
+                            "error": "Login button not found",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        out = self._capture(capsys, tmp_path, passed=False, attempts=3, scenario_edits=2)
+
+        assert "a person needs to look at this" in out
+        assert "Step 4 (find_and_click) — Login button not found" in out
+        assert "last_run.json" in out
+
+    def test_both_registers_are_printed(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        out = self._capture(capsys, tmp_path, passed=True, attempts=2, scenario_edits=1)
+
+        assert "Details for a developer:" in out
+        assert "mode=scenario" in out
+        assert "Scenario file rewrites: 1" in out
+
+    def test_it_never_offers_a_git_undo(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """`devqa` writes no source files, so there is nothing to revert.
+
+        `git checkout -- <path>` printed here would discard the user's own
+        uncommitted work in exchange for undoing nothing.
+        """
+        out = self._capture(capsys, tmp_path, passed=True, attempts=3, scenario_edits=2)
+
+        assert "git checkout" not in out
+        assert "git branch -D" not in out
+
+    def test_the_runner_prints_it_on_both_outcomes(self) -> None:
+        """Asserted against the source for the same reason as the evaluator
+        wiring test in `tests/integration/test_text_assertions.py`: reaching
+        the end of `_devqa` needs a live browser and a `/dev/tty` approval,
+        and the approval gate is not something a test may walk around.
+
+        What a source check can prove is placement -- that the verdict is not
+        parked inside the success branch, which would leave the one reader who
+        most needs the plain summary (the run failed) without it.
+        """
+        source = inspect.getsource(_devqa)
+        verdict_at = source.index("_print_devqa_verdict(")
+        failure_at = source.index("_report_failure(data_dir)")
+        guard_at = source.index("if not passed:")
+
+        assert verdict_at < guard_at < failure_at
+
+    def test_every_scenario_rewrite_is_counted(self) -> None:
+        """The count is what turns "it passed" into "it passed after the test
+        was rewritten three times", so a rewrite that skips the counter is a
+        silent one."""
+        source = inspect.getsource(_devqa)
+        # Only writes inside the retry loop are rewrites; the one above it
+        # creates the generated scenario in the first place.
+        retry_loop = source[source.index("for attempt in range(") :]
+        rewrites = retry_loop.count("scenario_path.write_text(scenario_yaml")
+        counted = retry_loop.count("scenario_edits += 1")
+
+        assert rewrites == counted == 1

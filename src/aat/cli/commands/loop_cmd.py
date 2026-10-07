@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,6 +17,7 @@ from aat.core.git_ops import GitOps
 from aat.core.loop import DevQALoop
 from aat.core.models import ApprovalMode, StepStatus
 from aat.core.scenario_loader import load_scenarios
+from aat.core.verdict import render, verdict_from_loop
 from aat.engine import ENGINE_REGISTRY
 from aat.engine.comparator import Comparator
 from aat.engine.executor import StepExecutor
@@ -252,6 +254,31 @@ def _rich_approval_callback(prompt_text: str) -> bool:
             continue
 
 
+def _warn_about_auto_mode() -> None:
+    """Say what ``auto`` actually does before it starts doing it.
+
+    Not a prompt. ``auto`` exists so a pipeline can run unattended, and a
+    blocking question would break the one job it has. But the mode writes
+    model-generated code into the user's files with nobody reading it, and
+    the person most likely to reach for it is the person least equipped to
+    audit the result afterwards.
+
+    ``branch`` is the same loop with the changes parked somewhere reversible,
+    so it is named here rather than left to be discovered in ``--help``.
+    """
+    warn = typer.style("  ! ", fg=typer.colors.YELLOW, bold=True)
+    typer.echo()
+    typer.echo(f"{warn}--approval-mode auto writes AI-generated changes straight into")
+    typer.echo("    your files and re-tests until the suite is green. Nobody reads")
+    typer.echo("    them in between.")
+    typer.echo("    AWT refuses changes that gut a file, break its syntax or delete a")
+    typer.echo("    check — but it cannot tell a real repair from one that only stops")
+    typer.echo("    the test complaining.")
+    typer.echo("    For unattended runs prefer: --approval-mode branch")
+    typer.echo("    (same loop, every change committed to a throwaway git branch).")
+    typer.echo()
+
+
 # -- CLI command -----------------------------------------------------------
 
 
@@ -265,7 +292,12 @@ def loop_command(
         "manual",
         "--approval-mode",
         "-a",
-        help="Approval mode: manual | branch | auto.",
+        help=(
+            "What AWT may do with a fix: 'manual' (show it, change nothing — "
+            "default), 'branch' (recommended for unattended runs: apply and "
+            "commit it to a throwaway git branch, then re-test there), or "
+            "'auto' (write it straight into your files)."
+        ),
     ),
     report_format: str = typer.Option(
         "markdown",
@@ -314,6 +346,9 @@ async def _loop(
     except ValueError:
         msg = f"Invalid approval mode: {approval_mode_str}. Use: manual, branch, auto"
         raise AATError(msg) from None
+
+    if mode == ApprovalMode.AUTO:
+        _warn_about_auto_mode()
 
     # Load config
     cfg_path = Path(config_path) if config_path else None
@@ -438,8 +473,15 @@ async def _loop(
     elif new_entries:
         typer.echo("  AI cost: Free")
 
-    if result.reason:
-        typer.echo(f"  Reason: {result.reason}")
+    typer.echo("  " + "=" * 55)
+
+    # Said twice on purpose: the block above is addressed to someone who knows
+    # what an iteration is, and that is not who this product is for.
+    verdict = verdict_from_loop(result, mode.value)
+    verdict = replace(verdict, report_hint=str(Path(config.reports_dir)))
+    typer.echo()
+    for line in render(verdict):
+        typer.echo(f"  {line}")
     typer.echo("  " + "=" * 55)
 
     if not result.success:

@@ -167,6 +167,11 @@ async def _devqa(
     typer.echo("[AWT] Step 3/4: Testing...")
     passed = False
     attempt = 0
+    #: How many times the scenario file was rewritten. The loop only ever
+    #: repoints a locator, and every rewrite was shown and approved — but a
+    #: run that needed four of them is telling you the scenario was stale,
+    #: and nothing in the old ending said so.
+    scenario_edits = 0
 
     for attempt in range(1, max_attempts + 1):
         typer.echo(f"\n[AWT] Attempt {attempt}/{max_attempts}")
@@ -217,6 +222,7 @@ async def _devqa(
             attempt,
         )
         scenario_path.write_text(scenario_yaml, encoding="utf-8")
+        scenario_edits += 1
 
         # Show diff + approval before retry
         from aat.core.scenario_reviewer import ScenarioReviewer
@@ -228,7 +234,7 @@ async def _devqa(
             previous_yaml=previous_yaml,
             auto_approve=False,  # always require human approval for retry
         ):
-            typer.echo("[AWT] 재시도 취소됨.")
+            typer.echo("[AWT] Retry cancelled. The scenario file is left as it was rewritten.")
             raise typer.Exit(code=1)
 
     # -- Step 7/9: Report -----------------------------------------------------
@@ -239,6 +245,15 @@ async def _devqa(
         typer.echo(f"[AWT] ✅ DevQA complete: ALL PASSED ({attempt} attempt(s), {elapsed:.1f}min)")
     else:
         typer.echo(f"[AWT] ❌ DevQA failed after {attempt} attempts ({elapsed:.1f}min)")
+
+    _print_devqa_verdict(
+        passed=passed,
+        attempts=attempt,
+        scenario_edits=scenario_edits,
+        data_dir=data_dir,
+    )
+
+    if not passed:
         _report_failure(data_dir)
         raise typer.Exit(code=1)
     typer.echo("[AWT] " + "=" * 50)
@@ -884,6 +899,41 @@ def _wait_for_approval(seconds: int) -> bool:
 
         _time.sleep(min(seconds, 3))
         return True
+
+
+def _print_devqa_verdict(
+    *,
+    passed: bool,
+    attempts: int,
+    scenario_edits: int,
+    data_dir: Path,
+) -> None:
+    """Close with the same two registers ``aat loop`` closes with.
+
+    ``devqa`` never edits source. Everything it rewrites is the scenario's
+    own locators, each rewrite shown as a diff and approved at the terminal,
+    so the plain register says that in those words rather than borrowing the
+    language of a code fix.
+    """
+    from aat.core.verdict import EDITED_SCENARIO, Verdict, render
+
+    fail = _read_last_failure(data_dir)
+    failing: tuple[str, ...] = ()
+    if fail and not passed:
+        error = str(fail.get("error", "")).strip() or "no error message recorded"
+        failing = (f"Step {fail.get('step')} ({fail.get('action', '?')}) — {error}",)
+
+    verdict = Verdict(
+        passed=passed,
+        attempts=attempts,
+        disposition=EDITED_SCENARIO,
+        scenario_edits=scenario_edits,
+        failing_steps=failing,
+        report_hint=str(data_dir / "last_run.json"),
+    )
+    typer.echo()
+    for line in render(verdict):
+        typer.echo(f"[AWT] {line}" if line else "[AWT]")
 
 
 def _report_failure(data_dir: Path) -> None:

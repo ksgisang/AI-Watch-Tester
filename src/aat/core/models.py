@@ -1037,6 +1037,20 @@ class FixResult(BaseModel):
     confidence: float = Field(..., ge=0.0, le=1.0)
 
 
+class RefusedChange(BaseModel):
+    """A proposed file change AWT declined to write, and why.
+
+    Validation used to end at ``logger.warning``, so nothing downstream could
+    tell "the fix was applied and did not help" apart from "the fix was never
+    applied". Those are different answers to the only question the person
+    reading the report is asking, and only one of them means a human has to
+    look at the proposal itself.
+    """
+
+    path: str
+    reason: str
+
+
 class LoopIteration(BaseModel):
     """Single DevQA Loop iteration result."""
 
@@ -1047,6 +1061,18 @@ class LoopIteration(BaseModel):
     approved: bool | None = None
     branch_name: str | None = None
     commit_hash: str | None = None
+    applied_paths: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Files actually written this iteration. ``fix.files_changed`` is "
+            "what the model proposed; a report that counts the proposal claims "
+            "edits that validation refused to make."
+        ),
+    )
+    refused_changes: list[RefusedChange] = Field(
+        default_factory=list,
+        description="Proposed changes validation blocked, with the reason.",
+    )
     timestamp: datetime = Field(default_factory=datetime.now)
 
 

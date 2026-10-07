@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections.abc import Callable  # noqa: TC003
 from pathlib import Path
@@ -14,6 +15,7 @@ from aat.core.models import (
     ApprovalMode,
     LoopIteration,
     LoopResult,
+    RefusedChange,
     StepStatus,
     TestResult,
 )
@@ -27,6 +29,80 @@ if TYPE_CHECKING:
     from aat.reporters.base import BaseReporter
 
 logger = logging.getLogger(__name__)
+
+#: Keywords whose disappearance means the code now refuses less than it did.
+#: Split by how a genuine repair treats them.
+#:
+#: Hard: a bug fix almost never needs fewer of these, and deleting the branch
+#: that raises is the cheapest way to turn a red test green. Any net loss is
+#: refused.
+_HARD_GUARDS = ("assert", "raise", "throw")
+#: Soft: an honest refactor can legitimately collapse one of several branches,
+#: so only the complete disappearance of a kind is refused — the same shape as
+#: the existing "removes all import statements" rule.
+_SOFT_GUARDS = ("if", "except", "catch")
+
+#: The guard check reads source, not prose. Run on a ``.md`` file it would
+#: refuse any edit that drops a sentence containing the word "if".
+_CODE_SUFFIXES = frozenset(
+    {
+        ".py",
+        ".js",
+        ".ts",
+        ".jsx",
+        ".tsx",
+        ".mjs",
+        ".cjs",
+        ".vue",
+        ".svelte",
+        ".java",
+        ".kt",
+        ".go",
+        ".rb",
+        ".php",
+        ".cs",
+        ".swift",
+        ".rs",
+        ".dart",
+    }
+)
+
+#: Line and block comments. Stripping them first keeps a deleted comment that
+#: happens to contain the word "raise" from reading as a deleted guard.
+#: String literals are not stripped, which is a known gap: a fix that deletes
+#: the message text "throw" is counted as deleting a throw. Refusing one
+#: legitimate fix costs an iteration; accepting one guard deletion costs a
+#: green report over code that no longer checks anything.
+_COMMENT_RE = re.compile(r"#[^\n]*|//[^\n]*|/\*.*?\*/", re.DOTALL)
+
+
+def _count_keyword(text: str, keyword: str) -> int:
+    """Count whole-word occurrences — ``if`` must not match ``verify``."""
+    return len(re.findall(rf"\b{re.escape(keyword)}\b", text))
+
+
+def _removed_guards(original: str, modified: str) -> str:
+    """Name the guards the fix deletes without replacing, or return ``""``.
+
+    ``_validate_fix`` only ever looked for vandalism: a file gutted, every
+    import gone, syntax broken. None of that describes the failure mode that
+    matters when nobody is watching — a small, syntactically perfect edit that
+    removes the check the test was tripping over. The test then passes, and
+    the report says so.
+    """
+    before = _COMMENT_RE.sub("", original)
+    after = _COMMENT_RE.sub("", modified)
+
+    lost: list[str] = []
+    for keyword in _HARD_GUARDS:
+        gone = _count_keyword(before, keyword) - _count_keyword(after, keyword)
+        if gone > 0:
+            lost.append(f"{gone} `{keyword}`")
+    for keyword in _SOFT_GUARDS:
+        count = _count_keyword(before, keyword)
+        if count and not _count_keyword(after, keyword):
+            lost.append(f"every `{keyword}` ({count})")
+    return ", ".join(lost)
 
 
 def _default_prompt_approval(analysis_text: str) -> bool:
@@ -271,21 +347,7 @@ class DevQALoop:
         branch_name = f"aat/fix-{self._fix_counter:03d}"
 
         async with self._git_ops.on_fix_branch(branch_name):
-            safe_changes = []
-            for change in fix.files_changed:
-                safe, reason = self._validate_fix(change)
-                if not safe:
-                    logger.warning("Skipping unsafe fix for %s: %s", change.path, reason)
-                else:
-                    affected = self._analyze_impact(change)
-                    if affected:
-                        logger.info(
-                            "Impact analysis for %s: %d dependent file(s): %s",
-                            change.path,
-                            len(affected),
-                            ", ".join(affected),
-                        )
-                    safe_changes.append(change)
+            safe_changes, refused = self._screen_changes(fix)
             written = await self._git_ops.apply_file_changes(safe_changes)
             commit_hash = await self._git_ops.commit_changes(
                 written,
@@ -303,6 +365,8 @@ class DevQALoop:
             approved=True,
             branch_name=branch_name,
             commit_hash=commit_hash,
+            applied_paths=[c.path for c in safe_changes],
+            refused_changes=refused,
         )
 
     async def _handle_auto(
@@ -319,19 +383,8 @@ class DevQALoop:
 
         # Apply changes directly to working directory
         project_root = Path(self._config.source_path)
-        for change in fix.files_changed:
-            safe, reason = self._validate_fix(change)
-            if not safe:
-                logger.warning("Skipping unsafe fix for %s: %s", change.path, reason)
-                continue
-            affected = self._analyze_impact(change)
-            if affected:
-                logger.info(
-                    "Impact analysis for %s: %d dependent file(s): %s",
-                    change.path,
-                    len(affected),
-                    ", ".join(affected),
-                )
+        safe_changes, refused = self._screen_changes(fix)
+        for change in safe_changes:
             file_path = project_root / change.path
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(change.modified, encoding="utf-8")
@@ -345,11 +398,40 @@ class DevQALoop:
             analysis=analysis,
             fix=fix,
             approved=True,
+            applied_paths=[c.path for c in safe_changes],
+            refused_changes=refused,
         )
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _screen_changes(self, fix: FixResult) -> tuple[list[FileChange], list[RefusedChange]]:
+        """Split a proposed fix into what may be written and what may not.
+
+        Both file-writing modes used to inline this loop, which is how they
+        drifted: ``branch`` recorded the unfiltered proposal on the iteration
+        while writing only part of it. One screening means the record and the
+        disk cannot disagree.
+        """
+        safe_changes: list[FileChange] = []
+        refused: list[RefusedChange] = []
+        for change in fix.files_changed:
+            safe, reason = self._validate_fix(change)
+            if not safe:
+                logger.warning("Skipping unsafe fix for %s: %s", change.path, reason)
+                refused.append(RefusedChange(path=change.path, reason=reason))
+                continue
+            affected = self._analyze_impact(change)
+            if affected:
+                logger.info(
+                    "Impact analysis for %s: %d dependent file(s): %s",
+                    change.path,
+                    len(affected),
+                    ", ".join(affected),
+                )
+            safe_changes.append(change)
+        return safe_changes, refused
 
     def _validate_fix(self, change: FileChange) -> tuple[bool, str]:
         """AI가 제안한 파일 변경이 안전한지 검증한다."""
@@ -379,8 +461,15 @@ class DevQALoop:
                 f"Fix replaces {original_lines}-line file with {modified_lines}-line stub",
             )
 
-        # 파일 확장자별 문법 검증
         ext = Path(change.path).suffix.lower()
+
+        # 검사를 지우는 수정 차단 — 파손이 아니라 「초록으로 만들기」를 겨냥한다
+        if ext in _CODE_SUFFIXES:
+            lost = _removed_guards(self._baseline_for(change), change.modified)
+            if lost:
+                return False, f"Fix removes {lost} with no replacement"
+
+        # 파일 확장자별 문법 검증
         if ext == ".py":
             try:
                 import ast
@@ -404,6 +493,24 @@ class DevQALoop:
                 return False, f"Invalid JSON in fix: {e}"
 
         return True, ""
+
+    def _baseline_for(self, change: FileChange) -> str:
+        """What the file really holds, falling back to the model's account.
+
+        ``change.original`` is the model describing its own input. A fix that
+        under-reports it — handing back only the lines it kept — makes every
+        before/after comparison in here come out clean, which is precisely the
+        comparison the guard check depends on. The file on disk cannot be
+        talked down. A path that does not exist yet is a new file, and there
+        the model's empty original is the honest answer.
+        """
+        try:
+            path = Path(self._config.source_path) / change.path
+            if path.is_file():
+                return path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            logger.warning("Cannot read %s to validate the fix against: %s", change.path, exc)
+        return change.original
 
     def _analyze_impact(self, change: FileChange) -> list[str]:
         """변경된 파일에 의존하는 다른 파일을 탐색한다."""
