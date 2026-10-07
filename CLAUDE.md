@@ -503,6 +503,27 @@ aat run --skill-mode --fast <scenario>
   - 범위 밖(의도): `dashboard/app.py`의 `_execute_loop`은 평문 결말을 받지 않습니다(WebSocket·프런트 작업 필요, 승인 다섯 항목 밖)
   - 기록: 보고서 §11-22
 
+### Post-MVP: 판정이 단정 내용이 아니라 실행 위치에 따라 갈리던 결함 (AAT-123)
+
+- [x] **AAT-123** 판정 무결성 세 겹 — 완료 2026-10-07
+  - 배경: 최대리 세션이 ClasRing SC-901을 돌려 **"24스텝 중 22 통과"** 를 받았으나 스크린샷은 **가입 자체가 실패한 실행**이었습니다. 가입이 깨진 원인은 자내공 쪽(라이브가 아직 옛 `<select>`)이고 김대리가 해소했지만, 그것을 「22/24 통과」로 읽히게 만든 것은 AWT 판정기입니다. 대표님이 전달하신 네 항목은 실은 **세 가지 기계**였습니다(1·2번이 같은 원인)
+  - **① AWT 자기 진행 막대가 판정 대상 DOM 안에 있었음** — 막대가 평범한 `<div>`여서 `Step 21: assert · text_visible "승인 대기"`가 **페이지 본문 텍스트로 읽혔습니다.** 단정이 **AWT가 그려 놓은 자기 기대값**을 읽고 통과했고, 막대 글자가 단계마다 달라지므로 **같은 단정이 어느 단계에서 불렸는지에 따라** 판정이 갈렸습니다 — 대표님 진단이 문자 그대로 맞습니다
+  - **closed shadow root**(`attachShadow({mode:'closed'})`)로 격리. 네 성질을 한꺼번에 만족하는 유일한 수단입니다: `innerText` 제외 / **Playwright 글자 검색이 뚫지 못함**(open root는 뚫습니다 — 그래서 `open`이 아닙니다) / 여전히 그려짐 / `getElementById`로 캡처 직전 숨김 가능. 손잡이는 `window`가 아니라 `host.__awt`(요소와 함께 죽어야 하고, 전역에 두면 그것 자체가 페이지 상태입니다)
+  - **픽셀에는 shadow 경계가 없습니다** — 숨김을 `WebEngine.screenshot()`·`save_screenshot()`과 `DesktopEngine`으로 내려 증거 사진·PDF·시각 회귀 기준선·매처 체인·OCR 후퇴를 **한 자리**에서 덮습니다. 비교기의 스윕 가드와 캡처별 내부 가드가 겹치므로 `dataset.awtHideDepth`로 **참조 셈**(겹침을 안 세면 내부 가드 탈출 시 막대가 되살아나 다음 프레임을 오염시킵니다)
+  - **② 타이핑이 들어가지 않았는데 통과였음** — 선택자 경로는 `bounding_box()` → `_act_at_pos`, 즉 **눌러 놓고 키보드로 치는** 방식입니다. `<select>`는 드롭다운이 열리고 타이핑은 항목을 건너뛸 뿐인데 **값을 되읽는 코드가 없었습니다.** `_WARN_ON_NO_EFFECT`에 클릭·내비는 있고 `FIND_AND_TYPE`이 없었습니다
+  - 탐침은 `document.activeElement`(여섯 찾기 경로 **전부에서 경로 무관**). 단 **`disabled`는 포커스를 받지 않으므로**(`activeElement`가 `<body>`) **선택자 후퇴가 필수**입니다 — 없으면 가장 명백한 거부 사례를 구조적으로 못 봅니다
+  - **높은 정밀도 규칙만**: `<select>` / `readonly` / `disabled` / 입력 후에도 비어 있음. **일부러 넣지 않은 것**은 「값이 입력한 글자와 다름」입니다 — 전화번호 마스크·`maxlength`·대문자 변환·통화 서식이 **정당하게** 다릅니다. **Flutter 가드**: 「비어 있음」만 건너뜁니다(포커스된 `<input>`은 IME 셔틀이고 값의 정본이 아니며, AAT-118이 23/23으로 실측). `<select>`·`readonly`·`disabled`는 어느 쪽이든 **DOM 사실**
+  - **③ 실패 뒤의 통과를 세지 않는다** — 대표님 지시는 **(ㄴ)+(ㄷ) 조합**이고, (ㄱ)「단정 실패를 기본 중단으로」는 **일부러 하지 않았습니다**(다른 사람 저장소에서 지금 통과하는 대본이 빨개집니다)
+  - `StepStatus.UNVERIFIED` 신설. 별도 카운터를 두지 않은 이유는 `_build_test_result`와 모든 리포터가 **단계 상태에서** 수치를 끌어내므로, 상태를 바꾸면 콘솔·Markdown 표·PDF 표·`last_run.json`·`TestResult.passed_steps`가 규칙을 각자 배우지 않고도 일치하기 때문입니다. **안전 성질이 선택의 근거입니다** — UNVERIFIED는 **실패와 함께만** 생기고 실패는 이미 종료코드를 1로 만들어 두었으므로 **초록 실행을 빨갛게 만들 수 없습니다**(`tests/test_core/test_tally.py`가 모든 상태를 돌며 못 박습니다)
+  - (ㄷ) 생성기 세 곳(`claude`·`openai`·`ollama`) 프롬프트가 **「뒤가 전부 무의미해지는 한 단계」에 `critical: true`** 를 붙이라고 지시합니다. *모두* 붙이지 말라는 문장을 같이 넣었습니다(전부 치명적인 대본은 첫 겉모양 불일치에서 멈춥니다)
+  - **OpenAI 구조화 출력이 한 겹 더 요구했습니다**: `strict` + `additionalProperties: False`에서는 **스키마에 없는 키를 프롬프트가 뭐라 하든 낼 수 없고**, 모든 속성이 `required`에도 있어야 하므로 `anyOf [boolean, null]`이 되며, 그러면 모델이 `null`로 답할 수 있어 **`coerce_critical`(`mode="before"`)** 이 필요합니다. 없으면 `generate_scenarios`가 `AdapterError`로 터져 **시나리오 생성이 아예 멈춥니다**(같은 경로를 같은 이유로 지키는 `coerce_humanize`의 모양을 따랐습니다)
+  - **역변이 셋은 시험이 약한 게 아니라 스크립트가 틀렸습니다**: 배선 해제 변이가 `as nodemote_`로 **import를 남겨** 소스 검색 시험이 심볼을 찾아 SURVIVED로 보고 / `_WARN_ON_NO_EFFECT` 변이가 첫 출현(=정의가 아니라 **사용처**)에 걸려 PATCH-FAILED. **역변이가 살아남으면 먼저 의심할 것은 변이가 실제로 들어갔는지입니다**
+  - 픽스처 `tests/fixtures/signup_form_server.py`는 **기대 문구를 어느 페이지에도 넣지 않습니다**(막대 격리 시험이 「통과할 방법이 없는 상태」에서 출발해야 합니다). 막대 시험은 `#awt-overlay`가 **실제로 심겼는지 먼저 단정**합니다 — 그러지 않으면 **막대 주입 실패만으로 시험이 초록**이 됩니다(§11-14가 네 번 만난 자리)
+  - 검증: 역변이 **12종 전부 잡힘**, 시험 24건 신규(실제 Chromium 통합 10 + tally 14), `ruff`·`mypy` 깨끗
+  - 표면: `QUICK_START.md`(§5 타이핑 경고 + §5-1 UNVERIFIED), `cli-reference.md`, `SKILL.md`(보고 금칙 포함), `mcp/server.py`, `CROSS_SESSION_TESTING.md` §2 `[4]`·`[5]`, 전역 스킬 재동기화
+  - 범위 밖(의도): `dashboard/app.py`의 `_execute_loop`은 UNVERIFIED 집계를 보내지 않습니다(AAT-122와 같은 자리) / `_SCENARIO_JSON_SCHEMA`에 `expected_result`가 없어 OpenAI 구조화 출력 경로는 대본 수준 기대를 아예 만들지 않습니다(별개 결손, 기록만) / `cloud/app/scenario_builder.py`는 단정 **뒤에 단계를 두지 않으므로** `critical`을 붙여도 관측되는 변화가 없습니다
+  - 기록: 보고서 §11-23
+
 ---
 
 ## 협업 프로젝트 연동 (ClasRing + DSL)
@@ -550,8 +571,8 @@ aat run --skill-mode --fast <scenario>
 
 ## Current Status
 
-- **현재 단계**: 보고서(`docs/awt_project_analysis_and_strategy.md`) **1~3순위 + 판단 대기 3건 전량 마감**(AAT-115까지), 그 위에 **Flutter CanvasKit 세 겹 수리**(AAT-116~118)와 그 CI가 드러낸 `doctor` 결손(AAT-119), 그리고 대표님의 지시 한 건에서 나온 **좌표계 혼용**(AAT-120)·**접힌 선 아래 미탐색**(AAT-121), 그리고 대표님 질문에서 나온 **자동 수정 안전장치 + 두 겹 결말**(AAT-122)을 더했습니다. 다음 작업은 품질 수리가 아니라 **등재와 홍보**이고, 미결 사항은 **`1.8.0` 배포 승인**입니다
-- **완료**: Phase 1~6 (Ultra-MVP) + AAT-060~065 + AAT-070~076 + AAT-080~081 + AAT-090~092 + AAT-093~095 + AAT-100~122 (Post-MVP)
+- **현재 단계**: 보고서(`docs/awt_project_analysis_and_strategy.md`) **1~3순위 + 판단 대기 3건 전량 마감**(AAT-115까지), 그 위에 **Flutter CanvasKit 세 겹 수리**(AAT-116~118)와 그 CI가 드러낸 `doctor` 결손(AAT-119), 그리고 대표님의 지시 한 건에서 나온 **좌표계 혼용**(AAT-120)·**접힌 선 아래 미탐색**(AAT-121), 그리고 대표님 질문에서 나온 **자동 수정 안전장치 + 두 겹 결말**(AAT-122)과, 최대리 세션의 SC-901 보고에서 나온 **판정 무결성 세 겹**(AAT-123)을 더했습니다. 다음 작업은 품질 수리가 아니라 **등재와 홍보**이고, 미결 사항은 **`1.8.0` 배포 승인**입니다
+- **완료**: Phase 1~6 (Ultra-MVP) + AAT-060~065 + AAT-070~076 + AAT-080~081 + AAT-090~092 + AAT-093~095 + AAT-100~123 (Post-MVP)
 - **블로커**: 없음. 판단 대기도 없습니다 — 세 건 모두 AAT-115에서 수리했고, 저장소에 `xfail(strict=True)`는 **한 건도 남아 있지 않습니다**
 - **Flutter 웹 실측 상태**(2026-10-03): ClasRing CanvasKit 앱에서 **23/23 통과**, `wait` 단계를 전부 뺀 대본도 **5/5 통과**, 증거 사진의 한국어가 또렷합니다. Semantics 라벨 기반 `find_and_click`·`find_and_type`를 권하십시오 — 손좌표를 권하던 이전 조언은 실측으로 뒤집혔습니다(AAT-118)
 - **Python**: 3.12.12 (.venv), `source .venv/bin/activate`

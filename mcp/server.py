@@ -191,9 +191,17 @@ async def aat_run(
     Do NOT auto-retry or auto-fix without user permission.
 
     Exit code 3 with STATUS: WARNINGS means every step ran but at least one
-    changed nothing on screen — a click that almost certainly missed its target.
-    Do NOT report such a run as passed: read the warned step's screenshot and
-    tell the user what you found.
+    changed nothing: a click that missed its target, or a find_and_type whose
+    field was a <select>, readonly, disabled, or still empty afterwards. Do NOT
+    report such a run as passed: read the warned step's screenshot and the
+    warning text, which names what to use instead.
+
+    Steps reported as UNVERIFIED ran after an earlier step in the same scenario
+    had already failed, so they acted on a screen the scenario never reached.
+    They are not counted as passed and you must not count them either: report
+    the first failure and say how many steps after it went unverified. "22 of 24
+    passed" on a run whose signup failed at step 6 is the exact reading this
+    status exists to prevent.
 
     Args:
         scenario_file: Path to a YAML scenario file or directory containing scenarios.
@@ -246,8 +254,13 @@ async def aat_run_skill_mode(
     4. WAIT for user instruction — do NOT auto-fix
 
     A run can also end with === AWT SKILL VERIFY === / STATUS: WARNINGS
-    (exit code 3): the steps ran, but a click moved nothing on screen. Treat it
-    like a failure to investigate, not like a pass.
+    (exit code 3): the steps ran, but nothing landed — a click that moved no
+    pixel, or typing that the field refused. Treat it like a failure to
+    investigate, not like a pass.
+
+    Steps reported as UNVERIFIED came after the scenario had already broken and
+    are not counted as passed. Report the first failure and the number of
+    unverified steps; never fold them into a pass count.
 
     Exit code 4 means the opposite of a verdict: nothing ran, because approval
     needed a terminal and this process had none. Never report it as a pass or as

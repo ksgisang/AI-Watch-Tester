@@ -161,15 +161,38 @@ that range on purpose: it says no browser opened and nothing was checked, so a
 CI job cannot print a green tick over a suite it never executed. If you see it,
 run `aat run` from your own terminal — there is no flag that skips approval.
 
-Code `3` is the "it clicked, but nothing happened" case. The step is reported as
+Code `3` is the "it ran, but nothing happened" case. The step is reported as
 `WARNING` rather than `PASSED`, because a click that moves no pixel has almost
 certainly missed its target, and the real failure would otherwise surface
 several steps later as if the product were broken. Check the screenshot for the
 warned step and the target it was given.
 
+Typing is held to the same rule. A `find_and_type` step whose field is a
+`<select>`, is `readonly`, is `disabled`, or is still empty afterwards is a
+`WARNING`, not a pass — the step did run, and the text went nowhere. The warning
+names which of those it was and what to use instead, so you do not have to open
+the screenshot to find out.
+
 Codes `3` and `4` are the same principle applied at two scales: a step that
 changed nothing is not a pass, and a suite that ran nothing is not a pass
 either.
+
+### 5-1. `UNVERIFIED` — the step ran, and it proves nothing
+
+A scenario is a sequence. If step 6 fails to create the account, the steps after
+it are not testing the dashboard; they are running against a login screen, and
+they can pass there. Counting those passes gives you a line like "22 of 24
+passed" for a run in which the thing under test never happened once.
+
+So once a scenario has failed, every later step that would have passed is
+reported as `UNVERIFIED` and left out of the pass count, with a note saying
+which step broke. The summary prints how many there were. Read the first failure
+and run again; the unverified steps have nothing to tell you until you do.
+
+This never changes an exit code. An `UNVERIFIED` step can only exist alongside a
+failure, and the failure has already set the code to `1`. If you would rather the
+scenario stop at the break instead of running on, mark that step
+`critical: true` — then it exits `2` and nothing runs after it.
 
 ### 6. A report you can send to someone
 
