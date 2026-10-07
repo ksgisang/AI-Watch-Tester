@@ -207,6 +207,50 @@ what actually happened. Diagnose from `ACTUAL_CAUSE`.
 
 ---
 
+## Letting AWT fix it
+
+`aat loop` runs a scenario, asks an AI model what went wrong, applies a fix, and
+tests again until it passes or runs out of tries. How much it is allowed to touch
+is up to you:
+
+```bash
+aat loop scenarios/login.yaml                        # default: shows fixes, writes nothing
+aat loop scenarios/login.yaml -a branch              # applies each fix on a throwaway git branch
+aat loop scenarios/login.yaml -a auto                # writes straight into your files
+```
+
+- **`manual`** (default) prints the proposed fix and asks. **Answering `y` still
+  writes nothing** — the loop simply tries again and fails the same way. It is a way
+  to read what the model would do, not a way to have it done.
+- **`branch`** is the one to use if you want the fix actually applied. Each iteration
+  creates `aat/fix-NNN`, commits there, re-tests there, and puts you back on your own
+  branch. Your working copy never changes. `git branch -D aat/fix-NNN` erases it.
+- **`auto`** edits your files in place with nobody reviewing in between. The command
+  prints a warning saying so before it starts.
+
+Before writing anything, AWT refuses a proposed change that guts a file, breaks its
+syntax, or deletes a check (an `assert`, a `raise`/`throw`, or every `if`/`except`)
+without putting something in its place. Refused files are named in the summary and
+never written. **This catches wreckage, not cheating** — AWT cannot tell a genuine
+repair from a change that merely stops the test complaining. That is the reason
+`branch` exists, and the reason the default writes nothing.
+
+Every loop ends with the same summary written twice. The first part is plain:
+
+```
+The test passes now. AWT changed something to get there — see below.
+Changed 1 file: src/auth.py
+The changes are on aat/fix-001, not in your working copy. To keep them:
+git merge aat/fix-001. To throw them away: git branch -D aat/fix-001
+```
+
+Underneath it, `Details for a developer:` lists iterations, failing steps, written
+and refused paths, branches, commits, and where the report went. When the loop
+cannot fix the problem it says exactly that — *"a person needs to look at this"* —
+rather than reporting a pass.
+
+---
+
 ## Cloud Mode
 
 > Cloud mode is coming soon at [awt.dev](https://awt.dev).
@@ -238,7 +282,7 @@ what actually happened. Diagnose from `ACTUAL_CAUSE`.
 | `aat config set <key> <value>` | Update a config value |
 | `aat validate <scenario>` | Validate a YAML scenario file |
 | `aat run <scenario>` | Run a single test scenario |
-| `aat loop <scenario>` | Run DevQA Loop (fail → AI fix → retest) |
+| `aat loop <scenario>` | Run DevQA Loop (fail → AI fix → retest). See *Letting AWT fix it* above |
 | `aat analyze <document>` | Analyze a document with AI |
 | `aat generate <spec>` | Auto-generate scenarios from a spec |
 | `aat start` | Interactive guided mode |

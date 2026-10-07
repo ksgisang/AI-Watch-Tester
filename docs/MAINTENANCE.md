@@ -13,6 +13,7 @@ When code changes, the corresponding documentation must be updated in the same P
 | `docs/QUICK_START.md` | End-user setup — install, AI provider config, CLI approval gate, CLI reference |
 | `docs/API_REFERENCE.md` | Full REST API + WebSocket docs with schemas and curl examples |
 | `docs/FAQ.md` | Common questions — comparisons, pricing, self-hosting, licensing |
+| `docs/CROSS_SESSION_TESTING.md` | Briefing pasted into *other* Claude Code sessions on this machine so they test with the live build; also the global-skill sync procedure |
 | `cloud/docs/CI_CD_GUIDE.md` | CI/CD pipeline integration — GitHub Actions example, API key usage |
 | `cloud/BACKUP_RECOVERY.md` | Database and file backup/restore procedures |
 | `cloud/frontend/messages/en.json` | Frontend UI strings (English, source of truth) |
@@ -47,6 +48,11 @@ When code changes, the corresponding documentation must be updated in the same P
 | Step status or exit code changed (`core/models.py` `StepStatus`, `cli/commands/run_cmd.py` `_exit_code`) | `QUICK_START.md` (Exit codes), `awt-skill/awt/references/cli-reference.md`, `mcp/server.py` |
 | Report format added/changed (`src/aat/reporters/`) | `QUICK_START.md` (A report you can send to someone), `README.md` (Features), `awt-skill/awt/references/cli-reference.md` + `awt-skill/awt/SKILL.md` (CLI Commands, Key Flags), `mcp/server.py` (`report` argument), `mcp/README.md` |
 | Coordinate learning changed (`engine/executor.py`, `learning/store.py`) | `awt-skill/awt/references/cli-reference.md` (`aat run --no-learn`, `aat learn reset`), `awt-skill/awt/SKILL.md` (when to write `learn: false`) |
+| Approval mode behaviour changed (`core/loop.py` handlers, `ApprovalMode`) | `README.md` (Approval modes), `QUICK_START.md` (Letting AWT fix it), `awt-skill/awt/references/cli-reference.md` (`aat loop` → Approval Modes), `awt-skill/awt/SKILL.md` (Critical rule 7) |
+| Fix validation rules changed (`core/loop.py` `_validate_fix`, `_removed_guards`) | `README.md` (What AWT refuses to write), `QUICK_START.md`, `awt-skill/awt/references/cli-reference.md` (What screening exists) — **state the limit, not just the rule**: a reader who thinks the screen catches test-relaxing fixes will trust `auto` |
+| Closing summary changed (`core/verdict.py`) | `README.md` (How a loop ends), `QUICK_START.md` (the sample output), `awt-skill/awt/references/cli-reference.md` (Verdict). Both registers come from one `Verdict`; if a command starts printing its own ending, that is the bug |
+| Matching, healing, OCR or any behaviour another session should exercise | `docs/CROSS_SESSION_TESTING.md` §2 `[4]`/`[5]` — replace the focus list with what *this* change fixed, and name the log phrase it emits |
+| `awt-skill/awt/**` edited for any reason | Re-sync the global copy at `~/.claude/skills/awt/` — procedure in `docs/CROSS_SESSION_TESTING.md` §3. They do not sync themselves |
 
 ---
 

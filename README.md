@@ -151,6 +151,22 @@ The honest reading of `manual`: it is a **preview**, not a repair. If you approv
 aat loop scenarios/ -a branch      # fix on a throwaway branch, then review the commit
 ```
 
+**What AWT refuses to write.** Before `branch` or `auto` applies anything, each proposed
+change is screened against the file **on disk** (not against the model's account of it).
+A change is rejected if it guts the file, breaks its syntax, or deletes a check — an
+`assert`, a `raise`/`throw`, or every `if`/`except`/`catch` — without putting something
+in its place. Rejected files are named in the summary and never written.
+
+That screen catches wreckage. It does **not** catch cheating: AWT cannot tell a genuine
+repair from a change that merely stops the test complaining. That limit is why the
+default writes nothing and why `branch` exists.
+
+**How a loop ends.** With the same facts written twice — a plain-language summary
+(what broke, whether it was fixed, which files changed, how to undo it) and, indented
+below it, the developer detail (iterations, failing steps, written and refused paths,
+branches, commits). When the loop runs out of attempts it says a person needs to look
+at it, rather than reporting a pass.
+
 ---
 
 ## Four Ways to Use AWT
