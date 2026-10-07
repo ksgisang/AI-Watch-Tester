@@ -19,6 +19,7 @@ from aat.core.models import (
     StepStatus,
     TestResult,
 )
+from aat.core.tally import demote_if_flow_broken
 
 if TYPE_CHECKING:
     from aat.adapters.base import AIAdapter
@@ -584,7 +585,15 @@ class DevQALoop:
         from aat.core.diagnosis import classify_failure
 
         for step_result in test_result.steps:
-            if step_result.status in (StepStatus.PASSED, StepStatus.WARNING):
+            # Only a failure carries a cause worth classifying. UNVERIFIED and
+            # SKIPPED steps hold a note about why they were not counted, and
+            # feeding that to the classifier would name the wrong problem.
+            if step_result.status in (
+                StepStatus.PASSED,
+                StepStatus.WARNING,
+                StepStatus.UNVERIFIED,
+                StepStatus.SKIPPED,
+            ):
                 continue
             category = classify_failure(step_result.error_message or "")
             if category != "unknown":
@@ -629,15 +638,31 @@ class DevQALoop:
         from aat.engine.comparator import evaluate_scenario_expectations
 
         for scenario in scenarios:
+            # Reset per scenario: a failure in one scenario says nothing about
+            # what the next one is acting on.
+            broke_at: int | None = None
+
             for step_config in scenario.steps:
-                step_result = await self._executor.execute_step(step_config)
+                raw = await self._executor.execute_step(step_config)
+                step_result = demote_if_flow_broken(raw, broke_at)
+                if broke_at is None and step_result.status in (
+                    StepStatus.FAILED,
+                    StepStatus.ERROR,
+                ):
+                    broke_at = step_result.step
                 all_steps.append(step_result)
                 total_elapsed += step_result.elapsed_ms
 
             # The same check `aat run` performs, through the same evaluator.
             # A scenario that reports differently depending on which command
             # ran it is worse than one that does not check at all.
-            for exp_result in await evaluate_scenario_expectations(scenario, self._engine):
+            for raw_exp in await evaluate_scenario_expectations(scenario, self._engine):
+                exp_result = demote_if_flow_broken(raw_exp, broke_at)
+                if broke_at is None and exp_result.status in (
+                    StepStatus.FAILED,
+                    StepStatus.ERROR,
+                ):
+                    broke_at = exp_result.step
                 all_steps.append(exp_result)
                 total_elapsed += exp_result.elapsed_ms
 

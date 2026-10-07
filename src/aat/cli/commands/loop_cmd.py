@@ -153,6 +153,16 @@ def _print_retest_result(test_result: TestResult) -> None:
                         fg=typer.colors.GREEN,
                     )
                 )
+            elif sr.status == StepStatus.UNVERIFIED:
+                # It ran, it raised nothing, and it came after the break.
+                # Listing it as ✓ next to the failure it followed is the
+                # inflated tally this status exists to stop.
+                typer.echo(
+                    typer.style(
+                        f"    ➖ Step {sr.step}: {sr.description} (not counted)",
+                        fg=typer.colors.YELLOW,
+                    )
+                )
 
 
 # -- Rich approval callback -----------------------------------------------

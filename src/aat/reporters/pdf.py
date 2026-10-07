@@ -38,6 +38,10 @@ _MIME_BY_SUFFIX = {
 _TONE_BY_STATUS = {
     StepStatus.PASSED: "pass",
     StepStatus.WARNING: "warn",
+    # Mapped explicitly rather than falling through to the default so the
+    # screenshot policy below is a decision and not an accident: a failure
+    # should not drag the eighteen steps that followed it into the gallery.
+    StepStatus.UNVERIFIED: "skip",
     StepStatus.FAILED: "fail",
     StepStatus.ERROR: "fail",
     StepStatus.SKIPPED: "skip",

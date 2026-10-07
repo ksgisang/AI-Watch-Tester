@@ -23,6 +23,7 @@ from aat.core.exceptions import AATError, ReporterError
 from aat.core.models import FIND_ACTIONS, Scenario, StepResult, StepStatus, TestResult
 from aat.core.platform_detect import detect_platform, format_platform_info
 from aat.core.scenario_loader import load_scenarios
+from aat.core.tally import demote_if_flow_broken
 from aat.engine import ENGINE_REGISTRY
 from aat.engine.comparator import Comparator
 from aat.engine.executor import StepExecutor
@@ -36,11 +37,31 @@ from aat.reporters import build_reporter
 
 _OVERLAY_INIT_JS = """
 (() => {
-  if (document.getElementById('awt-overlay')) return;
-  const bar = document.createElement('div');
-  bar.id = 'awt-overlay';
-  bar.style.cssText = `
+  const prior = document.getElementById('awt-overlay');
+  if (prior) {
+    // A host without its handle is a leftover we cannot drive. Replace it
+    // rather than returning early and leaving the bar frozen.
+    if (prior.__awt) return;
+    prior.remove();
+  }
+  // The bar is painted INSIDE A CLOSED SHADOW ROOT on purpose. AWT judges the
+  // page it is drawing on: ``Comparator.check`` reads ``inner_text("body")``
+  // for ``text_visible`` and the find/assert routes use ``get_by_text``.
+  // A light-DOM bar carrying "Step 21: ... 승인 대기 ..." is read back as page
+  // content, so the step's own description decides the verdict -- AWT passes
+  // an assertion by having written the expected words itself. A closed root is
+  // excluded from ``innerText`` and, unlike an open one, is not pierced by
+  // Playwright's text engine, while still being painted on screen and still
+  // reachable by ``getElementById`` so it can be hidden before a capture.
+  const host = document.createElement('div');
+  host.id = 'awt-overlay';
+  host.style.cssText = `
     position: fixed; bottom: 0; left: 0; right: 0; z-index: 2147483647;
+    pointer-events: none;
+  `;
+  const root = host.attachShadow({ mode: 'closed' });
+  const bar = document.createElement('div');
+  bar.style.cssText = `
     background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
     color: #e2e8f0; font-family: -apple-system, 'Segoe UI', sans-serif;
     font-size: 13px; padding: 8px 16px;
@@ -48,51 +69,56 @@ _OVERLAY_INIT_JS = """
     box-shadow: 0 -2px 12px rgba(0,0,0,0.3);
     border-top: 2px solid #22d3ee;
     transition: all 0.3s ease;
-    pointer-events: none;
   `;
   // Left: logo + status
   const left = document.createElement('div');
   left.style.cssText = 'display:flex;align-items:center;gap:10px;';
-  left.innerHTML = `
-    <span style="background:#22d3ee;color:#0f172a;font-weight:800;font-size:11px;
-      padding:2px 8px;border-radius:4px;letter-spacing:0.5px;">AWT</span>
-    <span id="awt-status" style="font-weight:600;">Initializing...</span>
-  `;
+  const logo = document.createElement('span');
+  logo.style.cssText = `background:#22d3ee;color:#0f172a;font-weight:800;
+    font-size:11px;padding:2px 8px;border-radius:4px;letter-spacing:0.5px;`;
+  logo.textContent = 'AWT';
+  const status = document.createElement('span');
+  status.style.cssText = 'font-weight:600;';
+  status.textContent = 'Initializing...';
+  left.appendChild(logo);
+  left.appendChild(status);
   // Right: step counter
-  const right = document.createElement('div');
-  right.id = 'awt-counter';
-  right.style.cssText = 'font-size:12px;color:#94a3b8;';
-  right.textContent = '';
+  const counter = document.createElement('div');
+  counter.style.cssText = 'font-size:12px;color:#94a3b8;';
+  counter.textContent = '';
   bar.appendChild(left);
-  bar.appendChild(right);
-  document.body.appendChild(bar);
+  bar.appendChild(counter);
+  root.appendChild(bar);
+  // A closed root is unreachable from outside, so the handle has to be kept.
+  // It hangs off the host, not off ``window``, so it dies with the element.
+  host.__awt = { bar: bar, status: status, counter: counter };
+  document.body.appendChild(host);
 })();
 """
 
 _OVERLAY_UPDATE_JS = """
 ((status, detail, color) => {
-  const el = document.getElementById('awt-status');
-  const counter = document.getElementById('awt-counter');
-  if (el) {
-    el.textContent = status;
-    el.style.color = color || '#e2e8f0';
-  }
-  if (counter && detail) counter.textContent = detail;
+  const host = document.getElementById('awt-overlay');
+  const parts = host && host.__awt;
+  if (!parts) return;
+  parts.status.textContent = status;
+  parts.status.style.color = color || '#e2e8f0';
+  if (detail) parts.counter.textContent = detail;
 })(%s, %s, %s);
 """
 
 _OVERLAY_REMOVE_JS = """
 (() => {
-  const el = document.getElementById('awt-overlay');
-  if (el) {
-    el.style.borderBottomColor = %s;
-    const status = document.getElementById('awt-status');
-    if (status) { status.textContent = %s; status.style.color = %s; }
-    setTimeout(() => {
-      if (el) el.style.opacity = '0';
-      setTimeout(() => { if (el) el.remove(); }, 500);
-    }, %d);
-  }
+  const host = document.getElementById('awt-overlay');
+  const parts = host && host.__awt;
+  if (!parts) return;
+  parts.bar.style.borderTopColor = %s;
+  parts.status.textContent = %s;
+  parts.status.style.color = %s;
+  setTimeout(() => {
+    host.style.opacity = '0';
+    setTimeout(() => { host.remove(); }, 500);
+  }, %d);
 })();
 """
 
@@ -674,6 +700,7 @@ async def _run(
     total_steps = 0
     total_skipped = 0
     total_warned = 0
+    total_unverified = 0  # ran after the scenario had already broken
     warnings: list[str] = []  # steps that ran but changed nothing
     had_critical = False
     passed_scenarios: set[str] = set()
@@ -755,6 +782,10 @@ async def _run(
             scenario_start = time.monotonic()
             scenario_failed = False
             critical_failure = False
+            # Step number of the first failure in this scenario. Everything that
+            # runs after it acts on a screen the scenario never meant to reach,
+            # so its passes are recorded as UNVERIFIED (see core/tally.py).
+            broke_at: int | None = None
             scenario_steps: list[StepResult] = []  # kept for the report
 
             # Resolve scenario-level vars at execution time (handles env refs set after load)
@@ -796,6 +827,8 @@ async def _run(
                         total_failed += 1
                         scenario_failed = True
                         critical_failure = True
+                        if broke_at is None:
+                            broke_at = step.step
                         remaining = len(scenario.steps) - scenario.steps.index(step) - 1
                         total_skipped += remaining
 
@@ -857,6 +890,11 @@ async def _run(
                     raise
                 total_steps += 1
 
+                # A pass that came after the flow broke is not evidence. Done
+                # here, before anything reads the result, so the console line,
+                # the report table and last_run.json all say the same thing.
+                result = demote_if_flow_broken(result, broke_at)
+
                 # Platform detection (once, after first navigate)
                 if not platform_detected and step.action.value == "navigate":
                     platform_detected = True
@@ -907,6 +945,9 @@ async def _run(
                                 "#4ade80",
                             )
                             await asyncio.sleep(1.2)
+                elif result.status == StepStatus.UNVERIFIED:
+                    total_unverified += 1
+                    status_str = typer.style("UNVERIFIED", fg=typer.colors.YELLOW)
                 elif result.status == StepStatus.SKIPPED:
                     total_skipped += 1
                     status_str = typer.style("SKIPPED", fg=typer.colors.YELLOW)
@@ -922,6 +963,8 @@ async def _run(
                 else:
                     total_failed += 1
                     scenario_failed = True
+                    if broke_at is None:
+                        broke_at = result.step
                     status_str = typer.style(str(result.status.value).upper(), fg=typer.colors.RED)
                     if headed:
                         page = _get_active_page()
@@ -944,6 +987,8 @@ async def _run(
                     # Skill-mode progress format
                     if result.status == StepStatus.PASSED:
                         icon = "✅"
+                    elif result.status == StepStatus.UNVERIFIED:
+                        icon = "➖"
                     elif result.status == StepStatus.SKIPPED:
                         icon = "⏭️"
                     elif result.status == StepStatus.WARNING:
@@ -956,7 +1001,11 @@ async def _run(
                 else:
                     typer.echo(f"  Step {result.step}: {status_str} ({result.elapsed_ms:.0f}ms)")
                 if result.error_message:
-                    typer.echo(f"    Error: {result.error_message}")
+                    # An unverified step has no error of its own; what it carries
+                    # is the reason its pass was not counted. Calling that an
+                    # error sends the reader looking for a second problem.
+                    label = "Note" if result.status == StepStatus.UNVERIFIED else "Error"
+                    typer.echo(f"    {label}: {result.error_message}")
 
                 # Nav-zone warning: click in left 20% is likely nav panel
                 nav_warning = ""
@@ -1020,9 +1069,12 @@ async def _run(
             # pages an expectation is written to look at.
             from aat.engine.comparator import evaluate_scenario_expectations
 
-            for exp_result in await evaluate_scenario_expectations(
+            for raw_exp_result in await evaluate_scenario_expectations(
                 scenario, engine, skipped=critical_failure
             ):
+                # Same rule as the steps above: an expectation that holds on a
+                # screen the scenario never reached has verified nothing.
+                exp_result = demote_if_flow_broken(raw_exp_result, broke_at)
                 scenario_steps.append(exp_result)
                 total_steps += 1
                 all_results.append(
@@ -1039,6 +1091,9 @@ async def _run(
                 if exp_result.status == StepStatus.PASSED:
                     total_passed += 1
                     icon, label = "✅", typer.style("PASSED", fg=typer.colors.GREEN)
+                elif exp_result.status == StepStatus.UNVERIFIED:
+                    total_unverified += 1
+                    icon, label = "➖", typer.style("UNVERIFIED", fg=typer.colors.YELLOW)
                 elif exp_result.status == StepStatus.SKIPPED:
                     total_skipped += 1
                     icon, label = "⏭️", typer.style("SKIPPED", fg=typer.colors.YELLOW)
@@ -1051,6 +1106,8 @@ async def _run(
                 else:
                     total_failed += 1
                     scenario_failed = True
+                    if broke_at is None:
+                        broke_at = exp_result.step
                     icon, label = "❌", typer.style("FAILED", fg=typer.colors.RED)
 
                 if skill_mode:
@@ -1131,10 +1188,23 @@ async def _run(
     parts = [f"{total_passed} passed", fail_label]
     if total_warned > 0:
         parts.append(f"{total_warned} warning")
+    if total_unverified > 0:
+        parts.append(f"{total_unverified} unverified")
     if total_skipped > 0:
         parts.append(f"{total_skipped} skipped")
     parts.append(f"{total_steps} steps total")
     typer.echo(f"\nSummary: {', '.join(parts)}")
+
+    if total_unverified > 0:
+        typer.echo(
+            typer.style(
+                f"\n{total_unverified} step(s) ran after the scenario had already "
+                "broken, so they are not counted as passed — whatever they checked, "
+                "they checked it on a screen this run never reached. Fix the first "
+                "failure and run again before reading them.",
+                fg=typer.colors.YELLOW,
+            )
+        )
 
     if warnings:
         typer.echo(

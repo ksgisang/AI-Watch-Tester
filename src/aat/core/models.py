@@ -176,6 +176,13 @@ class StepStatus(StrEnum):
     RUNNING = "running"
     PASSED = "passed"
     WARNING = "warning"
+    #: Ran, raised nothing, and proves nothing: an earlier step in the same
+    #: scenario had already failed, so this one acted on a screen the scenario
+    #: never meant to reach. Counted apart from PASSED so a broken run cannot
+    #: report "22 of 24 passed" on the strength of steps that came after the
+    #: break. Only ever produced alongside a failure, so it cannot change an
+    #: exit code (see AAT-123).
+    UNVERIFIED = "unverified"
     FAILED = "failed"
     SKIPPED = "skipped"
     ERROR = "error"
@@ -531,6 +538,24 @@ class StepConfig(BaseModel):
         default=False,
         description="If True, test stops immediately on failure",
     )
+
+    @field_validator("critical", mode="before")
+    @classmethod
+    def coerce_critical(cls, v: object) -> bool:
+        """Read an omitted or null `critical` as False.
+
+        OpenAI structured output requires every property to be listed in
+        `required`, so the schema declares this field nullable and the model is
+        free to answer `null` for a step it does not consider critical. Without
+        this the strict `bool` annotation would reject that answer and
+        `generate_scenarios` would raise `AdapterError` -- scenario generation
+        would stop working outright. Same shape as `coerce_humanize` below,
+        which protects the same path for the same reason.
+        """
+        if v is None:
+            return False
+        return bool(v)
+
     on_fail: str = Field(
         default="",
         description="Action on failure: 'stop' to halt test immediately",

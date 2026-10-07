@@ -94,6 +94,17 @@ requires another to pass first. Example:
   {"id": "SC-002", "depends_on": ["SC-001"], ...}
 - SC-001 should have no dependencies. Later scenarios depend on earlier ones.
 
+STEP-LEVEL "critical":
+- Set "critical": true on the one step whose failure makes every later step \
+meaningless -- usually the submit that creates the account, or the login \
+that has to succeed before anything else can be observed.
+- When a critical step fails the scenario stops there. Without it the run \
+carries on against a screen it never reached, and those later steps are \
+reported as "not counted" instead of as evidence.
+- Do NOT mark every step critical. One or two per scenario at most -- a \
+scenario where everything is critical halts on the first cosmetic mismatch.
+- Leave the field out for ordinary steps.
+
 CRITICAL RULES:
 - "click" is INVALID. Use "find_and_click"
 - "type" is INVALID. Use "find_and_type"
@@ -210,6 +221,19 @@ _SCENARIO_JSON_SCHEMA: dict[str, Any] = {
                                         ],
                                     },
                                     "description": {"type": "string"},
+                                    # Without this the prompt can ask for
+                                    # `critical` all it likes and the model
+                                    # cannot comply: `strict` plus
+                                    # `additionalProperties: false` rejects any
+                                    # key not listed here. Structured output
+                                    # also requires every property to appear in
+                                    # `required`, hence the nullable form.
+                                    "critical": {
+                                        "anyOf": [
+                                            {"type": "boolean"},
+                                            {"type": "null"},
+                                        ],
+                                    },
                                     "humanize": {
                                         "anyOf": [
                                             {"type": "boolean"},
@@ -242,6 +266,7 @@ _SCENARIO_JSON_SCHEMA: dict[str, Any] = {
                                     "value",
                                     "assert_type",
                                     "case_insensitive",
+                                    "critical",
                                     "humanize",
                                     "expected",
                                 ],

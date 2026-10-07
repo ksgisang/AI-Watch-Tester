@@ -91,6 +91,17 @@ requires another to pass first. Example:
   {"id": "SC-002", "depends_on": ["SC-001"], ...}
 - SC-001 should have no dependencies. Later scenarios depend on earlier ones.
 
+STEP-LEVEL "critical":
+- Set "critical": true on the one step whose failure makes every later step \
+meaningless -- usually the submit that creates the account, or the login \
+that has to succeed before anything else can be observed.
+- When a critical step fails the scenario stops there. Without it the run \
+carries on against a screen it never reached, and those later steps are \
+reported as "not counted" instead of as evidence.
+- Do NOT mark every step critical. One or two per scenario at most -- a \
+scenario where everything is critical halts on the first cosmetic mismatch.
+- Leave the field out for ordinary steps.
+
 CRITICAL RULES:
 - "click" is INVALID. Use "find_and_click"
 - "type" is INVALID. Use "find_and_type"
