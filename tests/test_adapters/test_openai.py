@@ -445,3 +445,77 @@ def test_adapter_registry() -> None:
 
     assert "openai" in ADAPTER_REGISTRY
     assert ADAPTER_REGISTRY["openai"] is OpenAIAdapter
+
+
+# ---------------------------------------------------------------------------
+# Tests: step-level `critical`
+#
+# Both halves of this section live here because they are one mechanism. The
+# three adapters' prompts ask the model to mark the step whose failure makes
+# every later step meaningless; only the OpenAI path also has to get a JSON
+# schema to agree, because `strict` plus `additionalProperties: false` means a
+# key the schema omits cannot be emitted no matter what the prompt says.
+# ---------------------------------------------------------------------------
+
+
+def test_schema_allows_the_model_to_answer_critical() -> None:
+    """Without this the prompt below is unobeyable on the OpenAI path."""
+    from aat.adapters.openai_adapter import _SCENARIO_JSON_SCHEMA
+
+    step = _SCENARIO_JSON_SCHEMA["schema"]["properties"]["scenarios"]["items"]["properties"][
+        "steps"
+    ]["items"]
+    assert "critical" in step["properties"]
+    # Structured output requires every declared property to be listed in
+    # `required`, which is why the field has to be nullable rather than simply
+    # omitted for ordinary steps.
+    assert "critical" in step["required"]
+
+
+def test_a_null_critical_does_not_break_generation() -> None:
+    """The cost of the nullable form, paid in the model rather than the schema.
+
+    `StepConfig.critical` is a plain `bool`, so `null` would be a validation
+    error -- and `generate_scenarios` turns any validation error into
+    `AdapterError`, which would stop scenario generation outright rather than
+    degrade it. `coerce_humanize` protects the same path for the same reason.
+    """
+    from aat.core.models import Scenario
+
+    scenario = Scenario.model_validate(
+        {
+            "id": "SC-001",
+            "name": "Sign up",
+            "steps": [
+                {
+                    "step": 1,
+                    "action": "navigate",
+                    "value": "https://example.test",
+                    "description": "Open the site",
+                    "critical": None,
+                    "humanize": None,
+                },
+            ],
+        }
+    )
+    assert scenario.steps[0].critical is False
+
+
+@pytest.mark.parametrize(
+    "module",
+    ["aat.adapters.claude", "aat.adapters.openai_adapter", "aat.adapters.ollama"],
+)
+def test_every_generator_prompt_asks_for_critical(module: str) -> None:
+    """Three copies of the same prompt, so three chances to drift.
+
+    A generator that never marks a critical step keeps producing the scenario
+    shape that caused the report under test: the run carries on past the break
+    and the reader gets a tally built on steps that proved nothing.
+    """
+    import importlib
+
+    prompt = importlib.import_module(module)._SYSTEM_GENERATE_SCENARIOS
+    assert '"critical": true' in prompt
+    # And it has to say *not* to mark everything, or the model marks everything
+    # and the first cosmetic mismatch halts the scenario.
+    assert "Do NOT mark every step critical" in prompt
