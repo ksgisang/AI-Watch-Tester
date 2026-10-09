@@ -335,6 +335,16 @@ class TestSelectorBeatsMemory:
         asked. That is the right behaviour -- it is the whole point of ordering
         what we can see ahead of what we guessed -- but it leaves no way to
         exercise the memory except to take the DOM routes away.
+
+        The planted position is the *same wrong one* as in the test above, and
+        deliberately so: the only difference between the pair is the selector,
+        which is what makes this a control rather than a second scenario. The
+        consequence is that the memory puts the text in the neighbouring field,
+        and AAT-124 says so -- the step named "Nickname", the page has a visible
+        field labelled exactly that, and it is still empty. So the outcome here
+        is WARNING, and that is the destination check working rather than a
+        regression. What this test is for is unchanged: `note` holding the text
+        is the proof that the memory was consulted at all.
         """
         executor = _executor(engine, store, tmp_path)
         await _open(engine, quiz_url, SHORT_PAGE)
@@ -350,8 +360,10 @@ class TestSelectorBeatsMemory:
 
         result = await executor.execute_step(_type_nickname())
 
-        assert result.status == StepStatus.PASSED, result.error_message
         assert await _field(engine, "note") == "haneul", "the memory was not consulted"
+        assert result.status == StepStatus.WARNING, result.error_message
+        assert "input#note" in (result.error_message or "")
+        assert "input#nickname" in (result.error_message or "")
 
 
 class TestClickWithNoEffect:

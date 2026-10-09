@@ -131,6 +131,154 @@ _TYPED_VALUE_PROBE_JS = """
 }
 """
 
+# Which field did the scenario *name*, and which one actually took the text?
+#
+# The four rules above all interrogate one element -- the one that received the
+# keystrokes -- so none of them can see the text landing in a field other than
+# the named one: that field holds a value, is not a <select>, and is neither
+# readonly nor disabled. Every rule passes and the step is scored PASSED while
+# the form is left blank. Answering it needs two elements, not one.
+#
+# ``intended`` is resolved from an *authored* association only -- a ``<label
+# for>``, a wrapping ``<label>`` or an ``aria-label`` that equals the target
+# text exactly, and only when exactly one field carries it. A placeholder does
+# not count: a substring of someone else's placeholder is the very thing that
+# misdirected the text, so it cannot also be the evidence of where the text
+# belonged. Where no authored label says what the author meant, this returns
+# ``null`` and nothing is claimed.
+#
+# ``key`` is element identity, never a coordinate. One viewport point denotes
+# different elements at different scroll offsets, and a long form scrolls while
+# it is filled -- keying on the point would both miss real collisions and
+# invent false ones. The accessible name is part of the key so that a wizard
+# which reuses one ``<input>`` for successive questions is not reported as a
+# collision: the element is the same, what it is asking for is not.
+_TYPED_IDENTITY_PROBE_JS = """
+(args) => {
+  const FIELD_SEL = 'input, textarea, select, [contenteditable=""], [contenteditable="true"]';
+  const fields = Array.prototype.slice.call(document.querySelectorAll(FIELD_SEL));
+  const scope = location.origin + location.pathname;
+
+  const labelOf = (el) => {
+    const id = el.id;
+    if (id) {
+      let sel = null;
+      try {
+        sel = 'label[for="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]';
+      } catch (e) { sel = null; }
+      if (sel) {
+        const l = document.querySelector(sel);
+        if (l && l.innerText && l.innerText.trim()) return l.innerText.trim();
+      }
+    }
+    const wrap = el.closest ? el.closest('label') : null;
+    if (wrap && wrap.innerText && wrap.innerText.trim()) return wrap.innerText.trim();
+    const aria = el.getAttribute('aria-label');
+    if (aria && aria.trim()) return aria.trim();
+    return '';
+  };
+
+  const nameOf = (el) => {
+    const authored = labelOf(el);
+    if (authored) return authored;
+    const ph = el.getAttribute('placeholder');
+    return ph && ph.trim() ? ph.trim() : '';
+  };
+
+  const valueOf = (el) => {
+    const tag = (el.tagName || '').toLowerCase();
+    if (tag === 'select') {
+      const opt = el.options ? el.options[el.selectedIndex] : null;
+      return opt ? (opt.label || opt.text || '') : '';
+    }
+    if (typeof el.value === 'string') return el.value;
+    return el.innerText || '';
+  };
+
+  const visibleOf = (el) => {
+    try {
+      if (el.getAttribute('aria-hidden') === 'true') return false;
+      return !!(el.offsetParent || (el.getClientRects && el.getClientRects().length));
+    } catch (e) { return false; }
+  };
+
+  const identify = (el) => {
+    if (!el || el === document.body || el === document.documentElement) return null;
+    const tag = (el.tagName || '').toLowerCase();
+    const desc = tag
+      + (el.id ? '#' + el.id : '')
+      + (el.name ? '[' + el.name + ']' : '');
+    const label = nameOf(el);
+    return {
+      key: scope + '|' + fields.indexOf(el) + '|' + desc + '|' + label,
+      desc: desc,
+      label: label,
+      value: valueOf(el),
+      visible: visibleOf(el),
+    };
+  };
+
+  const selector = (args && args.selector) || '';
+  const want = ((args && args.text) || '').trim();
+
+  let intended = null;
+  if (selector) {
+    try { intended = identify(document.querySelector(selector)); } catch (e) { intended = null; }
+  } else if (want) {
+    const hits = fields.filter((el) => labelOf(el) === want);
+    if (hits.length === 1) intended = identify(hits[0]);
+  }
+
+  return { actual: identify(document.activeElement), intended: intended };
+}
+"""
+
+# Did the target text name one field while matching a different one?
+#
+# Evaluated against the element the input-field search chose. ``null`` means
+# there is nothing to say: either the chosen element carries the target text as
+# its own authored label, or no other field does either, so there was no choice
+# to make quietly.
+_LABEL_AMBIGUITY_PROBE_JS = """
+(el, want) => {
+  const w = (want || '').trim();
+  if (!w) return null;
+  const labelOf = (e) => {
+    const id = e.id;
+    if (id) {
+      let sel = null;
+      try {
+        sel = 'label[for="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]';
+      } catch (err) { sel = null; }
+      if (sel) {
+        const l = document.querySelector(sel);
+        if (l && l.innerText && l.innerText.trim()) return l.innerText.trim();
+      }
+    }
+    const wrap = e.closest ? e.closest('label') : null;
+    if (wrap && wrap.innerText && wrap.innerText.trim()) return wrap.innerText.trim();
+    const aria = e.getAttribute('aria-label');
+    if (aria && aria.trim()) return aria.trim();
+    return '';
+  };
+  const descOf = (e) => (e.tagName || '').toLowerCase()
+    + (e.id ? '#' + e.id : '')
+    + (e.name ? '[' + e.name + ']' : '');
+
+  if (labelOf(el) === w) return null;
+  const exact = Array.prototype.slice
+    .call(document.querySelectorAll('input, textarea, select'))
+    .filter((e) => labelOf(e) === w);
+  if (!exact.length || exact.indexOf(el) !== -1) return null;
+  return {
+    chosen: descOf(el),
+    chosen_label: labelOf(el),
+    chosen_placeholder: el.getAttribute('placeholder') || '',
+    exact: exact.map(descOf),
+  };
+}
+"""
+
 # Steps skipped entirely in concise verbosity mode
 _CONCISE_SKIP_ACTIONS: frozenset[ActionType] = frozenset(
     {
@@ -273,6 +421,14 @@ class StepExecutor:
         # telling the reader it "probably missed its target" sends them looking
         # for a coordinate bug that is not there.
         self._no_effect_reason: str | None = None
+        # Which field each typing target has already written into, this run.
+        # Keyed by element identity rather than by the point that was clicked:
+        # a long form scrolls while it is filled, so one viewport coordinate
+        # denotes different elements at different times. Lives for the whole
+        # run and is never cleared -- two steps naming different things and
+        # filling one field is the fact worth reporting, however far apart
+        # they are.
+        self._typed_claims: dict[str, tuple[str, int]] = {}
         self._iframe_locator: Any = None  # for iframe direct click
         self._iframe_frame: Any = None
         self._found_frame: Any = None  # frame where if_visible found target
@@ -865,11 +1021,48 @@ class StepExecutor:
                         await loc.scroll_into_view_if_needed(timeout=2000)
                     box = await loc.bounding_box()
                     if box:
+                        await self._warn_label_ambiguity(loc, text)
                         return _box_centre(box) + (box,)
             except Exception:
                 continue
 
         return None
+
+    @staticmethod
+    async def _warn_label_ambiguity(loc: Any, text: str) -> None:
+        """Say out loud that the target text could have meant another field.
+
+        The first thing this chain tries is a placeholder *substring* match, so
+        a target text that is part of another field's placeholder resolves to
+        that field -- '이름' is inside '학교 이름을 입력하세요', and the school box is
+        earlier in the document than the name box. The text still lands
+        somewhere and the step still passes, which is why this has to be said
+        at the moment the choice is made.
+
+        Only ever a log line. The verdict belongs to
+        :meth:`_check_typed_destination`, which reports the step when the
+        ambiguity actually misdirected the text; '비밀번호' being a prefix of
+        '비밀번호 확인' is true of nearly every signup form, and a warning that
+        fires on all of them is a warning worth ignoring.
+        """
+        try:
+            info = await loc.evaluate(_LABEL_AMBIGUITY_PROBE_JS, text)
+        except Exception as e:  # noqa: BLE001 - this must never fail a step
+            logger.debug("Could not check label ambiguity for %r: %s", text, e)
+            return
+        if not isinstance(info, dict):
+            return
+        logger.warning(
+            "[AWT] %r matched %s (labelled %r, placeholder %r), but %s "
+            "is labelled exactly %r — name the field with `target.selector` "
+            "to say which you mean",
+            text,
+            info.get("chosen"),
+            info.get("chosen_label") or "",
+            info.get("chosen_placeholder") or "",
+            ", ".join(str(d) for d in (info.get("exact") or [])),
+            text,
+        )
 
     async def _act_at_pos(
         self,
@@ -3557,6 +3750,9 @@ class StepExecutor:
                 )
 
         if reason is None:
+            reason = await self._check_typed_destination(page, step, typed)
+
+        if reason is None:
             return True
 
         if step.critical:
@@ -3566,6 +3762,115 @@ class StepExecutor:
         logger.warning("[AWT] %s", reason)
         self._no_effect_reason = reason
         return False
+
+    async def _check_typed_destination(
+        self,
+        page: Any,
+        step: StepConfig,
+        typed: str,
+    ) -> str | None:
+        """Say whether the text landed in the field the step named, and in a
+        field no earlier step has already filled.
+
+        Two questions the four value rules above cannot ask, because each of
+        them interrogates a single element:
+
+        * **Wrong field.** The step named one field and the keystrokes went to
+          another. Every value rule passes -- the receiving field holds text,
+          is not a ``<select>``, is neither readonly nor disabled -- so the step
+          was scored ``PASSED`` while the named field stayed empty and the form
+          refused to submit.
+        * **Two targets, one field.** Two steps naming different things wrote
+          into the same element, so one of the two targets never got a field of
+          its own. AWT already *noticed* this and logged ``Duplicate coords``
+          from the learning store; that line is cross-run database state and
+          the function that emitted it returns ``None``, so the verdict never
+          saw it. This one is in-run and reaches the verdict.
+
+        Both stay quiet unless they are certain, on the same terms as the rules
+        above -- ``False`` here turns the step yellow and the exit code to 3:
+
+        * The wrong-field claim needs an **authored** label (``<label for>``,
+          a wrapping ``<label>``, or ``aria-label``) that equals the target
+          text exactly and belongs to exactly one field, *and* that field has
+          to be visible. Without that there is no evidence of which field the
+          author meant, and a component library whose visible input is not the
+          one the label points at would otherwise be reported as a bug.
+        * It also requires the typed text to be **present in the receiving
+          field and absent from the named one**. Comparing the named field's
+          value against the keystrokes is what this deliberately does not do:
+          phone masks, ``maxlength``, uppercase transforms and currency
+          formatting all legitimately hold something else. Those all land in
+          the field that was named, so this question never gets asked of them.
+
+        Returns the reason to report, or ``None`` when there is nothing to say.
+        """
+        ident = await self._probe_typed_identity(page, step)
+        if ident is None:
+            return None
+
+        actual = ident.get("actual")
+        intended = ident.get("intended")
+        reasons: list[str] = []
+
+        if (
+            isinstance(actual, dict)
+            and isinstance(intended, dict)
+            and actual.get("key") != intended.get("key")
+            and intended.get("visible")
+        ):
+            landed = str(actual.get("value") or "")
+            named = str(intended.get("value") or "")
+            if typed in landed and typed not in named:
+                reasons.append(
+                    f"{typed!r} went into {actual.get('desc')} "
+                    f"(labelled {str(actual.get('label') or '')!r}), not into "
+                    f"{intended.get('desc')} which the step named — "
+                    f"{intended.get('desc')} is still {named!r}; "
+                    "name the field with `target.selector` to say which you mean"
+                )
+
+        # Recorded even when the wrong-field claim already fired: the field that
+        # wrongly received the text is now claimed, so a later step that names
+        # it *correctly* is still reported. Step 9 typing into the confirm field
+        # is how step 10 ends up with nowhere of its own to write.
+        if isinstance(actual, dict):
+            key = str(actual.get("key") or "")
+            target_name = ""
+            if step.target is not None:
+                target_name = step.target.text or step.target.selector or ""
+            if key:
+                prior = self._typed_claims.get(key)
+                if prior is not None and prior[0] != target_name:
+                    reasons.append(
+                        f"{typed!r} went into {actual.get('desc')}, which step "
+                        f"{prior[1]} already filled for target {prior[0]!r} — "
+                        f"{target_name!r} and {prior[0]!r} resolved to one field, "
+                        "so one of the two never got its own"
+                    )
+                else:
+                    self._typed_claims[key] = (target_name, step.step)
+
+        return "; also ".join(reasons) if reasons else None
+
+    @staticmethod
+    async def _probe_typed_identity(page: Any, step: StepConfig) -> dict[str, Any] | None:
+        """Identify the field the step named and the field that took the text.
+
+        ``None`` means the question could not be asked -- a probe must never be
+        the reason a step fails.
+        """
+        target = step.target
+        args = {
+            "selector": (target.selector if target else None) or "",
+            "text": (target.text if target else None) or "",
+        }
+        try:
+            info = await page.evaluate(_TYPED_IDENTITY_PROBE_JS, args)
+        except Exception as e:  # noqa: BLE001 - a probe must not fail the step
+            logger.debug("Could not identify the typed target (%s): %s", args, e)
+            return None
+        return info if isinstance(info, dict) else None
 
     @staticmethod
     async def _probe_typed_target(page: Any, selector: str | None) -> dict[str, Any] | None:
