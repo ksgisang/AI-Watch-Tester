@@ -196,6 +196,14 @@ async def aat_run(
     report such a run as passed: read the warned step's screenshot and the
     warning text, which names what to use instead.
 
+    The same status covers typing that went into the WRONG field, which is what
+    a long form produces: the target text matched a different field's
+    placeholder substring ('이름' is inside '학교 이름을 입력하세요'), so the
+    text landed there and the named field stayed empty. The warning names both
+    fields, and says when two steps naming different things wrote into one box.
+    The fix is a target.selector on those steps; do not re-run unchanged and do
+    not count them as passed.
+
     Steps reported as UNVERIFIED ran after an earlier step in the same scenario
     had already failed, so they acted on a screen the scenario never reached.
     They are not counted as passed and you must not count them either: report
@@ -255,7 +263,9 @@ async def aat_run_skill_mode(
 
     A run can also end with === AWT SKILL VERIFY === / STATUS: WARNINGS
     (exit code 3): the steps ran, but nothing landed — a click that moved no
-    pixel, or typing that the field refused. Treat it like a failure to
+    pixel, typing that the field refused, or typing that went into a different
+    field than the step named (the warning names both fields and tells you to
+    say which you mean with target.selector). Treat it like a failure to
     investigate, not like a pass.
 
     Steps reported as UNVERIFIED came after the scenario had already broken and

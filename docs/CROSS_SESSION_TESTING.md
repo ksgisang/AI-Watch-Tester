@@ -66,11 +66,12 @@ ModuleNotFoundError: No module named 'aat.engine.sweep'
     이 기기에서는 낡은 사본을 하나 더 만드는 결과가 됩니다.
 
 [2] 시험 전 확인 (1회):
-    /usr/local/opt/python@3.14/bin/python3.14 -c "import aat, aat.engine.sweep as s; from aat.core.models import ScreenshotSpace; print(aat.__file__); print('sweep', s.MAX_SCREENS)"
+    /usr/local/opt/python@3.14/bin/python3.14 -c "import aat, aat.engine.sweep as s; from aat.core.models import ScreenshotSpace, StepStatus; print(aat.__file__); print('sweep', s.MAX_SCREENS); print('unverified', StepStatus.UNVERIFIED.value)"
 
     기대 출력:
       /Users/apple/Documents/Projects/AI_Auto_Tester/src/aat/__init__.py
       sweep 10
+      unverified unverified
 
     다르게 나오거나 ModuleNotFoundError가 나면 낡은 빌드입니다. 멈추고 보고하십시오.
 
@@ -92,6 +93,14 @@ ModuleNotFoundError: No module named 'aat.engine.sweep'
         통과하면 결함이 되살아난 것입니다.
     - `find_and_type`의 대상이 <select>·readonly·disabled이거나 입력 후에도
       비어 있을 때 WARNING(종료코드 3)으로 찍히는가. 통과로 찍히면 결함입니다.
+    - 글자가 **지목한 칸이 아닌 다른 칸**에 들어갔을 때 WARNING으로 찍히는가
+      (AAT-124). → 긴 가입 폼이 이것을 만듭니다. 대상 글자가 다른 칸의
+      placeholder에 부분 문자열로 들어 있으면(`'이름'` ⊂
+      `'학교 이름을 입력하세요'`) 그 칸으로 갑니다. 두 단계가 서로 다른 것을
+      지목하고 한 칸에 겹쳐 쓴 경우도 같은 경고입니다. 경고에는 두 칸의
+      이름이 다 나옵니다. **대상 칸을 `target.selector`로 지목하지 않은
+      대본으로 시험해 주십시오** — 선택자를 붙이면 이 경로를 지나가지 않아
+      작동 여부를 알 수 없게 됩니다.
     - 실패한 단계 이후의 단계가 UNVERIFIED로 빠지고 통과율에서 제외되는가.
       → 일부러 깨지는 시나리오(없는 계정으로 로그인 등)를 한 번 돌려 보십시오.
     - 첫 화면 밖(스크롤해야 보이는) 요소를 찾아내는가.
@@ -108,6 +117,7 @@ ModuleNotFoundError: No module named 'aat.engine.sweep'
     - 로그에 다음 문구가 찍혔는지 (각각 어느 단계에서인지 함께):
         "below the fold"  /  "healed_from_bank"  /  "satisfied by OCR"
         "not counted"  /  "text went nowhere"
+        "went into"  /  "labelled exactly"   (← AAT-124, 다른 칸에 들어간 글자)
     - 거짓 통과로 의심되는 단계가 있으면 그 근거
 ```
 
@@ -186,4 +196,6 @@ diff -r --exclude='*.bak-*' --exclude=scripts "$DST" "$SRC" && echo "동일합�
 | 날짜 | 내용 |
 |---|---|
 | 2026-10-06 | 최초 작성. AAT-112~121 수리분을 `[4]` 중점 항목으로 삼음. 전역 스킬을 저장소본(20,532 B)으로 동기화하고 `references/`·`templates/`를 처음으로 함께 배치 |
+| 2026-10-07 | `[2]` 탐침에 `StepStatus.UNVERIFIED`를 더함 — AAT-123 이전 빌드에서는 `ImportError`가 나므로, 낡은 사본으로 「고쳤다는 자리」를 재는 일을 막습니다 |
 | 2026-10-07 | AAT-123(판정 무결성) 수리분을 `[4]` 맨 앞에 추가. `[5]`의 보고 수치를 통과/실패/경고/**미검증** 네 갈래로 분리 — 최대리의 SC-901 보고가 미검증을 통과에 합산해 "24스텝 중 22 통과"로 읽혔던 것이 이 작업의 출발점이었습니다. 전역 스킬 재동기화 |
+| 2026-10-09 | AAT-124(다른 칸에 들어간 글자)를 `[4]`에 추가하고 `[5]` 로그 문구에 `went into`·`labelled exactly`를 더함. **대상을 선택자로 지목하지 않은 대본으로 시험하라**는 조건을 함께 적었습니다 — 선택자를 붙이면 입력란 탐색 경로를 지나가지 않아 이 수리가 작동했는지 측정할 수 없습니다. 전역 스킬 재동기화 |

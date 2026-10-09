@@ -173,6 +173,31 @@ Typing is held to the same rule. A `find_and_type` step whose field is a
 names which of those it was and what to use instead, so you do not have to open
 the screenshot to find out.
 
+Typing into the *wrong* field is the same verdict, and it is the one a long form
+produces. When a step names a field by text, AWT checks the field it named
+against the field that actually received the text, and reports the step rather
+than counting it:
+
+```
+Step 7: WARNING  '에이더블유티점검' went into input#school (labelled '학교'), not into
+                 input#name which the step named — input#name is still '';
+                 name the field with `target.selector` to say which you mean
+Step 10: WARNING '…' went into input#password-confirm, which step 9 already filled
+                 for target '비밀번호' — '비밀번호 확인' and '비밀번호' resolved to one
+                 field, so one of the two never got its own
+```
+
+Those two happen for one reason: a target text can be a substring of a
+*different* field's placeholder — '이름' is inside '학교 이름을 입력하세요', and
+'비밀번호' matches the placeholder of the confirm box but not of the password box.
+AWT also logs the ambiguity at the moment it picks, naming both candidates.
+Giving the step a `target.selector` settles it permanently.
+
+These stay quiet where they cannot tell: a form with no `<label>`, `aria-label`
+or label-wrapped field says nothing about which box a text meant, and a field
+that reformats what you type (phone masks, `maxlength`, uppercase) is not
+compared against the keystrokes at all.
+
 Codes `3` and `4` are the same principle applied at two scales: a step that
 changed nothing is not a pass, and a suite that ran nothing is not a pass
 either.
