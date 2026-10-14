@@ -36,6 +36,24 @@ UNSCOPED_HOST = "_unscoped"
 #: these rows are inert -- visible in ``aat learned list``, never clicked.
 LEGACY_HOST = ""
 
+#: What a caller means when it cannot say how far the page had been scrolled.
+#: A remembered position is a *viewport* position: it is replayed through
+#: ``click()``, which measures from the top-left of what is on screen, so the
+#: same row means two different places on the page at two different scroll
+#: offsets. Treated exactly like :data:`LEGACY_HOST` -- stored, listed, never
+#: reused -- because "I do not know where this was measured from" and "it was
+#: measured at the top" are different claims, and only one of them is safe to
+#: act on.
+#:
+#: This does not protect a Flutter CanvasKit screen, which scrolls its own
+#: content while ``window.scrollY`` stays nailed to 0 (see
+#: ``aat.engine.sweep``). There the offset reads 0 at every position and the
+#: key degrades to what it was before. What catches that case is the order the
+#: chain already runs in -- remembered positions come after every DOM path
+#: (AAT-112) -- and the fact that a click that changes nothing is reported as a
+#: warning and has its position forgotten (AAT-109).
+UNKNOWN_SCROLL: int | None = None
+
 _CREATE_TABLE = """\
 CREATE TABLE IF NOT EXISTS learned_elements (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,6 +67,8 @@ CREATE TABLE IF NOT EXISTS learned_elements (
     confidence      REAL DEFAULT 1.0,
     use_count       INTEGER DEFAULT 0,
     host            TEXT NOT NULL DEFAULT '',
+    scroll_x        INTEGER,
+    scroll_y        INTEGER,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
@@ -123,19 +143,24 @@ CREATE TABLE IF NOT EXISTS state_coords (
     confidence      REAL DEFAULT 1.0,
     use_count       INTEGER DEFAULT 0,
     host            TEXT NOT NULL DEFAULT '',
+    scroll_x        INTEGER,
+    scroll_y        INTEGER,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
 """
 
 _CREATE_IDX_STATE_COORDS = (
-    "CREATE INDEX IF NOT EXISTS idx_state_coords ON state_coords(target_name, page_state, host);"
+    "CREATE INDEX IF NOT EXISTS idx_state_coords "
+    "ON state_coords(target_name, page_state, host, scroll_x, scroll_y);"
 )
 
-#: Tables that gained the ``host`` column in AAT-115. Added by ALTER on an
-#: existing database rather than by recreating the table, so that a user's
-#: accumulated learning survives the upgrade -- inert, but inspectable.
-_HOST_SCOPED_TABLES = ("state_coords", "learned_elements")
+#: Tables whose rows are a remembered position, and which therefore have to say
+#: *where the position was measured from*. ``host`` was added in AAT-115, the
+#: scroll offset here. Added by ALTER on an existing database rather than by
+#: recreating the table, so that a user's accumulated learning survives the
+#: upgrade -- inert, but inspectable.
+_SCOPED_TABLES = ("state_coords", "learned_elements")
 
 _CREATE_TABLE_STRATEGIES = """\
 CREATE TABLE IF NOT EXISTS test_strategies (
@@ -156,6 +181,9 @@ _CREATE_IDX_STRATEGIES = (
 
 def _row_to_element(row: sqlite3.Row) -> LearnedElement:
     """Convert a sqlite3.Row to a LearnedElement."""
+    # `in row` would search the row's *values*: sqlite3.Row is a sequence, not
+    # a mapping, so the column names only come from keys().
+    columns = set(row.keys())
     return LearnedElement(
         id=row["id"],
         scenario_id=row["scenario_id"],
@@ -167,9 +195,9 @@ def _row_to_element(row: sqlite3.Row) -> LearnedElement:
         cropped_image_path=row["cropped_image"],
         confidence=row["confidence"],
         use_count=row["use_count"],
-        # `in row` would search the row's *values*: sqlite3.Row is a sequence,
-        # not a mapping, so the column names only come from keys().
-        host=row["host"] if "host" in set(row.keys()) else "",
+        host=row["host"] if "host" in columns else "",
+        scroll_x=row["scroll_x"] if "scroll_x" in columns else None,
+        scroll_y=row["scroll_y"] if "scroll_y" in columns else None,
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
     )
@@ -196,12 +224,14 @@ class LearnedStore:
             self._conn.execute(_CREATE_TABLE_STATE_COORDS)
             self._conn.execute(_CREATE_TABLE_STRATEGIES)
             self._conn.execute(_CREATE_IDX_STRATEGIES)
-            # Before any index that names ``host``: CREATE TABLE IF NOT EXISTS is a
-            # no-op on a database that already has the table, so an existing user's
-            # state_coords keeps the old column list and indexing a column that is
-            # not there yet raises -- which would make the learning database refuse
-            # to open at all on upgrade, not merely lose its memory.
+            # Before any index that names ``host`` or ``scroll_*``: CREATE TABLE
+            # IF NOT EXISTS is a no-op on a database that already has the table,
+            # so an existing user's state_coords keeps the old column list and
+            # indexing a column that is not there yet raises -- which would make
+            # the learning database refuse to open at all on upgrade, not merely
+            # lose its memory.
             self._add_host_column()
+            self._add_scroll_columns()
             self._conn.execute(_CREATE_IDX_STATE_COORDS)
             self._conn.commit()
         except sqlite3.Error as exc:
@@ -223,16 +253,8 @@ class LearnedStore:
         fires once per database -- the next open finds the column already
         there -- and names the command that clears them.
         """
-        for table in _HOST_SCOPED_TABLES:
-            columns = {
-                str(row["name"]) for row in self._conn.execute(f"PRAGMA table_info({table})")
-            }
-            if "host" in columns:
-                continue
-            self._conn.execute(
-                f"ALTER TABLE {table} ADD COLUMN host TEXT NOT NULL DEFAULT '{LEGACY_HOST}'"
-            )
-            stale = self._conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"]
+        for table in _SCOPED_TABLES:
+            stale = self._add_column(table, "host", f"TEXT NOT NULL DEFAULT '{LEGACY_HOST}'")
             if stale:
                 logger.warning(
                     "[AWT] %d remembered position(s) in %s predate host scoping and will not "
@@ -241,6 +263,51 @@ class LearnedStore:
                     stale,
                     table,
                 )
+
+    def _add_scroll_columns(self) -> None:
+        """Give an existing database the scroll offset columns, once.
+
+        Positions used to be remembered without any record of how far the page
+        had been scrolled when they were measured. A viewport coordinate only
+        means one place on the page at one scroll offset, so a button learned
+        two screens down was replayed as a click two screens up -- on whatever
+        happened to be at that pixel.
+
+        Rows that predate the columns keep :data:`UNKNOWN_SCROLL`, which no
+        read ever asks for, on the same reasoning as :meth:`_add_host_column`:
+        they are not deleted, and they are not reused either.
+
+        Both columns are added in one pass so that a database interrupted
+        between them is still consistent on the next open -- each is added only
+        if missing, so an upgrade that got halfway simply finishes.
+        """
+        for table in _SCOPED_TABLES:
+            stale = 0
+            for column in ("scroll_x", "scroll_y"):
+                stale = max(stale, self._add_column(table, column, "INTEGER"))
+            if stale:
+                logger.warning(
+                    "[AWT] %d remembered position(s) in %s do not record the scroll offset "
+                    "they were measured at and will not be reused -- they will be learned "
+                    "again on the next run. Clear them with: aat learn reset --all",
+                    stale,
+                    table,
+                )
+
+    def _add_column(self, table: str, column: str, declaration: str) -> int:
+        """Add *column* to *table* if it is not there, and say what it orphaned.
+
+        Returns the number of rows that predate the column -- which are the
+        rows the new scoping makes inert -- or 0 when the column was already
+        present, so that the warning fires once per database and not on every
+        open.
+        """
+        columns = {str(row["name"]) for row in self._conn.execute(f"PRAGMA table_info({table})")}
+        if column in columns:
+            return 0
+        self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+        count = self._conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"]
+        return int(count)
 
     # -- CRUD ----------------------------------------------------------------
 
@@ -255,7 +322,7 @@ class LearnedStore:
                     SET scenario_id=?, step_number=?, target_name=?,
                         screenshot_hash=?, correct_x=?, correct_y=?,
                         cropped_image=?, confidence=?, use_count=?,
-                        host=?, updated_at=?
+                        host=?, scroll_x=?, scroll_y=?, updated_at=?
                     WHERE id=?
                     """,
                     (
@@ -269,6 +336,8 @@ class LearnedStore:
                         element.confidence,
                         element.use_count,
                         element.host,
+                        element.scroll_x,
+                        element.scroll_y,
                         now,
                         element.id,
                     ),
@@ -283,8 +352,8 @@ class LearnedStore:
                 INSERT INTO learned_elements
                     (scenario_id, step_number, target_name, screenshot_hash,
                      correct_x, correct_y, cropped_image, confidence,
-                     use_count, host, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     use_count, host, scroll_x, scroll_y, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     element.scenario_id,
@@ -297,6 +366,8 @@ class LearnedStore:
                     element.confidence,
                     element.use_count,
                     element.host,
+                    element.scroll_x,
+                    element.scroll_y,
                     element.created_at.isoformat(),
                     now,
                 ),
@@ -340,22 +411,25 @@ class LearnedStore:
         self,
         target_name: str,
         host: str = UNSCOPED_HOST,
+        scroll_x: int = 0,
+        scroll_y: int = 0,
     ) -> LearnedElement | None:
         """Find the most recently used element by target name, on *host*.
 
-        ``host`` is part of the key, not a filter applied afterwards: a
-        position learned on one application is not evidence about another, even
-        when both call the button "Submit".
+        ``host`` and the scroll offset are part of the key, not filters applied
+        afterwards: a position learned on one application is not evidence about
+        another even when both call the button "Submit", and a position learned
+        two screens down is not evidence about the top of the page.
         """
         try:
             row = self._conn.execute(
                 """\
                 SELECT * FROM learned_elements
-                WHERE target_name=? AND host=?
+                WHERE target_name=? AND host=? AND scroll_x=? AND scroll_y=?
                 ORDER BY use_count DESC, updated_at DESC
                 LIMIT 1
                 """,
-                (target_name, host),
+                (target_name, host, scroll_x, scroll_y),
             ).fetchone()
             if row is None:
                 return None
@@ -370,18 +444,23 @@ class LearnedStore:
         y: int,
         confidence: float = 1.0,
         host: str = UNSCOPED_HOST,
+        scroll_x: int = 0,
+        scroll_y: int = 0,
     ) -> None:
         """Save or update learned coordinates by target name, under *host*."""
         now = datetime.now(UTC).isoformat()
         try:
             # Duplicate coordinate check: warn if another target has same coords.
-            # Scoped to one host, because two applications having a button at the
-            # same pixel is a coincidence, not a conflict worth reporting.
+            # Scoped to one host and one scroll offset, because two applications
+            # having a button at the same pixel is a coincidence, and so is the
+            # same pixel being two different buttons at two different offsets --
+            # neither is a conflict worth reporting.
             dup_row = self._conn.execute(
                 "SELECT target_name FROM learned_elements "
                 "WHERE correct_x=? AND correct_y=? AND target_name!=? AND host=? "
+                "AND scroll_x=? AND scroll_y=? "
                 "LIMIT 1",
-                (x, y, target_name, host),
+                (x, y, target_name, host, scroll_x, scroll_y),
             ).fetchone()
             if dup_row:
                 logger.warning(
@@ -392,7 +471,7 @@ class LearnedStore:
                     dup_row["target_name"],
                 )
 
-            existing = self.find_by_name(target_name, host)
+            existing = self.find_by_name(target_name, host, scroll_x, scroll_y)
             if existing and existing.id is not None:
                 # Update if coordinates changed
                 if existing.correct_x != x or existing.correct_y != y:
@@ -419,10 +498,25 @@ class LearnedStore:
                         (scenario_id, step_number, target_name,
                          screenshot_hash, correct_x, correct_y,
                          cropped_image, confidence, use_count, host,
-                         created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         scroll_x, scroll_y, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    ("_auto", 1, target_name, "", x, y, "", confidence, 1, host, now, now),
+                    (
+                        "_auto",
+                        1,
+                        target_name,
+                        "",
+                        x,
+                        y,
+                        "",
+                        confidence,
+                        1,
+                        host,
+                        scroll_x,
+                        scroll_y,
+                        now,
+                        now,
+                    ),
                 )
                 self._conn.commit()
         except sqlite3.Error:
@@ -861,6 +955,8 @@ class LearnedStore:
         target_name: str,
         page_state: str = "normal",
         host: str = UNSCOPED_HOST,
+        scroll_x: int = 0,
+        scroll_y: int = 0,
     ) -> tuple[int, int, float] | None:
         """Find coordinates for target in given page state, on *host*.
 
@@ -869,6 +965,11 @@ class LearnedStore:
         Rows carrying :data:`LEGACY_HOST` are ignored for the same reason in a
         different form -- an unknown origin is not evidence about this screen.
 
+        The scroll offset is matched exactly rather than approximately. A near
+        miss costs one DOM search and a fresh measurement; a near hit replayed
+        as a click costs a press on whatever else is at that pixel, reported as
+        a pass. Those are not the same price.
+
         Returns (x, y, confidence) or None.
         """
         try:
@@ -876,11 +977,19 @@ class LearnedStore:
                 """\
                 SELECT correct_x, correct_y, confidence
                 FROM state_coords
-                WHERE target_name=? AND page_state=? AND host=? AND confidence>=?
+                WHERE target_name=? AND page_state=? AND host=?
+                  AND scroll_x=? AND scroll_y=? AND confidence>=?
                 ORDER BY use_count DESC
                 LIMIT 1
                 """,
-                (target_name, page_state, host, MIN_COORD_CONFIDENCE),
+                (
+                    target_name,
+                    page_state,
+                    host,
+                    scroll_x,
+                    scroll_y,
+                    MIN_COORD_CONFIDENCE,
+                ),
             ).fetchone()
             if row:
                 return row["correct_x"], row["correct_y"], row["confidence"]
@@ -896,20 +1005,24 @@ class LearnedStore:
         y: int,
         confidence: float = 1.0,
         host: str = UNSCOPED_HOST,
+        scroll_x: int = 0,
+        scroll_y: int = 0,
     ) -> None:
-        """Save or update coordinates for target + state + host combination.
+        """Save or update coordinates for target + state + host + scroll offset.
 
-        ``host`` belongs in the update-or-insert lookup, not just in the
-        inserted row: looking up without it would find another host's row and
-        overwrite its position, which both corrupts that host's memory and
-        leaves this host with no row of its own.
+        ``host`` and the scroll offset belong in the update-or-insert lookup,
+        not just in the inserted row: looking up without them would find the
+        row for some other screen and overwrite its position, which both
+        corrupts that screen's memory and leaves this one with no row of its
+        own -- learning that never takes, silently, forever.
         """
         now = datetime.now(UTC).isoformat()
         try:
             row = self._conn.execute(
                 "SELECT id, correct_x, correct_y FROM state_coords "
-                "WHERE target_name=? AND page_state=? AND host=?",
-                (target_name, page_state, host),
+                "WHERE target_name=? AND page_state=? AND host=? "
+                "AND scroll_x=? AND scroll_y=?",
+                (target_name, page_state, host, scroll_x, scroll_y),
             ).fetchone()
 
             if row:
@@ -929,9 +1042,21 @@ class LearnedStore:
                 self._conn.execute(
                     "INSERT INTO state_coords "
                     "(target_name, page_state, correct_x, correct_y, "
-                    "confidence, use_count, host, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)",
-                    (target_name, page_state, x, y, confidence, host, now, now),
+                    "confidence, use_count, host, scroll_x, scroll_y, "
+                    "created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
+                    (
+                        target_name,
+                        page_state,
+                        x,
+                        y,
+                        confidence,
+                        host,
+                        scroll_x,
+                        scroll_y,
+                        now,
+                        now,
+                    ),
                 )
             self._conn.commit()
         except sqlite3.Error:
@@ -943,6 +1068,8 @@ class LearnedStore:
         page_state: str | None = None,
         penalty: float = COORD_PENALTY,
         host: str = UNSCOPED_HOST,
+        scroll_x: int = 0,
+        scroll_y: int = 0,
     ) -> int:
         """Lower the confidence of remembered coordinates that did not work.
 
@@ -950,15 +1077,18 @@ class LearnedStore:
         Rows falling below MIN_COORD_CONFIDENCE are deleted, so the next run
         searches for the element again instead of repeating the same mistake.
 
-        Scoped to *host* for the same reason the lookup is: the row that sent
-        the click to the wrong place belongs to this application, and docking
-        another application's memory for it would punish the innocent.
+        Scoped to *host* and to the scroll offset for the same reason the
+        lookup is: the row that sent the click to the wrong place is the one
+        that answered for this screen at this offset, and docking any other
+        row for it would punish the innocent.
 
         Args:
             target_name: Target whose memory is suspect.
             page_state: Restrict to one page state, or None for every state.
             penalty: Confidence subtracted from each matching row.
             host: Host whose memory is suspect.
+            scroll_x: Horizontal offset the bad click was replayed at.
+            scroll_y: Vertical offset the bad click was replayed at.
 
         Returns:
             Number of rows deleted.
@@ -968,14 +1098,15 @@ class LearnedStore:
             if page_state is None:
                 self._conn.execute(
                     "UPDATE state_coords SET confidence=confidence-?, updated_at=? "
-                    "WHERE target_name=? AND host=?",
-                    (penalty, now, target_name, host),
+                    "WHERE target_name=? AND host=? AND scroll_x=? AND scroll_y=?",
+                    (penalty, now, target_name, host, scroll_x, scroll_y),
                 )
             else:
                 self._conn.execute(
                     "UPDATE state_coords SET confidence=confidence-?, updated_at=? "
-                    "WHERE target_name=? AND page_state=? AND host=?",
-                    (penalty, now, target_name, page_state, host),
+                    "WHERE target_name=? AND page_state=? AND host=? "
+                    "AND scroll_x=? AND scroll_y=?",
+                    (penalty, now, target_name, page_state, host, scroll_x, scroll_y),
                 )
             cursor = self._conn.execute(
                 "DELETE FROM state_coords WHERE target_name=? AND host=? AND confidence<?",
@@ -984,8 +1115,8 @@ class LearnedStore:
             deleted = cursor.rowcount or 0
             self._conn.execute(
                 "UPDATE learned_elements SET confidence=confidence-? "
-                "WHERE target_name=? AND host=?",
-                (penalty, target_name, host),
+                "WHERE target_name=? AND host=? AND scroll_x=? AND scroll_y=?",
+                (penalty, target_name, host, scroll_x, scroll_y),
             )
             cursor = self._conn.execute(
                 "DELETE FROM learned_elements WHERE target_name=? AND host=? AND confidence<?",
@@ -1004,12 +1135,16 @@ class LearnedStore:
         ``host`` is included because it is part of the key: without it the
         listing cannot distinguish two applications that happen to name a
         button the same way, and rows carrying :data:`LEGACY_HOST` would look
-        live when in fact nothing will ever reuse them.
+        live when in fact nothing will ever reuse them. The scroll offset is
+        included for the same reason: it is the other half of what a remembered
+        viewport coordinate means, and a row with no offset recorded is
+        likewise inert.
         """
         try:
             cursor = self._conn.execute(
-                "SELECT target_name, page_state, host, correct_x, correct_y, "
-                "confidence, use_count, updated_at FROM state_coords "
+                "SELECT target_name, page_state, host, scroll_x, scroll_y, "
+                "correct_x, correct_y, confidence, use_count, updated_at "
+                "FROM state_coords "
                 "ORDER BY use_count DESC, target_name"
             )
             return [dict(row) for row in cursor.fetchall()]

@@ -285,3 +285,192 @@ class TestLegacyRowsAreInert:
             store.close()
 
         assert "predate host scoping" not in caplog.text
+        assert "do not record the scroll offset" not in caplog.text
+
+
+class TestScrollScoping:
+    """A remembered position only means one place at one scroll offset.
+
+    What is stored is a *viewport* coordinate: it is replayed through
+    ``click()``, which measures from the top-left of what is on screen. Learn a
+    button two screens down and replay it at the top of the page and the same
+    pair of numbers names whatever happens to be two screens up. The offset is
+    the other half of what the position means, so it belongs in the key -- and,
+    as with the host, the bug that matters is the *lookup* leaving it out.
+
+    The match is exact, not approximate. A near miss costs one DOM search and a
+    fresh measurement; a near hit replayed as a click costs a press on whatever
+    else is at that pixel, reported as a pass.
+    """
+
+    def test_a_position_learned_scrolled_is_not_found_at_the_top(
+        self, store: LearnedStore
+    ) -> None:
+        store.save_state_coords("grade", "normal", 10, 20, host="a.example", scroll_y=900)
+
+        assert store.find_state_coords("grade", "normal", host="a.example", scroll_y=900) == (
+            10,
+            20,
+            1.0,
+        )
+        assert store.find_state_coords("grade", "normal", host="a.example") is None
+
+    def test_a_near_miss_is_still_a_miss(self, store: LearnedStore) -> None:
+        """Nothing interpolates. One pixel of drift is a different screen."""
+        store.save_state_coords("grade", "normal", 10, 20, host="a.example", scroll_y=900)
+
+        assert store.find_state_coords("grade", "normal", host="a.example", scroll_y=899) is None
+
+    def test_the_horizontal_offset_counts_too(self, store: LearnedStore) -> None:
+        store.save_state_coords("grade", "normal", 10, 20, host="a.example", scroll_x=400)
+
+        assert store.find_state_coords("grade", "normal", host="a.example", scroll_x=400) == (
+            10,
+            20,
+            1.0,
+        )
+        assert store.find_state_coords("grade", "normal", host="a.example") is None
+
+    def test_the_state_agnostic_lookup_is_scroll_scoped_too(self, store: LearnedStore) -> None:
+        """Dropping the page state widens *when* a position applies, not *where*."""
+        store.save_or_update_by_name("grade", 10, 20, host="a.example", scroll_y=900)
+
+        found = store.find_by_name("grade", host="a.example", scroll_y=900)
+        assert found is not None
+        assert (found.correct_x, found.correct_y) == (10, 20)
+        assert store.find_by_name("grade", host="a.example") is None
+
+    def test_two_offsets_keep_separate_positions_under_one_name(self, store: LearnedStore) -> None:
+        """The failure mode if the offset were in the row but not in the lookup.
+
+        ``save_state_coords`` updates-or-inserts. Looking up without the offset
+        would find the other screen's row, overwrite its position -- corrupting
+        that screen's memory -- and leave this one with no row of its own, so
+        learning would silently never take hold below the fold.
+        """
+        store.save_state_coords("submit", "normal", 10, 20, host="a.example", scroll_y=0)
+        store.save_state_coords("submit", "normal", 10, 300, host="a.example", scroll_y=900)
+
+        assert store.find_state_coords("submit", "normal", host="a.example", scroll_y=0) == (
+            10,
+            20,
+            1.0,
+        )
+        assert store.find_state_coords("submit", "normal", host="a.example", scroll_y=900) == (
+            10,
+            300,
+            1.0,
+        )
+
+    def test_the_named_lookup_keeps_two_offsets_apart_as_well(self, store: LearnedStore) -> None:
+        store.save_or_update_by_name("submit", 10, 20, host="a.example", scroll_y=0)
+        store.save_or_update_by_name("submit", 10, 300, host="a.example", scroll_y=900)
+
+        top = store.find_by_name("submit", host="a.example", scroll_y=0)
+        down = store.find_by_name("submit", host="a.example", scroll_y=900)
+        assert top is not None and down is not None
+        assert (top.correct_x, top.correct_y) == (10, 20)
+        assert (down.correct_x, down.correct_y) == (10, 300)
+
+    def test_penalising_one_offset_leaves_the_other_alone(self, store: LearnedStore) -> None:
+        """A click that did nothing here says nothing about the other screen."""
+        store.save_state_coords(
+            "submit", "normal", 10, 20, confidence=0.6, host="a.example", scroll_y=0
+        )
+        store.save_state_coords(
+            "submit", "normal", 10, 300, confidence=0.6, host="a.example", scroll_y=900
+        )
+
+        store.penalize_coords("submit", "normal", host="a.example", scroll_y=0)
+
+        assert store.find_state_coords("submit", "normal", host="a.example", scroll_y=0) is None
+        assert store.find_state_coords("submit", "normal", host="a.example", scroll_y=900) == (
+            10,
+            300,
+            0.6,
+        )
+
+    def test_the_listing_shows_the_offset_each_position_was_measured_at(
+        self, store: LearnedStore
+    ) -> None:
+        store.save_state_coords("submit", "normal", 10, 20, host="a.example", scroll_y=900)
+
+        rows = store.list_state_coords()
+        assert [(r["scroll_x"], r["scroll_y"]) for r in rows] == [(0, 900)]
+
+
+class TestRowsWithNoOffsetAreInert:
+    """Rows that predate the offset columns are kept, listed, and never reused.
+
+    The same bargain the host migration struck (:class:`TestLegacyRowsAreInert`):
+    an unknown origin is not evidence about the screen in front of us, but
+    throwing away a user's accumulated learning is not the migration's call
+    either. So the column is added empty, and nothing ever asks for empty.
+    """
+
+    def _legacy_db(self, tmp_path: Path) -> Path:
+        """A database with the host column but no offset columns."""
+        import sqlite3
+
+        db = tmp_path / "pre_scroll.db"
+        conn = sqlite3.connect(db)
+        conn.execute(
+            "CREATE TABLE state_coords ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, target_name TEXT NOT NULL, "
+            "page_state TEXT NOT NULL, correct_x INTEGER NOT NULL, "
+            "correct_y INTEGER NOT NULL, confidence REAL NOT NULL DEFAULT 1.0, "
+            "use_count INTEGER NOT NULL DEFAULT 1, host TEXT NOT NULL DEFAULT '', "
+            "created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO state_coords "
+            "(target_name, page_state, correct_x, correct_y, host, created_at, updated_at) "
+            "VALUES ('grade','normal',10,20,'a.example','','')"
+        )
+        conn.commit()
+        conn.close()
+        return db
+
+    def test_an_existing_database_gains_the_columns_and_keeps_its_rows(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The upgrade path: ALTER, not recreate, so learning survives it.
+
+        The row has a perfectly good host, so it would have been reused before
+        this change -- which is the point. Provenance in one axis is not
+        provenance in the other.
+        """
+        import logging
+
+        db = self._legacy_db(tmp_path)
+
+        with caplog.at_level(logging.WARNING):
+            store = LearnedStore(db)
+        try:
+            rows = store.list_state_coords()
+            assert len(rows) == 1, "the upgrade must not discard what was learned"
+            assert rows[0]["scroll_y"] is None
+            assert store.find_state_coords("grade", "normal", host="a.example") is None
+            assert (
+                store.find_state_coords("grade", "normal", host="a.example", scroll_y=900) is None
+            )
+        finally:
+            store.close()
+
+        assert "aat learn reset --all" in caplog.text
+
+    def test_learning_the_same_target_again_writes_a_usable_row(self, tmp_path: Path) -> None:
+        """The inert row must not block the one that replaces it.
+
+        If the update-or-insert lookup matched the offsetless row, the new
+        measurement would be written back into a row nothing reads -- and the
+        screen would be relearned on every single run, forever, in silence.
+        """
+        db = self._legacy_db(tmp_path)
+        store = LearnedStore(db)
+        try:
+            store.save_state_coords("grade", "normal", 11, 21, host="a.example", scroll_y=0)
+
+            assert store.find_state_coords("grade", "normal", host="a.example") == (11, 21, 1.0)
+        finally:
+            store.close()

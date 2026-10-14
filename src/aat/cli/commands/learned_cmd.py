@@ -94,29 +94,32 @@ def _print_db_sections(
     if coords:
         typer.echo("\n  Remembered Coordinates:")
         typer.echo(
-            f"  {'Target':<26} {'State':<10} {'Host':<22} {'Position':<12} {'Conf':>5} {'Uses':>5}"
+            f"  {'Target':<26} {'State':<10} {'Host':<22} {'Scroll':<11} "
+            f"{'Position':<12} {'Conf':>5} {'Uses':>5}"
         )
-        typer.echo("  " + "-" * 84)
+        typer.echo("  " + "-" * 96)
         legacy = 0
         for c in coords:
             pos = f"({c['correct_x']},{c['correct_y']})"
-            # A row with no host predates host scoping, so nothing will reuse it.
-            # Saying "(not reused)" rather than printing an empty column keeps the
-            # listing from implying the position is still live.
+            # A row with no host, or none that records the scroll offset it was
+            # measured at, is one nothing will ever reuse. Saying "(not reused)"
+            # rather than printing an empty column keeps the listing from
+            # implying the position is still live.
             host = c.get("host") or ""
-            if not host:
+            scroll_y = c.get("scroll_y")
+            inert = not host or scroll_y is None
+            if inert:
                 legacy += 1
-                host_label = "(not reused)"
-            else:
-                host_label = host[:22]
+            host_label = "(not reused)" if not host else host[:22]
+            scroll_label = "—" if scroll_y is None else f"({c.get('scroll_x') or 0},{scroll_y})"
             typer.echo(
                 f"  {c['target_name'][:26]:<26} {c['page_state'][:10]:<10} {host_label:<22} "
-                f"{pos:<12} {c['confidence']:>5.2f} {c['use_count']:>5}"
+                f"{scroll_label:<11} {pos:<12} {c['confidence']:>5.2f} {c['use_count']:>5}"
             )
         typer.echo('  Remove one with: aat learn reset "<target>"')
         if legacy:
             typer.echo(
-                f"  {legacy} row(s) predate host scoping and are never reused "
+                f"  {legacy} row(s) predate host or scroll scoping and are never reused "
                 "— clear them with: aat learn reset --all"
             )
 

@@ -1138,6 +1138,22 @@ class LearnedElement(BaseModel):
             "is never reused"
         ),
     )
+    scroll_x: int | None = Field(
+        default=None,
+        description=(
+            "Horizontal scroll offset the position was measured at. None means "
+            "the row does not record one and is never reused"
+        ),
+    )
+    scroll_y: int | None = Field(
+        default=None,
+        description=(
+            "Vertical scroll offset the position was measured at. A remembered "
+            "position is a viewport coordinate, so it only means one place on "
+            "the page at one offset; None means the row does not record one "
+            "and is never reused"
+        ),
+    )
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 

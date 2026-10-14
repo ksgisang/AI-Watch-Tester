@@ -483,3 +483,125 @@ class TestLearningCanBeTurnedOff:
         assert result.status == StepStatus.PASSED, result.error_message
         assert await _panel_shown(engine)
         assert _memory(store, "Grade it") is None, "a step marked learn: false was learned"
+
+
+# A page taller than any viewport these tests run in: the button only comes
+# into view after a scroll, which is the whole point of the class below.
+BELOW_THE_FOLD = 2000
+
+
+async def _scroll_to(engine: WebEngine, y: int) -> None:
+    await engine.page.evaluate(f"window.scrollTo(0, {y})")
+    await engine.page.wait_for_timeout(100)
+
+
+async def _scroll_y(engine: WebEngine) -> int:
+    return int(await engine.page.evaluate("() => window.scrollY"))
+
+
+class TestAPositionOnlyMeansOnePlaceAtOneOffset:
+    """A remembered position is a viewport coordinate, not a page coordinate.
+
+    ``click()`` measures from the top-left of what is on screen, so the same
+    pair of numbers names two different elements at two different scroll
+    offsets. Until the offset was stored alongside the position, a button
+    learned two screens down was replayed as a press two screens up -- on
+    whatever happened to be at that pixel, reported as a pass.
+
+    Both directions are measured here: the stale replay must stop happening,
+    and the memory must still work at the offset it was taken at. Only the
+    second one proves the fix did not simply turn remembering off.
+    """
+
+    async def test_what_is_learned_below_the_fold_records_where_it_was_measured(
+        self, engine: WebEngine, store: LearnedStore, quiz_url: str, tmp_path: Path
+    ) -> None:
+        executor = _executor(engine, store, tmp_path)
+        await _open(engine, quiz_url, BELOW_THE_FOLD)
+        assert await _scroll_y(engine) == 0, "the page must start above the button"
+
+        result = await executor.execute_step(_click_grade())
+
+        assert result.status == StepStatus.PASSED, result.error_message
+        offset = await _scroll_y(engine)
+        assert offset > 0, "finding the button should have scrolled the page"
+
+        remembered = _memory(store, "Grade it")
+        assert remembered is not None
+        assert remembered["scroll_y"] == offset, (
+            "the offset stored is the one the position was measured at, "
+            "not the one the page happened to be at when the step began"
+        )
+
+    async def test_it_is_not_replayed_at_the_top_of_the_page(
+        self, engine: WebEngine, store: LearnedStore, quiz_url: str, tmp_path: Path
+    ) -> None:
+        """The defect: a press on whatever is two screens up, reported as a pass."""
+        executor = _executor(engine, store, tmp_path)
+        await _open(engine, quiz_url, BELOW_THE_FOLD)
+        assert (await executor.execute_step(_click_grade())).status == StepStatus.PASSED
+        learned_at = await _scroll_y(engine)
+        assert learned_at > 0
+
+        # Same page, same target, top of the document -- and nothing but the
+        # memory left to answer with.
+        await _open(engine, quiz_url, BELOW_THE_FOLD)
+        _blind_the_search(engine, executor)
+        assert await _scroll_y(engine) == 0
+
+        result = await executor.execute_step(_click_grade(step=2))
+
+        assert result.status != StepStatus.PASSED, (
+            "a position measured at a different scroll offset was replayed as a pass"
+        )
+        assert not await _panel_shown(engine)
+        assert "grade" not in await _clicks(engine)
+
+    async def test_it_is_replayed_at_the_offset_it_was_learned_at(
+        self, engine: WebEngine, store: LearnedStore, quiz_url: str, tmp_path: Path
+    ) -> None:
+        """The other direction: scoping must not quietly disable remembering."""
+        executor = _executor(engine, store, tmp_path)
+        await _open(engine, quiz_url, BELOW_THE_FOLD)
+        assert (await executor.execute_step(_click_grade())).status == StepStatus.PASSED
+        learned_at = await _scroll_y(engine)
+        assert learned_at > 0
+
+        await _open(engine, quiz_url, BELOW_THE_FOLD)
+        await _scroll_to(engine, learned_at)
+        assert await _scroll_y(engine) == learned_at
+        _blind_the_search(engine, executor)
+
+        result = await executor.execute_step(_click_grade(step=2))
+
+        assert result.status == StepStatus.PASSED, result.error_message
+        assert await _panel_shown(engine), "the memory stopped working at its own offset"
+        assert "grade" in await _clicks(engine)
+
+    async def test_a_search_that_found_nothing_leaves_the_page_where_it_was(
+        self, engine: WebEngine, store: LearnedStore, quiz_url: str, tmp_path: Path
+    ) -> None:
+        """The scroll-to-top retry is a probe, not a navigation.
+
+        It used to scroll to the top and stay there, so everything consulted
+        after it -- the picture bank, the remembered position, the failure
+        screenshot -- was answering about a screen the step had never been on.
+        That is what made a remembered position unreachable even when the page
+        was sitting at exactly the offset it was measured at.
+        """
+        executor = _executor(engine, store, tmp_path)
+        await _open(engine, quiz_url, BELOW_THE_FOLD)
+        await _scroll_to(engine, 1200)
+        _blind_the_search(engine, executor)
+
+        result = await executor.execute_step(
+            StepConfig(
+                step=1,
+                action=ActionType.FIND_AND_CLICK,
+                target=TargetSpec(text="Nothing by this name"),
+                description="Look for something that is not there",
+            )
+        )
+
+        assert result.status != StepStatus.PASSED
+        assert await _scroll_y(engine) == 1200, "a failed search walked off with the page"
