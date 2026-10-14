@@ -65,3 +65,20 @@ reports/
 
 # Obsidian — vault settings are shared, per-machine window layout is not
 .obsidian/workspace.json
+
+# Cloud backend local DB — the ignore above only matched the repo-root name,
+# and the file this machine actually writes is one directory down
+cloud/aat_cloud.db
+cloud/tests/output/
+
+# Downloaded release binary (19MB, Mach-O), not source
+mcp-publisher
+
+# Remotion demo — the build and its dependencies are generated (471MB)
+demo/node_modules/
+demo/out/
+
+# Per-machine dev install helper: hard-codes one person's home directory
+# and passes --break-system-packages. Publishing it would hand a new user
+# a command that is wrong for their machine.
+install-dev.sh

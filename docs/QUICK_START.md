@@ -224,6 +224,30 @@ failure, and the failure has already set the code to `1`. If you would rather th
 scenario stop at the break instead of running on, mark that step
 `critical: true` — then it exits `2` and nothing runs after it.
 
+### 5-2. "When did this start failing?" — `.aat/runs/`
+
+`.aat/last_run.json` is overwritten on every run. It answers "did it pass just
+now", and it cannot answer "when did this turn red" — the run you would compare
+against was deleted by the run you just did.
+
+So the same payload is filed a second time, with the clock in its name:
+
+```
+.aat/runs/2026-10-14T143022.118-000_scenarios.json
+```
+
+The name is `<timestamp>-<counter>_<scenarios>`, and the file holds the same
+per-step results as `last_run.json` plus a status tally. The newest 50 are kept
+and the oldest are dropped. `last_run.json` keeps the name and shape it always
+had, so nothing you already script against it changes.
+
+```bash
+ls -1 .aat/runs/ | tail -5          # the last five runs
+```
+
+Open the two or three before the current one to see which run a step first went
+red in. Without them, "it used to work" is a memory; with them, it is a record.
+
 ### 6. A report you can send to someone
 
 ```bash

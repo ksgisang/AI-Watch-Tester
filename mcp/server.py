@@ -274,6 +274,14 @@ async def aat_run_skill_mode(
     are not counted as passed. Report the first failure and the number of
     unverified steps; never fold them into a pass count.
 
+    "When did this start failing?" is answered from `.aat/runs/`, never from
+    `.aat/last_run.json`. The pointer file is overwritten on every run, so it
+    only ever describes the latest one. Each run is also filed as
+    `.aat/runs/<timestamp>-<nnn>_<scenarios>.json` with its status tally, newest
+    50 kept. Read the files just before the current one to say which run a step
+    first went red in; without them, "it used to pass" is the user's claim, not
+    yours.
+
     Exit code 4 means the opposite of a verdict: nothing ran, because approval
     needed a terminal and this process had none. Never report it as a pass or as
     a test failure — no browser opened and nothing was checked. Tell the user to

@@ -116,6 +116,10 @@ ModuleNotFoundError: No module named 'aat.engine.sweep'
       "24스텝 중 22 통과"처럼 미검증을 통과에 합산한 수치는 쓰지 마십시오.
       실패가 있었다면 첫 실패 단계 번호와 그 뒤 미검증 건수를 적습니다.
     - .aat/last_run.json 경로, reports/ 경로
+    - .aat/runs/ 에 쌓인 이번 실행 파일의 이름.
+      last_run.json 은 매번 덮어쓰이므로 "언제 빨개졌는가"에는 답하지 못합니다.
+      .aat/runs/ 쪽은 시각표가 이름에 붙어 남으므로, 직전 실행과 견주어
+      어느 실행부터 달라졌는지 적으실 수 있습니다(최근 50회 보관).
     - 로그에 다음 문구가 찍혔는지 (각각 어느 단계에서인지 함께):
         "below the fold"  /  "healed_from_bank"  /  "satisfied by OCR"
         "not counted"  /  "text went nowhere"
