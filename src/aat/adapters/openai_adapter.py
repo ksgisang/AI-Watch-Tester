@@ -295,6 +295,38 @@ _SCENARIO_JSON_SCHEMA: dict[str, Any] = {
                                 {"type": "null"},
                             ],
                         },
+                        # The prompt has asked for `expected_result` all along
+                        # and the model could not comply: `strict` plus
+                        # `additionalProperties: false` rejects any key not
+                        # listed here, so this one path generated scenarios
+                        # that had nothing to check after their last step --
+                        # even though AAT-115 ② had made the field real.
+                        # The enum is the same three the prompt names above;
+                        # widening one without the other re-opens the gap.
+                        "expected_result": {
+                            "anyOf": [
+                                {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "type": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "text_visible",
+                                                    "text_equals",
+                                                    "url_contains",
+                                                ],
+                                            },
+                                            "value": {"type": "string"},
+                                        },
+                                        "required": ["type", "value"],
+                                        "additionalProperties": False,
+                                    },
+                                },
+                                {"type": "null"},
+                            ],
+                        },
                     },
                     "required": [
                         "id",
@@ -303,6 +335,7 @@ _SCENARIO_JSON_SCHEMA: dict[str, Any] = {
                         "steps",
                         "tags",
                         "depends_on",
+                        "expected_result",
                     ],
                     "additionalProperties": False,
                 },

@@ -519,3 +519,95 @@ def test_every_generator_prompt_asks_for_critical(module: str) -> None:
     # And it has to say *not* to mark everything, or the model marks everything
     # and the first cosmetic mismatch halts the scenario.
     assert "Do NOT mark every step critical" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Tests: scenario-level `expected_result`
+#
+# Same mechanism as `critical` above, one level up. AAT-115 ② made the field
+# real -- it is evaluated after the last step and before teardown -- but the
+# structured-output path could not emit it, so every scenario this adapter
+# generated arrived with nothing to check once its steps were done.
+# ---------------------------------------------------------------------------
+
+
+def test_schema_allows_the_model_to_answer_expected_result() -> None:
+    from aat.adapters.openai_adapter import _SCENARIO_JSON_SCHEMA
+
+    scenario = _SCENARIO_JSON_SCHEMA["schema"]["properties"]["scenarios"]["items"]
+    assert "expected_result" in scenario["properties"]
+    assert "expected_result" in scenario["required"]
+
+
+def test_the_schema_and_the_prompt_name_the_same_assertion_types() -> None:
+    """Widening one without the other re-opens the gap this closed.
+
+    The prompt teaches three types. If the schema allowed fewer, the model
+    would be told to write something it cannot emit; if it allowed more, the
+    model could emit a type the prompt never explained how to fill in.
+    """
+    from aat.adapters.openai_adapter import (
+        _SCENARIO_JSON_SCHEMA,
+        _SYSTEM_GENERATE_SCENARIOS,
+    )
+
+    scenario = _SCENARIO_JSON_SCHEMA["schema"]["properties"]["scenarios"]["items"]
+    allowed = scenario["properties"]["expected_result"]["anyOf"][0]["items"]["properties"]["type"][
+        "enum"
+    ]
+
+    assert set(allowed) == {"text_visible", "text_equals", "url_contains"}
+    for kind in allowed:
+        assert f'"{kind}"' in _SYSTEM_GENERATE_SCENARIOS
+
+
+def test_a_null_expected_result_does_not_break_generation() -> None:
+    """The cost of the nullable form -- `required` leaves no other shape."""
+    from aat.core.models import Scenario
+
+    scenario = Scenario.model_validate(
+        {
+            "id": "SC-001",
+            "name": "Sign up",
+            "steps": [
+                {
+                    "step": 1,
+                    "action": "navigate",
+                    "value": "https://example.test",
+                    "description": "Open the site",
+                },
+            ],
+            "expected_result": None,
+        }
+    )
+    assert scenario.expected_result == []
+
+
+def test_a_typed_expectation_survives_as_a_checked_one() -> None:
+    """It must not arrive flagged `from_prose`, or it is only a warning.
+
+    That flag is what AAT-115 ② uses to say "nothing was checked here". An
+    object the model wrote properly has to come through as something the
+    evaluator actually checks.
+    """
+    from aat.core.models import AssertType, Scenario
+
+    scenario = Scenario.model_validate(
+        {
+            "id": "SC-001",
+            "name": "Sign up",
+            "steps": [
+                {
+                    "step": 1,
+                    "action": "navigate",
+                    "value": "https://example.test",
+                    "description": "Open the site",
+                },
+            ],
+            "expected_result": [{"type": "text_visible", "value": "가입 완료"}],
+        }
+    )
+
+    assert len(scenario.expected_result) == 1
+    assert scenario.expected_result[0].type == AssertType.TEXT_VISIBLE
+    assert scenario.expected_result[0].from_prose is False
