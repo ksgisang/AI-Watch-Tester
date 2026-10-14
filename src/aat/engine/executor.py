@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import re
 import time
@@ -153,9 +154,11 @@ _TYPED_VALUE_PROBE_JS = """
 # invent false ones. The accessible name is part of the key so that a wizard
 # which reuses one ``<input>`` for successive questions is not reported as a
 # collision: the element is the same, what it is asking for is not.
+_FIELD_SEL = 'input, textarea, select, [contenteditable=""], [contenteditable="true"]'
+
 _TYPED_IDENTITY_PROBE_JS = """
 (args) => {
-  const FIELD_SEL = 'input, textarea, select, [contenteditable=""], [contenteditable="true"]';
+  const FIELD_SEL = __FIELD_SEL__;
   const fields = Array.prototype.slice.call(document.querySelectorAll(FIELD_SEL));
   const scope = location.origin + location.pathname;
 
@@ -211,6 +214,7 @@ _TYPED_IDENTITY_PROBE_JS = """
     const label = nameOf(el);
     return {
       key: scope + '|' + fields.indexOf(el) + '|' + desc + '|' + label,
+      index: fields.indexOf(el),
       desc: desc,
       label: label,
       value: valueOf(el),
@@ -231,7 +235,7 @@ _TYPED_IDENTITY_PROBE_JS = """
 
   return { actual: identify(document.activeElement), intended: intended };
 }
-"""
+""".replace("__FIELD_SEL__", json.dumps(_FIELD_SEL))
 
 # Did the target text name one field while matching a different one?
 #
@@ -932,6 +936,47 @@ class StepExecutor:
             return None
         return {"x": float(pos[0]), "y": float(pos[1]), "width": 0.0, "height": 0.0}
 
+    async def _exact_label_field(self, text: str) -> Any | None:
+        """The single visible field whose *authored* label is exactly ``text``.
+
+        This asks the destination check's own question (see
+        ``_TYPED_IDENTITY_PROBE_JS``) and uses its answer to *search* rather
+        than only to judge: where an authored ``<label for>``, wrapping
+        ``<label>`` or ``aria-label`` says which field the step meant, the text
+        goes to that field. The two properties that make it safe to put first
+        are exactness and uniqueness -- a label that merely contains the target
+        does not qualify, and two fields carrying the same label disqualify
+        both, because then the page has not said which one either.
+
+        Invisible fields are skipped so that a component library whose
+        ``<label for>`` points at a hidden value holder does not capture the
+        text away from the box the user types in. The predicate is the probe's
+        own ``visible``, so a field this route declines is a field the
+        destination check also stays quiet about.
+
+        Returns ``None`` whenever there is no such field, in which case the
+        rest of the chain runs unchanged.
+        """
+        want = (text or "").strip()
+        if not want:
+            return None
+        page = self._engine.page  # type: ignore[attr-defined]
+        try:
+            probe = await page.evaluate(
+                _TYPED_IDENTITY_PROBE_JS,
+                {"text": want, "selector": ""},
+            )
+        except Exception:
+            logger.debug("exact-label lookup failed for %r", want, exc_info=True)
+            return None
+        intended = (probe or {}).get("intended") or {}
+        if not intended.get("visible"):
+            return None
+        index = intended.get("index")
+        if not isinstance(index, int) or isinstance(index, bool) or index < 0:
+            return None
+        return page.locator(_FIELD_SEL).nth(index)
+
     async def _find_input_field(
         self,
         step: StepConfig,
@@ -939,6 +984,7 @@ class StepExecutor:
         """Enhanced input field finding for find_and_type.
 
         Fallback chain when CSS selector fails:
+        0. the one visible field whose *authored* label is exactly the target
         1. placeholder text match (partial)
         2. get_by_label
         3. aria-label match
@@ -980,6 +1026,18 @@ class StepExecutor:
                     text_variants.append(syn)
 
         for variant in text_variants:
+            # 0. The one visible field whose authored label *is* this target.
+            #    Placed ahead of the partial matches below because this is the
+            #    only route that cannot pick someone else's field: the two
+            #    routes that follow are both substring matches -- a placeholder
+            #    reading '학교 이름을 입력하세요' captures the target '이름', and
+            #    so does a label reading '학교 이름' -- and between two substring
+            #    matches there is no principled winner, which is why their
+            #    relative order is left exactly as it was. See
+            #    ``_exact_label_field``.
+            named = await self._exact_label_field(variant)
+            if named is not None:
+                locators.append(named)
             # 1. placeholder partial match
             locators.append(page.locator(f'input[placeholder*="{variant}"]').first)
             locators.append(
@@ -995,6 +1053,9 @@ class StepExecutor:
                 if sep in variant:
                     short = variant.split(sep)[0].strip()
                     if short and short != variant:
+                        short_named = await self._exact_label_field(short)
+                        if short_named is not None:
+                            locators.append(short_named)
                         locators.append(
                             page.locator(f'input[placeholder*="{short}"]').first,
                         )

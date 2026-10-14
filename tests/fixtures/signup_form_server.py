@@ -252,8 +252,79 @@ _RICHTEXT = """<!doctype html>
 </body></html>
 """
 
+# The text misses its field even though the page says plainly which field was
+# meant. The name box carries `<label for="name">이름</label>`, so the search
+# resolves to it correctly -- and an autocomplete panel sits on top of it, so
+# the click at its centre lands on the panel and the keystrokes go there. This
+# is the shape that keeps the destination check necessary once resolution is
+# fixed: the net is not only for the search's own mistakes. It also catches a
+# remembered coordinate, a hand-written `click_at`, a healed template and a
+# canvas redraw, none of which the resolution order can speak for.
+_OVERLAID = """<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>자동완성</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 24px; background: #fff; }
+  label { display: block; margin-top: 12px; font-size: 14px; }
+  input { font-size: 15px; padding: 6px; width: 320px; box-sizing: border-box; }
+  .field { position: relative; }
+  #suggest {
+    position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+    z-index: 5; background: #fffbe6;
+  }
+</style></head>
+<body>
+<h1>학생 가입</h1>
+<form id="signup">
+  <label for="school">학교</label>
+  <input id="school" name="school" placeholder="학교를 입력하세요" />
+
+  <label for="name">이름</label>
+  <div class="field">
+    <input id="name" name="name" placeholder="이름을 입력하세요" />
+    <input id="suggest" name="suggest" aria-label="추천" placeholder="추천" />
+  </div>
+</form>
+</body></html>
+"""
+
+# Two fields carrying the same authored label. The page has not said which one
+# '주소' means, so the exact-label route has to decline both and let the rest of
+# the chain decide -- here a placeholder, which picks the second. Taking the
+# first would be the route inventing an answer the page did not give.
+_TWINLABEL = """<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>주소</title></head>
+<body>
+<form id="signup">
+  <label for="addr-old">주소</label>
+  <input id="addr-old" name="addrOld" />
+
+  <label for="addr-new">주소</label>
+  <input id="addr-new" name="addrNew" placeholder="주소를 입력하세요" />
+</form>
+</body></html>
+"""
+
+# A labelled field that is laid out but hidden from assistive technology -- a
+# decorative mirror of the real box. `bounding_box()` answers for it, so the
+# existing safety net in the resolution loop does not catch this one; only an
+# explicit visibility predicate does. The target has to reach the box a person
+# types into.
+_ARIAHIDDEN = """<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>도시</title></head>
+<body>
+<form id="signup">
+  <label for="city-mirror">도시</label>
+  <input id="city-mirror" name="cityMirror" aria-hidden="true" />
+  <input id="city-search" name="citySearch" placeholder="도시 검색" />
+</form>
+</body></html>
+"""
+
 _PAGES = {
     "/signup": _SIGNUP,
+    "/overlaid": _OVERLAID,
+    "/twinlabel": _TWINLABEL,
+    "/ariahidden": _ARIAHIDDEN,
     "/richtext": _RICHTEXT,
     "/plain": _PLAIN,
     "/longform": _LONGFORM,

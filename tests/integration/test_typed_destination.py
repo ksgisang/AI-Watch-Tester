@@ -18,16 +18,28 @@ match before an authored label:
 and ``#password`` is reachable by neither, because its placeholder is '8자 이상'.
 So step 9 ('비밀번호') and step 10 ('비밀번호 확인') both wrote into one box.
 
-These tests are about the verdict, not the resolution. The resolution order is
-left exactly as it was on purpose -- the requirement is that AWT say so when it
-picks wrong, and a test suite that only proved the new order works would prove
-nothing about the next form whose placeholders overlap differently.
+Two things have to hold together here, and the file is in two halves because of
+it.
 
-Both directions are measured. ``/longform`` is the form that misbehaved;
-``/cleanform`` is the same four fields with placeholders that do not name each
-other, and a warning there would mean the devices cost more than they are
-worth. ``/nolabel`` and ``/shimform`` pin the two places this stays quiet by
-choice.
+The resolution is fixed, which ``/longform`` proves: one route now runs ahead
+of the partial matches -- the single *visible* field whose authored label is
+exactly the target text. It is the verdict's own question, asked while
+searching instead of only while judging, so where the page says which field was
+meant the text goes there. The two routes it precedes are both left exactly
+where they were, because both are substring matches and between two substring
+matches there is no principled winner.
+
+The verdict is not thereby redundant, which ``/overlaid`` proves: the search
+resolves to the right field and the keystrokes still miss it, because an
+autocomplete panel covers the box. Resolution is also only one of the ways a
+click reaches a point -- a remembered coordinate, a hand-written ``click_at``, a
+healed template and a canvas redraw are others, and none of them consult a
+label. The devices are the net under all of them.
+
+Both directions are measured. ``/cleanform`` is the same four fields with
+placeholders that do not name each other, and a warning there would mean the
+devices cost more than they are worth. ``/nolabel``, ``/shimform``, ``/advance``
+and ``/richtext`` pin the places this stays quiet by choice.
 """
 
 from __future__ import annotations
@@ -110,43 +122,149 @@ def _type(step: int, text: str, value: str, *, critical: bool = False) -> StepCo
     )
 
 
-class TestTextInTheWrongField:
-    """Requirement (2): the verdict compares the field the step named against
-    the field that took the text."""
+class TestTheNamedFieldWins:
+    """The resolution half. On the form from the report, each target now
+    reaches the field whose label says it is the one."""
 
-    async def test_the_reported_step_is_not_a_pass(
+    async def test_an_authored_label_beats_someone_elses_placeholder(
         self, executor: StepExecutor, engine: WebEngine, base_url: str
     ) -> None:
-        """Step 7 of the real run, on the form that produced it."""
+        """Step 7 of the real run, on the form that produced it. '이름' is a
+        substring of the school box's placeholder ('학교 이름을 입력하세요 …') and
+        that box comes first in the document, which is how the text got there.
+        """
         await engine.navigate(f"{base_url}/longform")
-        # Step 4 first, because the school box holding a value is part of the
-        # shape: the name step appends to it rather than filling an empty box.
+        # Step 4 first, because the school box holding a value is what made the
+        # original defect legible: the name step appended to it.
         assert (await executor.execute_step(_type(4, "학교", "인천하늘고등학교"))).status == (
             StepStatus.PASSED
         )
 
         result = await executor.execute_step(_type(7, "이름", "에이더블유티점검"))
 
-        assert result.status == StepStatus.WARNING, result.error_message
-        assert result.error_message is not None
-        # The message has to name both fields. "Typing may have failed" on a
-        # step that looks like it worked sends the reader to the wrong place.
-        assert "#school" in result.error_message
-        assert "#name" in result.error_message
-        assert "target.selector" in result.error_message
-        # And the page has to agree: the named box really is empty.
-        assert await engine.page.input_value("#name") == ""
+        assert result.status == StepStatus.PASSED, result.error_message
+        assert await engine.page.input_value("#name") == "에이더블유티점검"
+        # And the box that used to swallow it still holds only its own value.
+        assert await engine.page.input_value("#school") == "인천하늘고등학교"
 
-    async def test_the_step_that_resolved_correctly_still_passes(
+    async def test_a_field_no_partial_match_can_reach_is_reachable(
         self, executor: StepExecutor, engine: WebEngine, base_url: str
     ) -> None:
-        """'학교' is unambiguous on this page and must stay green. Without this
-        the rule is indistinguishable from warning on every long form."""
+        """The pair that collided. '비밀번호' matched the *confirm* box by
+        placeholder ('비밀번호 재입력'), and ``#password`` was reachable by nothing
+        at all because its placeholder is '8자 이상' -- so both steps wrote into
+        one box. Each now fills its own, which is the defect inverted."""
+        await engine.navigate(f"{base_url}/longform")
+
+        ninth = await executor.execute_step(_type(9, "비밀번호", PASSWORD))
+        tenth = await executor.execute_step(_type(10, "비밀번호 확인", PASSWORD))
+
+        assert ninth.status == StepStatus.PASSED, ninth.error_message
+        assert tenth.status == StepStatus.PASSED, tenth.error_message
+        assert await engine.page.input_value("#password") == PASSWORD
+        assert await engine.page.input_value("#password-confirm") == PASSWORD
+
+    async def test_the_step_that_always_resolved_correctly_still_passes(
+        self, executor: StepExecutor, engine: WebEngine, base_url: str
+    ) -> None:
+        """'학교' was never ambiguous on this page and must stay green."""
         await engine.navigate(f"{base_url}/longform")
         result = await executor.execute_step(_type(4, "학교", "인천하늘고등학교"))
 
         assert result.status == StepStatus.PASSED, result.error_message
         assert await engine.page.input_value("#school") == "인천하늘고등학교"
+
+    async def test_a_placeholder_only_form_still_resolves(
+        self, executor: StepExecutor, engine: WebEngine, base_url: str
+    ) -> None:
+        """The new route answers ``None`` on a form with no authored labels, and
+        the rest of the chain has to carry on unchanged. Without this the fix
+        could be a silent regression on every unlabelled form on the web."""
+        await engine.navigate(f"{base_url}/nolabel")
+        result = await executor.execute_step(_type(2, "성함", "에이더블유티점검"))
+
+        assert result.status == StepStatus.PASSED, result.error_message
+        assert await engine.page.input_value("#name") == "에이더블유티점검"
+
+    async def test_a_phrased_target_reaches_the_field_its_prefix_names(
+        self, executor: StepExecutor, engine: WebEngine, base_url: str
+    ) -> None:
+        """A target written as a phrase falls through to the short-prefix
+        branch, which needs the same route for the same reason.
+
+        '이름 입력' reaches none of the full-text routes on this page: the
+        placeholders read '이름을 입력', so no substring of them is '이름 입력',
+        and no label contains the phrase either. Resolution then retries on the
+        prefix '이름' -- and at that point the hazard is back exactly as it was,
+        because '이름' is a substring of the school box's placeholder. Scenario
+        text comes out of a generator and a person's typing, so it is phrased
+        this way often enough to matter.
+        """
+        await engine.navigate(f"{base_url}/longform")
+        result = await executor.execute_step(_type(7, "이름 입력", "에이더블유티점검"))
+
+        assert result.status == StepStatus.PASSED, result.error_message
+        assert await engine.page.input_value("#name") == "에이더블유티점검"
+        assert await engine.page.input_value("#school") == ""
+
+    async def test_two_fields_with_one_label_defer_to_the_rest_of_the_chain(
+        self, executor: StepExecutor, engine: WebEngine, base_url: str
+    ) -> None:
+        """Exactness is not enough on its own -- the label also has to be
+        unique. Two fields labelled '주소' means the page has not said which one,
+        and taking the first would be the route inventing an answer. It declines
+        and the placeholder decides, which is the second field here."""
+        await engine.navigate(f"{base_url}/twinlabel")
+        result = await executor.execute_step(_type(2, "주소", "인천 서구"))
+
+        assert result.status == StepStatus.PASSED, result.error_message
+        assert await engine.page.input_value("#addr-new") == "인천 서구"
+        assert await engine.page.input_value("#addr-old") == ""
+
+    async def test_a_label_on_a_field_hidden_from_assistive_tech_is_declined(
+        self, executor: StepExecutor, engine: WebEngine, base_url: str
+    ) -> None:
+        """The labelled field is a decorative mirror: laid out, so
+        ``bounding_box()`` answers for it and the loop's existing safety net
+        does not catch it, but ``aria-hidden`` and therefore not a box anyone
+        types into. Only the route's own visibility predicate keeps the text
+        away from it -- and it is the same predicate the verdict reads, so a
+        field declined here is a field the verdict also stays quiet about."""
+        await engine.navigate(f"{base_url}/ariahidden")
+        result = await executor.execute_step(_type(3, "도시", "인천"))
+
+        assert result.status == StepStatus.PASSED, result.error_message
+        assert await engine.page.input_value("#city-search") == "인천"
+        assert await engine.page.input_value("#city-mirror") == ""
+
+
+class TestTextInTheWrongField:
+    """Requirement (2): the verdict compares the field the step named against
+    the field that took the text.
+
+    Measured on ``/overlaid``, where the search gets it *right* -- the name box
+    carries ``<label for>`` and is what resolution picks -- and an autocomplete
+    panel on top of it takes the keystrokes. Fixing resolution does not retire
+    this check; it only removes one of the ways the two can diverge.
+    """
+
+    async def test_the_reported_step_is_not_a_pass(
+        self, executor: StepExecutor, engine: WebEngine, base_url: str
+    ) -> None:
+        await engine.navigate(f"{base_url}/overlaid")
+        result = await executor.execute_step(_type(7, "이름", "에이더블유티점검"))
+
+        assert result.status == StepStatus.WARNING, result.error_message
+        assert result.error_message is not None
+        # The message has to name both fields. "Typing may have failed" on a
+        # step that looks like it worked sends the reader to the wrong place.
+        assert "#suggest" in result.error_message
+        assert "#name" in result.error_message
+        assert "target.selector" in result.error_message
+        # And the page has to agree: the named box really is empty, and this is
+        # a covered field rather than a mis-resolved one.
+        assert await engine.page.input_value("#name") == ""
+        assert await engine.page.input_value("#suggest") == "에이더블유티점검"
 
     async def test_critical_makes_it_a_failure(
         self, executor: StepExecutor, engine: WebEngine, base_url: str
@@ -154,42 +272,54 @@ class TestTextInTheWrongField:
         """Same evidence, louder, when the author said the step matters. A
         critical step stops the run rather than returning a result, so the
         evidence has to survive into the exception the runner sees."""
-        await engine.navigate(f"{base_url}/longform")
+        await engine.navigate(f"{base_url}/overlaid")
         with pytest.raises(CriticalStepError) as caught:
             await executor.execute_step(_type(7, "이름", "에이더블유티점검", critical=True))
 
         assert "#name" in str(caught.value)
-        assert "#school" in str(caught.value)
+        assert "#suggest" in str(caught.value)
 
 
 class TestTwoTargetsOneField:
     """Requirement (1): a field already filled for a different target is not a
-    place a later step can be said to have succeeded."""
+    place a later step can be said to have succeeded.
 
-    async def test_both_password_steps_are_reported(
+    Measured on ``/nolabel``, which is where two targets can still land in one
+    box: nothing on that page says which field '이름' meant, so the new route
+    declines, a placeholder substring picks the school box for both targets,
+    and rule (2) stays silent by design. What is left to report is the
+    collision, and this is the shape in which device (1) is the only reporter.
+    """
+
+    async def test_both_steps_are_reported(
         self, executor: StepExecutor, engine: WebEngine, base_url: str
     ) -> None:
-        await engine.navigate(f"{base_url}/longform")
+        await engine.navigate(f"{base_url}/nolabel")
 
-        ninth = await executor.execute_step(_type(9, "비밀번호", PASSWORD))
-        tenth = await executor.execute_step(_type(10, "비밀번호 확인", PASSWORD))
+        ninth = await executor.execute_step(_type(9, "이름", "에이더블유티점검"))
+        tenth = await executor.execute_step(_type(10, "학교", "인천하늘고등학교"))
 
-        # Step 9 named #password and wrote into #password-confirm.
-        assert ninth.status == StepStatus.WARNING, ninth.error_message
-        assert ninth.error_message is not None
-        assert "#password-confirm" in ninth.error_message
+        # Step 9 is a pass: '이름' went to the wrong box, and with no authored
+        # label on the page there is no evidence of where it belonged.
+        assert ninth.status == StepStatus.PASSED, ninth.error_message
 
-        # Step 10 named #password-confirm and resolved to it correctly -- so
-        # rule (2) has nothing to say. It is only not a pass because step 9
-        # already spent that field.
+        # Step 10 named the school box and resolved to it correctly -- so rule
+        # (2) has nothing to say. It is only not a pass because step 9 already
+        # spent that field, which is exactly the hole device (1) fills.
         assert tenth.status == StepStatus.WARNING, tenth.error_message
         assert tenth.error_message is not None
         assert "step 9" in tenth.error_message
-        assert "비밀번호" in tenth.error_message
+        assert "이름" in tenth.error_message
 
-        # The page agrees: one box, two passwords, and #password never filled.
-        assert await engine.page.input_value("#password") == ""
-        assert await engine.page.input_value("#password-confirm") == PASSWORD * 2
+        # The page agrees: one box holds both, and #name was never filled.
+        # Not asserted as a concatenation -- the second click lands mid-text so
+        # the caret sits inside what step 9 typed and the value interleaves.
+        # Which is the same reason no rule compares the typed string against
+        # the resulting value: a box can hold what it was given without the
+        # value ever equalling it.
+        assert await engine.page.input_value("#name") == ""
+        school = await engine.page.input_value("#school")
+        assert "에이더블유티" in school and "인천하늘고등학교" in school, school
 
     async def test_retyping_the_same_target_is_not_a_collision(
         self, executor: StepExecutor, engine: WebEngine, base_url: str
@@ -221,14 +351,14 @@ class TestTwoTargetsOneField:
         does not shift it, this fails rather than passing on a coordinate that
         never changed.
         """
-        await engine.navigate(f"{base_url}/longform")
-        await executor.execute_step(_type(9, "비밀번호", PASSWORD))
+        await engine.navigate(f"{base_url}/nolabel")
+        await executor.execute_step(_type(9, "이름", "에이더블유티점검"))
 
-        top = "document.querySelector('#password-confirm').getBoundingClientRect().top"
+        top = "document.querySelector('#school').getBoundingClientRect().top"
         before = await engine.page.evaluate(top)
         await engine.page.evaluate(
             "document.querySelector('#signup').insertAdjacentHTML('afterbegin',"
-            " '<p style=\"height:180px;color:#c00\">비밀번호를 확인해주세요.</p>')"
+            " '<p style=\"height:180px;color:#c00\">이름을 입력해주세요.</p>')"
         )
         after = await engine.page.evaluate(top)
         assert round(after) != round(before), (
@@ -239,7 +369,7 @@ class TestTwoTargetsOneField:
             "measurement above no longer describes what it sees"
         )
 
-        tenth = await executor.execute_step(_type(10, "비밀번호 확인", PASSWORD))
+        tenth = await executor.execute_step(_type(10, "학교", "인천하늘고등학교"))
 
         assert tenth.status == StepStatus.WARNING, tenth.error_message
         assert "step 9" in (tenth.error_message or "")
@@ -329,16 +459,23 @@ class TestAmbiguityIsSaidOutLoud:
         base_url: str,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        await engine.navigate(f"{base_url}/longform")
+        """``/shimform`` is where a choice is still made quietly now that an
+        exact visible label wins outright: the field labelled '도시' is the
+        hidden value holder, so the new route declines it and a placeholder
+        picks the search box. Typing there is right -- that is why the verdict
+        stays silent on this page -- but the author should know the page says
+        '도시' means something else.
+        """
+        await engine.navigate(f"{base_url}/shimform")
         with caplog.at_level(logging.WARNING, logger="aat.engine.executor"):
-            await executor.execute_step(_type(7, "이름", "에이더블유티점검"))
+            await executor.execute_step(_type(3, "도시", "인천"))
 
         ambiguity = [r for r in caplog.records if "labelled exactly" in r.getMessage()]
         assert ambiguity, [r.getMessage() for r in caplog.records]
         said = ambiguity[0].getMessage()
         # Both candidates and the way out, or the line is just noise.
-        assert "#school" in said
-        assert "#name" in said
+        assert "#city-search" in said
+        assert "#city-value" in said
         assert "target.selector" in said
 
     async def test_nothing_is_logged_when_there_was_no_choice(
