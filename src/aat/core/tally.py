@@ -35,7 +35,26 @@ from typing import TYPE_CHECKING
 from aat.core.models import StepStatus
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from aat.core.models import StepResult
+
+
+def tally_statuses(statuses: Iterable[str]) -> dict[str, int]:
+    """Count a run by step status, keeping every status it actually saw.
+
+    Takes strings rather than ``StepResult`` so that the stored run history
+    (rows of plain JSON) and a live run (model objects) are counted by the
+    same function. Nothing here knows the names of the statuses: a reader
+    that special-cases ``passed`` and ``failed`` is a reader that silently
+    drops ``UNVERIFIED`` the day it is introduced, which is exactly how the
+    dashboard came to report a number the CLI had already stopped reporting.
+    """
+    counts: dict[str, int] = {}
+    for status in statuses:
+        key = str(status or "") or "unknown"
+        counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def unverified_note(broke_at: int | None) -> str:

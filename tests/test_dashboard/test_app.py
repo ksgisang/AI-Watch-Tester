@@ -554,3 +554,224 @@ class TestBuildVariables:
 
         variables = _build_variables()
         assert "project_name" in variables
+
+
+class TestTheDashboardSaysWhatTheTerminalSays:
+    """Two registers reading one set of facts, not two accounts of one run.
+
+    A browser and a terminal driving the same loop reported it differently.
+    The terminal named the files that were written, the proposed changes
+    validation refused, and how to undo them (AAT-122); the browser said
+    "Loop ended after 3 iteration(s)". The terminal stopped counting a pass
+    that came after the scenario broke (AAT-123); the browser went on
+    counting it.
+
+    The payload is assembled by a function rather than inline in the
+    WebSocket handler so that these can be read without a browser, an
+    engine or an AI adapter.
+    """
+
+    @staticmethod
+    def _result(
+        statuses: list[str],
+        *,
+        success: bool = False,
+        applied: list[str] | None = None,
+        iterations: int = 1,
+    ) -> object:
+        from aat.core.models import LoopIteration, LoopResult, StepResult, TestResult
+
+        steps = [
+            StepResult(
+                step=i + 1,
+                action="find_and_click",
+                description=f"Step {i + 1}",
+                status=status,
+                elapsed_ms=1,
+            )
+            for i, status in enumerate(statuses)
+        ]
+        test_result = TestResult(
+            scenario_id="SC-901",
+            scenario_name="signup",
+            passed=success,
+            steps=steps,
+            total_steps=len(steps),
+            passed_steps=sum(1 for s in steps if s.status.value == "passed"),
+            failed_steps=sum(1 for s in steps if s.status.value == "failed"),
+            duration_ms=10.0,
+        )
+        return LoopResult(
+            success=success,
+            total_iterations=iterations,
+            iterations=[
+                LoopIteration(
+                    iteration=n + 1,
+                    test_result=test_result,
+                    applied_paths=list(applied or []),
+                )
+                for n in range(iterations)
+            ],
+            reason="max loops exceeded",
+            duration_ms=20.0,
+        )
+
+    def test_unverified_steps_reach_the_browser(self) -> None:
+        from aat.dashboard.app import _loop_tally
+
+        result = self._result(["passed", "failed", "unverified", "unverified"])
+
+        assert _loop_tally(result) == {"passed": 1, "failed": 1, "unverified": 2}
+
+    def test_the_tally_describes_the_attempt_the_run_ended_on(self) -> None:
+        from aat.core.models import StepResult, TestResult
+        from aat.dashboard.app import _loop_tally
+
+        result = self._result(["failed"], iterations=2)
+        # The second attempt went green; the first is how it got there.
+        result.iterations[-1].test_result = TestResult(
+            scenario_id="SC-901",
+            scenario_name="signup",
+            passed=True,
+            steps=[
+                StepResult(
+                    step=1,
+                    action="find_and_click",
+                    description="Step 1",
+                    status="passed",
+                    elapsed_ms=1,
+                )
+            ],
+            total_steps=1,
+            passed_steps=1,
+            failed_steps=0,
+            duration_ms=10.0,
+        )
+
+        assert _loop_tally(result) == {"passed": 1}
+
+    def test_a_loop_with_no_iterations_tallies_nothing(self) -> None:
+        from aat.core.models import LoopResult
+        from aat.dashboard.app import _loop_tally
+
+        empty = LoopResult(success=False, total_iterations=0, iterations=[], duration_ms=0.0)
+
+        assert _loop_tally(empty) == {}
+
+    def test_the_tally_is_actually_in_the_message(self) -> None:
+        """Counting correctly and sending the count are two repairs.
+
+        Found by mutation: replacing the payload's tally with an empty
+        dict left every test above green, because they all call
+        `_loop_tally` themselves. That proves the counter counts; it says
+        nothing about the browser ever being told -- and being told is the
+        entire B-4 item, since the terminal already knew.
+        """
+        from aat.core.models import ApprovalMode
+        from aat.dashboard.app import _loop_complete_payload
+
+        payload = _loop_complete_payload(
+            self._result(["passed", "failed", "unverified"]),
+            ApprovalMode.AUTO,
+            "reports",
+        )
+
+        assert payload["tally"] == {"passed": 1, "failed": 1, "unverified": 1}, (
+            "the page is being handed a different set of facts from the terminal"
+        )
+
+    def test_the_plain_verdict_is_sent(self) -> None:
+        from aat.core.models import ApprovalMode
+        from aat.dashboard.app import _loop_complete_payload
+
+        payload = _loop_complete_payload(
+            self._result(["failed"], applied=["src/app.py"]),
+            ApprovalMode.AUTO,
+            "reports",
+        )
+        plain = "\n".join(payload["verdict"]["plain"])
+
+        assert "a person needs to look at this" in plain
+        assert "src/app.py" in plain
+        # The undo line is the part that is dangerous to get wrong, and the
+        # one a terminal user had and a browser user did not.
+        assert "git checkout --" in plain
+
+    def test_the_developer_register_is_sent_alongside_it(self) -> None:
+        from aat.core.models import ApprovalMode
+        from aat.dashboard.app import _loop_complete_payload
+
+        payload = _loop_complete_payload(
+            self._result(["failed"], iterations=3),
+            ApprovalMode.MANUAL,
+            "reports",
+        )
+        developer = "\n".join(payload["verdict"]["developer"])
+
+        assert "after 3 iteration(s)" in developer
+        assert "mode=manual" in developer
+
+    def test_the_undo_line_is_the_one_for_this_mode(self) -> None:
+        from aat.core.models import ApprovalMode
+        from aat.dashboard.app import _loop_complete_payload
+
+        # `branch` leaves the edits on a branch, not in the working copy, so
+        # `git checkout -- <path>` there would throw away the user's own
+        # uncommitted work and change nothing AWT wrote.
+        payload = _loop_complete_payload(
+            self._result(["failed"], applied=["src/app.py"]),
+            ApprovalMode.BRANCH,
+            "reports",
+        )
+        plain = "\n".join(payload["verdict"]["plain"])
+
+        assert "git checkout --" not in plain
+
+    def test_the_old_fields_are_still_there(self) -> None:
+        # Additive: whatever the page already reads must keep arriving.
+        from aat.core.models import ApprovalMode
+        from aat.dashboard.app import _loop_complete_payload
+
+        payload = _loop_complete_payload(self._result(["failed"]), ApprovalMode.AUTO, "reports")
+
+        assert payload["type"] == "loop_complete"
+        assert payload["success"] is False
+        assert payload["iterations"] == 1
+        assert payload["reason"] == "max loops exceeded"
+        assert payload["duration_ms"] == 20.0
+
+
+class TestTheDashboardRunnerAppliesTheSharedRule:
+    """The browser's own runner never demoted a post-failure pass.
+
+    ``_execute_loop`` goes through ``core.loop``, which applies the rule;
+    ``_execute_run`` and the one-click path call the executor directly and
+    did not, so the dashboard kept reporting the inflated tally that AAT-123
+    removed from the terminal. These read the source: both paths need a
+    browser and an engine to run, and the defect was an omission, so the
+    call site is what gets checked.
+    """
+
+    @staticmethod
+    def _source() -> str:
+        from pathlib import Path
+
+        import aat.dashboard.app as mod
+
+        return Path(mod.__file__).read_text(encoding="utf-8")
+
+    def test_every_executor_call_in_the_dashboard_is_demoted(self) -> None:
+        source = self._source()
+        direct_calls = source.count("await executor.execute_step(")
+
+        assert direct_calls == 2
+        assert source.count("demote_if_flow_broken(raw, broke_at)") == direct_calls
+
+    def test_nothing_counts_statuses_by_hand(self) -> None:
+        # A hand-rolled `if passed: n += 1 else: m += 1` is how UNVERIFIED
+        # disappeared from this file in the first place.
+        source = self._source()
+
+        assert "passed_count += 1" not in source
+        assert "failed_count += 1" not in source
+        assert source.count("tally_statuses(") >= 2

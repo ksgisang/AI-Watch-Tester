@@ -10,12 +10,18 @@ import asyncio
 import contextlib
 import re
 import sys
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from aat.core.config import load_config, save_config
 from aat.core.exceptions import AATError, DashboardError
 from aat.core.models import ApprovalMode, Config, StepStatus
+from aat.core.tally import demote_if_flow_broken, tally_statuses
+from aat.core.verdict import render_developer, render_plain, verdict_from_loop
+
+if TYPE_CHECKING:
+    from aat.core.models import LoopResult
 
 try:
     from fastapi import (  # type: ignore[import-not-found]
@@ -1373,9 +1379,13 @@ async def _execute_run(
 
             total_steps = sum(len(sc.steps) for sc in scenarios)
             step_counter = 0
+            statuses: list[str] = []
 
             for sc in scenarios:
                 _ws_handler.section(f"Scenario: {sc.id} — {sc.name}")
+                # Reset per scenario: a scenario that broke says nothing about
+                # the next one, which starts from its own first step.
+                broke_at: int | None = None
 
                 for step_config in sc.steps:
                     step_counter += 1
@@ -1386,7 +1396,18 @@ async def _execute_run(
                     )
                     _ws_handler.progress("Testing", step_counter, total_steps)
 
-                    step_result = await executor.execute_step(step_config)
+                    raw = await executor.execute_step(step_config)
+                    # Same rule the CLI applies: a pass that came after the
+                    # flow broke is recorded, not counted. Without this the
+                    # dashboard went on reporting the inflated tally that
+                    # AAT-123 removed from the terminal.
+                    step_result = demote_if_flow_broken(raw, broke_at)
+                    if broke_at is None and step_result.status in (
+                        StepStatus.FAILED,
+                        StepStatus.ERROR,
+                    ):
+                        broke_at = step_config.step
+                    statuses.append(step_result.status.value)
 
                     passed = step_result.status == StepStatus.PASSED
                     _ws_handler.step_result(
@@ -1415,8 +1436,15 @@ async def _execute_run(
                         pass
 
             # Summary
+            tally = tally_statuses(statuses)
             _ws_handler.success(f"Test run complete: {step_counter} steps executed")
-            await _manager.broadcast({"type": "run_complete"})
+            if tally.get(StepStatus.UNVERIFIED.value):
+                _ws_handler.warning(
+                    f"{tally[StepStatus.UNVERIFIED.value]} step(s) passed after the "
+                    "scenario had already broken and are not counted — they ran on a "
+                    "screen the scenario never reached"
+                )
+            await _manager.broadcast({"type": "run_complete", "tally": tally})
 
         finally:
             await engine.stop()
@@ -1433,6 +1461,53 @@ async def _execute_run(
         if guidance:
             msg["guidance"] = guidance
         await _manager.broadcast(msg)
+
+
+def _loop_tally(result: LoopResult) -> dict[str, int]:
+    """Count the final attempt by step status, UNVERIFIED included.
+
+    The loop already demotes a pass that came after the flow broke
+    (``core.tally``), so the statuses are correct by the time they get here —
+    what was missing is that nobody sent them to the browser. Built from the
+    last iteration because that is the state the run ended in; the earlier
+    attempts are the history of getting there.
+    """
+    if not result.iterations:
+        return {}
+    last = result.iterations[-1].test_result
+    return tally_statuses(step.status.value for step in last.steps)
+
+
+def _loop_complete_payload(
+    result: LoopResult,
+    mode: ApprovalMode,
+    reports_dir: str,
+) -> dict[str, Any]:
+    """The whole ending, assembled where it can be tested.
+
+    A browser and a terminal driving the same loop were saying different
+    things about the same run: the terminal named the files that were
+    written, the proposed changes that were refused and how to undo them,
+    and the browser said "Loop ended after 3 iteration(s)". Both registers
+    now come from :func:`aat.core.verdict.verdict_from_loop`, which is the
+    one place those facts are gathered.
+    """
+    verdict = replace(
+        verdict_from_loop(result, mode.value),
+        report_hint=reports_dir,
+    )
+    return {
+        "type": "loop_complete",
+        "success": result.success,
+        "iterations": result.total_iterations,
+        "reason": result.reason,
+        "duration_ms": result.duration_ms,
+        "verdict": {
+            "plain": render_plain(verdict),
+            "developer": render_developer(verdict),
+        },
+        "tally": _loop_tally(result),
+    }
 
 
 async def _execute_loop(
@@ -1546,15 +1621,12 @@ async def _execute_loop(
                 f"Loop ended after {result.total_iterations} iteration(s): {result.reason}"
             )
 
-        await _manager.broadcast(
-            {
-                "type": "loop_complete",
-                "success": result.success,
-                "iterations": result.total_iterations,
-                "reason": result.reason,
-                "duration_ms": result.duration_ms,
-            }
-        )
+        # The ending the CLI prints, printed here too.
+        payload = _loop_complete_payload(result, mode, str(Path(config.reports_dir)))
+        for line in payload["verdict"]["plain"]:
+            _ws_handler.info(line)
+
+        await _manager.broadcast(payload)
 
     except asyncio.CancelledError:
         _ws_handler.warning("DevQA Loop cancelled")
@@ -1767,11 +1839,11 @@ async def _execute_oneclick(url: str) -> None:
 
             total_steps = sum(len(sc.steps) for sc in loaded_scenarios)
             step_counter = 0
-            passed_count = 0
-            failed_count = 0
+            statuses: list[str] = []
 
             for sc in loaded_scenarios:
                 _ws_handler.section(f"Scenario: {sc.id} — {sc.name}")
+                broke_at: int | None = None
 
                 for step_config in sc.steps:
                     step_counter += 1
@@ -1782,12 +1854,15 @@ async def _execute_oneclick(url: str) -> None:
                     )
                     _ws_handler.progress("Running tests", step_counter, total_steps)
 
-                    step_result = await executor.execute_step(step_config)
+                    raw = await executor.execute_step(step_config)
+                    step_result = demote_if_flow_broken(raw, broke_at)
+                    if broke_at is None and step_result.status in (
+                        StepStatus.FAILED,
+                        StepStatus.ERROR,
+                    ):
+                        broke_at = step_config.step
+                    statuses.append(step_result.status.value)
                     passed = step_result.status == StepStatus.PASSED
-                    if passed:
-                        passed_count += 1
-                    else:
-                        failed_count += 1
 
                     _ws_handler.step_result(
                         step_counter,
@@ -1808,12 +1883,25 @@ async def _execute_oneclick(url: str) -> None:
             _ws_handler.section("Phase 3: Results")
             _ws_handler.progress("Complete", 3, 3)
 
+            tally = tally_statuses(statuses)
+            passed_count = tally.get(StepStatus.PASSED.value, 0)
+            unverified_count = tally.get(StepStatus.UNVERIFIED.value, 0)
+            # Everything that is not a pass and not an unverified pass. Named
+            # this way round so a status added later lands in "not passed"
+            # rather than disappearing from the summary altogether.
+            failed_count = total_steps - passed_count - unverified_count
+
             summary = (
                 f"One-click test complete: "
                 f"{passed_count} passed, {failed_count} failed "
                 f"out of {total_steps} steps"
             )
-            if failed_count == 0:
+            if unverified_count:
+                summary += (
+                    f" ({unverified_count} not counted: they ran after the "
+                    "scenario had already broken)"
+                )
+            if failed_count == 0 and unverified_count == 0:
                 _ws_handler.success(summary)
             else:
                 _ws_handler.warning(summary)
@@ -1826,6 +1914,8 @@ async def _execute_oneclick(url: str) -> None:
                     "total_steps": total_steps,
                     "passed": passed_count,
                     "failed": failed_count,
+                    "unverified": unverified_count,
+                    "tally": tally,
                 }
             )
 
