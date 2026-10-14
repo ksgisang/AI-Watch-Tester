@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from aat.core.models import StepResult
+    from aat.core.models import StepConfig, StepResult
     from aat.learning.store import LearnedStore
 
 logger = logging.getLogger(__name__)
@@ -99,12 +99,42 @@ def classify_failure(error_message: str) -> str:
     return "unknown"
 
 
+def describe_target(step: StepConfig | None) -> str:
+    """Say, in words, what this step was looking for.
+
+    The diagnosis block used to carry the page's ``<title>`` and no record of
+    the string the step was hunting for -- that one lived inside the error
+    sentence and nowhere else. When the two happen to be the same words (an
+    app whose tab title is also its heading), the block printed the sought
+    text as ``PAGE_TITLE`` one line above "not found on page", and readers
+    took it to mean AWT had contradicted itself. Naming the two separately is
+    the fix; the coincidence itself is normal and not a defect.
+    """
+    if step is None:
+        return ""
+    parts: list[str] = []
+    for item in step.expected:
+        value = (item.value or "").strip()
+        if value:
+            parts.append(f"{item.type.value} '{value}'")
+    target = step.target
+    if target is not None:
+        if target.selector:
+            parts.append(f"selector '{target.selector}'")
+        if target.text:
+            parts.append(f"text '{target.text}'")
+        if target.image:
+            parts.append(f"image '{target.image}'")
+    return ", ".join(parts)
+
+
 async def collect_failure_context(
     engine: object,
     step_result: StepResult,
     scenario_path: str,
     data_dir: str = ".aat",
     actual_cause: str = "",
+    step: StepConfig | None = None,
 ) -> dict[str, Any]:
     """Collect structured diagnostic data from the browser at failure point.
 
@@ -115,6 +145,10 @@ async def collect_failure_context(
             author's interpretation (step.message). Classification keys off
             this, so a step that died for an unrelated reason is not
             diagnosed as a broken assertion.
+        step: The scenario step that failed, when the caller has it. Only
+            source of what the step was looking for -- ``StepResult`` does
+            not carry the target. Optional so that callers without it keep
+            working; they simply get a block without that line.
     """
     context: dict[str, Any] = {
         "step": step_result.step,
@@ -124,6 +158,9 @@ async def collect_failure_context(
         "actual_cause": actual_cause,
         "elapsed_ms": step_result.elapsed_ms,
     }
+    looked_for = describe_target(step)
+    if looked_for:
+        context["looked_for"] = looked_for
 
     try:
         # Current URL
@@ -171,6 +208,25 @@ async def collect_failure_context(
     return context
 
 
+#: Said next to the page title whenever it is the very string the step was
+#: hunting for. Without it the block reads as a contradiction.
+_TITLE_IS_NOT_BODY_TEXT = (
+    "same words the step looked for — a <title> is tab metadata, "
+    "not page text, and never satisfies a text assertion"
+)
+
+
+def _title_is_the_sought_text(context: dict[str, Any]) -> bool:
+    """Is the page title the exact string this step was looking for?
+
+    Matched on the quoted token rather than by substring, so a short title
+    that merely occurs inside a longer sought phrase does not raise the note.
+    """
+    title = str(context.get("page_title", "") or "").strip()
+    looked_for = str(context.get("looked_for", "") or "")
+    return bool(title) and f"'{title}'" in looked_for
+
+
 def format_diagnosis(
     context: dict[str, Any],
     scenario_file: str = "",
@@ -189,12 +245,16 @@ def format_diagnosis(
     lines.append(f"  Error:    {context.get('error', '')}")
     if context.get("actual_cause"):
         lines.append(f"    ↳ actual cause: {context['actual_cause']}")
+    if context.get("looked_for"):
+        lines.append(f"  Looked for: {context['looked_for']}")
 
     # Browser context
     if context.get("url"):
         lines.append(f"  URL:      {context['url']}")
     if context.get("page_title"):
-        lines.append(f"  Title:    {context['page_title']}")
+        lines.append(f"  Page title: {context['page_title']}")
+        if _title_is_the_sought_text(context):
+            lines.append(f"    ↳ {_TITLE_IS_NOT_BODY_TEXT}")
     if context.get("screenshot"):
         lines.append(f"  Screenshot: {context['screenshot']}")
 
@@ -275,10 +335,16 @@ def format_skill_diagnosis(
     # When the step died for another reason, say so explicitly.
     if context.get("actual_cause"):
         lines.append(f"ACTUAL_CAUSE: {context['actual_cause']}")
+    if context.get("looked_for"):
+        lines.append(f"LOOKED_FOR: {context['looked_for']}")
     lines += [
         f"SCREENSHOT: {context.get('screenshot', 'N/A')}",
         f"URL: {context.get('url', 'N/A')}",
         f"PAGE_TITLE: {context.get('page_title', 'N/A')}",
+    ]
+    if _title_is_the_sought_text(context):
+        lines.append(f"PAGE_TITLE_NOTE: {_TITLE_IS_NOT_BODY_TEXT}")
+    lines += [
         f"CATEGORY: {ftype}",
         f"POSSIBLE_CAUSE: {possible_cause}",
     ]
