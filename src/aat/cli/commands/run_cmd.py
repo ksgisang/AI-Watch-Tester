@@ -6,7 +6,9 @@ import asyncio
 import contextlib
 import json as _json
 import os
+import re
 import time
+from datetime import datetime
 from pathlib import Path
 
 import typer
@@ -23,7 +25,7 @@ from aat.core.exceptions import AATError, ReporterError
 from aat.core.models import FIND_ACTIONS, Scenario, StepResult, StepStatus, TestResult
 from aat.core.platform_detect import detect_platform, format_platform_info
 from aat.core.scenario_loader import load_scenarios
-from aat.core.tally import demote_if_flow_broken
+from aat.core.tally import demote_if_flow_broken, tally_statuses
 from aat.engine import ENGINE_REGISTRY
 from aat.engine.comparator import Comparator
 from aat.engine.executor import StepExecutor
@@ -874,6 +876,9 @@ async def _run(
                                     # Classification must key off the real cause,
                                     # not the author's reading of the assertion
                                     actual_cause=getattr(_crit_err, "cause", ""),
+                                    # Only carrier of what the step was hunting
+                                    # for -- StepResult does not keep the target
+                                    step=step,
                                 )
                                 diag["critical"] = True
                                 typer.echo(
@@ -1036,7 +1041,7 @@ async def _run(
                 if result.status == StepStatus.FAILED:
                     try:
                         diag = await collect_failure_context(
-                            engine, result, str(path), config.data_dir
+                            engine, result, str(path), config.data_dir, step=step
                         )
                         # Check learned hints
                         learned_hint = None
@@ -1326,7 +1331,112 @@ def _save_skill_attempt(
     )
 
 
+# -- Run history ------------------------------------------------------------
+
+#: Where finished runs accumulate, under the data dir (``.aat/runs/``).
+_RUN_HISTORY_DIRNAME = "runs"
+
+#: How many archived runs to keep. Enough to span a few weeks of ordinary
+#: use; small enough that the directory never becomes something the user has
+#: to think about. There is no flag for it because a number nobody needs to
+#: tune should not grow four documentation surfaces.
+_RUN_HISTORY_KEEP = 50
+
+
 # -- Learning helpers ------------------------------------------------------
+
+
+def _run_history_slug(scenarios_path: str) -> str:
+    """A filesystem-safe stem naming what ran, for the history filename.
+
+    Deliberately ASCII-only: these names end up as paths, and a Korean
+    scenario filename would be stored in one Unicode normal form and looked
+    up in another depending on the platform.
+    """
+    raw = Path(scenarios_path)
+    name = raw.stem if raw.suffix else raw.name
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "-", name).strip("-.")
+    return safe[:60] or "run"
+
+
+def _prune_run_history(runs_dir: Path, keep: int = _RUN_HISTORY_KEEP) -> None:
+    """Drop the oldest archived runs once there are more than ``keep``.
+
+    Sorting by filename is sorting by time: every name starts with a
+    zero-padded timestamp, so this does not depend on mtime, which a copy or
+    a restore would rewrite.
+    """
+    if keep < 0:
+        return
+    archived = sorted(p for p in runs_dir.glob("*.json") if p.is_file())
+    for stale in archived[: max(0, len(archived) - keep)]:
+        with contextlib.suppress(OSError):
+            stale.unlink()
+
+
+def _next_run_index(runs_dir: Path, stamp: str) -> int:
+    """One past the highest index already filed under *stamp*.
+
+    Not "the first index nobody is using". Pruning removes the oldest files,
+    which frees low numbers, and a search for the first free slot hands one
+    of them to the run that just finished -- which then sorts to the front
+    and becomes the first thing the next prune deletes. Counting past the
+    high-water mark cannot do that, because no number is issued twice under
+    one timestamp.
+
+    Found by mutation: the directory stayed correctly bounded the whole time,
+    while quietly throwing away the newest run in it.
+    """
+    prefix = f"{stamp}-"
+    highest = -1
+    for existing in runs_dir.glob(f"{prefix}*_*.json"):
+        index, _, _ = existing.name[len(prefix) :].partition("_")
+        if index.isdigit():
+            highest = max(highest, int(index))
+    return highest + 1
+
+
+def _archive_run_result(
+    data_dir: str,
+    scenarios_path: str,
+    payload: dict[str, object],
+) -> Path | None:
+    """Keep this run alongside the ones before it, under ``.aat/runs/``.
+
+    ``last_run.json`` is overwritten every run, so until now the only
+    question a finished run could answer was "did it pass just now". It
+    could not answer "when did this turn red", which is the question a
+    regression actually arrives as. The archive answers that one; the
+    pointer file keeps its name and shape so every existing consumer
+    (``devqa_cmd``, ``_learn_from_fixes``) reads exactly what it read before.
+
+    Failing to archive must not fail the run -- the test result is the
+    product, and a full disk is not a reason to throw away a verdict the
+    user already watched happen.
+    """
+    try:
+        runs_dir = Path(data_dir) / _RUN_HISTORY_DIRNAME
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S.%f")[:-3]
+        slug = _run_history_slug(scenarios_path)
+        # The run counter is always present and always the same width, so
+        # that two runs inside one millisecond still sort in the order they
+        # happened. A suffix added only on collision would not: '-' sorts
+        # below '_', so the *second* run would file itself ahead of the first
+        # and pruning would then drop the newer of the pair.
+        nth = _next_run_index(runs_dir, stamp)
+        out_path = runs_dir / f"{stamp}-{nth:03d}_{slug}.json"
+        while out_path.exists():
+            nth += 1
+            out_path = runs_dir / f"{stamp}-{nth:03d}_{slug}.json"
+        out_path.write_text(
+            _json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        _prune_run_history(runs_dir)
+        return out_path
+    except OSError:
+        return None
 
 
 def _save_run_result(
@@ -1334,19 +1444,44 @@ def _save_run_result(
     scenarios_path: str,
     results: list[dict[str, str]],
 ) -> list[dict[str, str]]:
-    """Save current run results to .aat/last_run.json for learning comparison."""
+    """Save current run results to .aat/last_run.json for learning comparison.
+
+    The same payload is also archived under ``.aat/runs/`` with a timestamp
+    so that earlier runs survive this one -- see ``_archive_run_result``.
+    """
     out_dir = Path(data_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "last_run.json"
+    payload: dict[str, object] = {
+        "scenarios_path": scenarios_path,
+        "results": results,
+    }
     out_path.write_text(
-        _json.dumps(
-            {"scenarios_path": scenarios_path, "results": results},
-            ensure_ascii=False,
-            indent=2,
-        ),
+        _json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    _archive_run_result(
+        data_dir,
+        scenarios_path,
+        {
+            "saved_at": datetime.now().isoformat(timespec="seconds"),
+            "tally": _tally_statuses(results),
+            **payload,
+        },
+    )
     return results
+
+
+def _tally_statuses(results: list[dict[str, str]]) -> dict[str, int]:
+    """Count the archived run by step status.
+
+    Written into the archive so that "when did this turn red" can be
+    answered by reading the small header of each file rather than replaying
+    every step of every run. Counting is delegated to ``core.tally`` so that
+    the archive, the console and the dashboard cannot disagree about how many
+    of anything there were.
+    """
+    return tally_statuses(str(row.get("status", "")) for row in results)
 
 
 def _learn_from_fixes(

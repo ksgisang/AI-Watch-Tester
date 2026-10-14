@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import inspect
 import json
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 import yaml
 
+from aat.cli.commands import run_cmd as run_cmd_module
 from aat.cli.commands.devqa_cmd import (
     _devqa,
     _find_matching_elements,
@@ -28,7 +30,15 @@ from aat.cli.commands.devqa_cmd import (
     _print_devqa_verdict,
     _read_last_failure,
 )
-from aat.cli.commands.run_cmd import _js_str, _scenario_to_yaml, _topo_sort
+from aat.cli.commands.run_cmd import (
+    _RUN_HISTORY_KEEP,
+    _js_str,
+    _prune_run_history,
+    _run_history_slug,
+    _save_run_result,
+    _scenario_to_yaml,
+    _topo_sort,
+)
 from aat.core.exceptions import AATError
 from aat.core.models import ActionType, Scenario, StepConfig, TargetSpec
 
@@ -531,3 +541,217 @@ class TestDevqaVerdict:
         counted = retry_loop.count("scenario_edits += 1")
 
         assert rewrites == counted == 1
+
+
+class TestRunHistory:
+    """Every finished run survives the next one (B-1, work order 2026-10-14).
+
+    `last_run.json` is overwritten each run, so the only question a finished
+    run could answer was "did it pass just now". The question a regression
+    actually arrives as is "when did this turn red", and until the archive
+    existed there was nothing on disk that could answer it -- on the machine
+    that prompted this item, nine days of runs had left exactly one file.
+
+    The pointer file keeps its name and shape. Both of its consumers
+    (`devqa_cmd._read_last_failure`, `_learn_from_fixes`) read it by that
+    name, so changing it here to "fix" history would have broken learning.
+    """
+
+    @staticmethod
+    def _rows(*statuses: str) -> list[dict[str, str]]:
+        return [
+            {
+                "scenario": "SC-001",
+                "step": str(i + 1),
+                "action": "click",
+                "description": f"step {i + 1}",
+                "status": s,
+                "error": "",
+            }
+            for i, s in enumerate(statuses)
+        ]
+
+    def test_two_runs_leave_two_files(self, tmp_path: Path) -> None:
+        """The defect, stated as a test: the second run used to erase the first."""
+        _save_run_result(str(tmp_path), "scenarios/SC-001.yaml", self._rows("passed"))
+        _save_run_result(str(tmp_path), "scenarios/SC-001.yaml", self._rows("failed"))
+
+        archived = sorted((tmp_path / "runs").glob("*.json"))
+        assert len(archived) == 2, "the earlier run was overwritten"
+
+        statuses = [
+            json.loads(p.read_text(encoding="utf-8"))["results"][0]["status"] for p in archived
+        ]
+        assert statuses == ["passed", "failed"], (
+            "the archive must keep both verdicts in the order they happened, "
+            "otherwise it cannot say when the run turned red"
+        )
+
+    def test_the_pointer_file_still_says_what_it_always_said(self, tmp_path: Path) -> None:
+        """`last_run.json` keeps its exact shape -- its consumers are unchanged."""
+        rows = self._rows("passed", "failed")
+        _save_run_result(str(tmp_path), "scenarios/SC-001.yaml", rows)
+
+        data = json.loads((tmp_path / "last_run.json").read_text(encoding="utf-8"))
+        assert data == {"scenarios_path": "scenarios/SC-001.yaml", "results": rows}
+
+    def test_the_archive_carries_a_timestamp_and_a_tally(self, tmp_path: Path) -> None:
+        """So "when did it turn red" is answerable from the file header alone."""
+        _save_run_result(
+            str(tmp_path),
+            "scenarios/SC-001.yaml",
+            self._rows("passed", "failed", "unverified", "unverified"),
+        )
+
+        archived = next((tmp_path / "runs").glob("*.json"))
+        data = json.loads(archived.read_text(encoding="utf-8"))
+
+        assert data["tally"] == {"passed": 1, "failed": 1, "unverified": 2}
+        assert data["saved_at"]
+        assert data["results"], "the steps themselves are kept too"
+
+    def test_the_filename_says_when_and_what(self, tmp_path: Path) -> None:
+        _save_run_result(
+            str(tmp_path),
+            "/somewhere/.aat/scenarios/SC-911-signup-approval-gate.yaml",
+            self._rows("passed"),
+        )
+
+        name = next((tmp_path / "runs").glob("*.json")).name
+        assert name.endswith("_SC-911-signup-approval-gate.json")
+        assert name[:4].isdigit(), "a sortable timestamp has to come first"
+
+    def test_two_runs_in_one_second_still_sort_in_order(self, tmp_path: Path) -> None:
+        """Sorting by name is only sorting by time if the names are uniform.
+
+        A disambiguator added *only* on collision breaks this: '-' sorts below
+        '_', so `...T120000-2_SC.json` would come before `...T120000_SC.json`
+        and pruning would delete the newer of the two.
+        """
+        for nth in range(3):
+            _save_run_result(str(tmp_path), "s.yaml", self._rows(f"status-{nth}"))
+
+        names = sorted(p.name for p in (tmp_path / "runs").glob("*.json"))
+        assert len(names) == 3, "each run must get its own file"
+
+        written = [json.loads((tmp_path / "runs" / n).read_text(encoding="utf-8")) for n in names]
+        assert [w["results"][0]["status"] for w in written] == [
+            "status-0",
+            "status-1",
+            "status-2",
+        ], "name order has to be arrival order even inside a single second"
+
+    def test_a_directory_of_scenarios_is_named_by_the_directory(self) -> None:
+        assert _run_history_slug("/project/.aat/scenarios") == "scenarios"
+
+    def test_a_name_that_would_not_survive_a_filesystem_is_folded(self) -> None:
+        """Korean names are stored in one Unicode normal form and looked up in
+        another depending on the platform, so names are kept ASCII."""
+        assert _run_history_slug("/p/가입 대본*v2.yaml") == "v2"
+        assert _run_history_slug("/p/....yaml") == "run", "never an empty name"
+
+    def test_saving_a_run_is_what_bounds_the_history(self, tmp_path: Path) -> None:
+        """The pruner is wired to the archiver, not merely written beside it.
+
+        Found by mutation: deleting the `_prune_run_history` call from
+        `_archive_run_result` left every test below green, because they all
+        call the pruner directly. That proves pruning prunes; it says nothing
+        about anyone ever asking it to -- which is the whole repair. A
+        directory that grows without limit is how this feature turns from a
+        note into a nuisance, and nothing would have reported it.
+
+        Driven through the real cap rather than a patched-in small one: the
+        default is bound at definition time, so a test that monkeypatched the
+        constant would be exercising a number this code never uses.
+        """
+        over = _RUN_HISTORY_KEEP + 2
+        for nth in range(over):
+            _save_run_result(str(tmp_path), "s.yaml", self._rows(f"status-{nth}"))
+
+        kept = sorted((tmp_path / "runs").glob("*.json"))
+        assert len(kept) == _RUN_HISTORY_KEEP, (
+            f"{over} runs left {len(kept)} files behind; the archive is unbounded"
+        )
+
+        newest = json.loads(kept[-1].read_text(encoding="utf-8"))
+        assert newest["results"][0]["status"] == f"status-{over - 1}", (
+            "the most recent run must be one of the survivors"
+        )
+
+    def test_a_freed_number_is_never_handed_to_the_newest_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pruning frees low numbers; the next run must not be given one.
+
+        A counter that looks for the first unused slot will take the number
+        pruning just released. That name sorts to the front of the directory,
+        so the run that finished a moment ago becomes the first thing the
+        *next* prune deletes -- an archive that eats its newest entries while
+        staying perfectly within its cap. Counting past the high-water mark
+        is what rules this out.
+
+        The clock is frozen because that is the only way to ask the question
+        at all. Timestamps carry milliseconds, so in real time these writes
+        land on distinct stamps, no two runs ever share a counter, and the
+        bug hides behind the resolution of the clock rather than behind the
+        code. Freezing makes the collision certain instead of lucky.
+        """
+        frozen = datetime(2026, 10, 14, 12, 0, 0)
+
+        class _StoppedClock:
+            @staticmethod
+            def now() -> datetime:
+                return frozen
+
+        monkeypatch.setattr(run_cmd_module, "datetime", _StoppedClock)
+
+        over = _RUN_HISTORY_KEEP + 2
+        for nth in range(over):
+            _save_run_result(str(tmp_path), "s.yaml", self._rows(f"status-{nth}"))
+
+        kept = sorted((tmp_path / "runs").glob("*.json"))
+        assert len(kept) == _RUN_HISTORY_KEEP, "the cap still holds"
+
+        newest = json.loads(kept[-1].read_text(encoding="utf-8"))
+        assert newest["results"][0]["status"] == f"status-{over - 1}", (
+            "the run that just finished was filed where pruning will reach it "
+            "first -- the archive is discarding its newest entry"
+        )
+
+    def test_history_is_bounded(self, tmp_path: Path) -> None:
+        runs_dir = tmp_path / "runs"
+        runs_dir.mkdir()
+        for i in range(8):
+            (runs_dir / f"2026-10-{i + 1:02d}T120000_SC-001.json").write_text("{}")
+
+        _prune_run_history(runs_dir, keep=3)
+
+        kept = sorted(p.name for p in runs_dir.glob("*.json"))
+        assert kept == [
+            "2026-10-06T120000_SC-001.json",
+            "2026-10-07T120000_SC-001.json",
+            "2026-10-08T120000_SC-001.json",
+        ], "the oldest go first, and 'oldest' is read off the name, not the mtime"
+
+    def test_pruning_ignores_everything_that_is_not_an_archived_run(self, tmp_path: Path) -> None:
+        runs_dir = tmp_path / "runs"
+        (runs_dir / "nested").mkdir(parents=True)
+        (runs_dir / "notes.txt").write_text("keep me")
+
+        _prune_run_history(runs_dir, keep=0)
+
+        assert (runs_dir / "notes.txt").exists()
+        assert (runs_dir / "nested").is_dir()
+
+    def test_an_unwritable_archive_does_not_lose_the_verdict(self, tmp_path: Path) -> None:
+        """A full disk is not a reason to throw away a result the user watched
+        happen -- the run's own output is the product, the archive is a note.
+
+        Something occupying `.aat/runs` as a plain file is the cheapest way to
+        make the archive fail for real rather than by patching it out.
+        """
+        (tmp_path / "runs").write_text("not a directory", encoding="utf-8")
+
+        rows = self._rows("passed")
+        assert _save_run_result(str(tmp_path), "s.yaml", rows) == rows
+        assert (tmp_path / "last_run.json").exists(), "the pointer still lands"
