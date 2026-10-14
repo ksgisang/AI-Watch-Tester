@@ -173,10 +173,9 @@ Typing is held to the same rule. A `find_and_type` step whose field is a
 names which of those it was and what to use instead, so you do not have to open
 the screenshot to find out.
 
-Typing into the *wrong* field is the same verdict, and it is the one a long form
-produces. When a step names a field by text, AWT checks the field it named
-against the field that actually received the text, and reports the step rather
-than counting it:
+Typing into the *wrong* field is the same verdict. When a step names a field by
+text, AWT checks the field it named against the field that actually received the
+text, and reports the step rather than counting it:
 
 ```
 Step 7: WARNING  '에이더블유티점검' went into input#school (labelled '학교'), not into
@@ -187,10 +186,16 @@ Step 10: WARNING '…' went into input#password-confirm, which step 9 already fi
                  field, so one of the two never got its own
 ```
 
-Those two happen for one reason: a target text can be a substring of a
-*different* field's placeholder — '이름' is inside '학교 이름을 입력하세요', and
-'비밀번호' matches the placeholder of the confirm box but not of the password box.
-AWT also logs the ambiguity at the moment it picks, naming both candidates.
+A target text can be a substring of a *different* field's placeholder — '이름' is
+inside '학교 이름을 입력하세요', and '비밀번호' matches the placeholder of the confirm
+box but not of the password box. So AWT looks first for the one visible field
+whose `<label>`, wrapping label or `aria-label` **is** the target text, and types
+there: where the page says which field was meant, the text goes to it.
+
+The check above stays because resolution is only one of the ways a click reaches
+a point. An autocomplete panel covering the box, a remembered coordinate, a
+hand-written `click_at` and a healed template all land somewhere no label spoke
+for. AWT also logs the ambiguity at the moment it picks, naming both candidates.
 Giving the step a `target.selector` settles it permanently.
 
 These stay quiet where they cannot tell: a form with no `<label>`, `aria-label`

@@ -196,13 +196,15 @@ async def aat_run(
     report such a run as passed: read the warned step's screenshot and the
     warning text, which names what to use instead.
 
-    The same status covers typing that went into the WRONG field, which is what
-    a long form produces: the target text matched a different field's
-    placeholder substring ('이름' is inside '학교 이름을 입력하세요'), so the
-    text landed there and the named field stayed empty. The warning names both
-    fields, and says when two steps naming different things wrote into one box.
-    The fix is a target.selector on those steps; do not re-run unchanged and do
-    not count them as passed.
+    The same status covers typing that went into the WRONG field. AWT resolves
+    a text target to the one visible field whose <label>, wrapping label or
+    aria-label IS that text before it tries placeholder substrings, so a
+    labelled form sends the text where the page says it belongs. It can still
+    diverge where no label says which box was meant, or where something covers
+    the box (an autocomplete panel) -- then the warning names both the field
+    the step named and the field that took the text, and says when two steps
+    naming different things wrote into one box. The fix is a target.selector on
+    those steps; do not re-run unchanged and do not count them as passed.
 
     Steps reported as UNVERIFIED ran after an earlier step in the same scenario
     had already failed, so they acted on a screen the scenario never reached.
