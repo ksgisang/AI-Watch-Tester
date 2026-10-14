@@ -19,24 +19,12 @@ from playwright.async_api import (
 
 from aat.core.exceptions import EngineError
 from aat.core.models import EngineConfig
+from aat.engine import dom_search
 from aat.engine.base import BaseEngine
 from aat.engine.overlay import overlay_hidden
 
-
-def _as_box(rect: Any) -> dict[str, float]:
-    """Playwright's bounding box as a plain dict of four floats.
-
-    ``bounding_box()`` returns a ``FloatRect``, which is not a ``dict[str,
-    float]`` as far as the type checker is concerned. Copying the four keys we
-    actually use keeps the return type honest and stops a Playwright type
-    detail from leaking into every caller that wants to crop a screenshot.
-    """
-    return {
-        "x": float(rect["x"]),
-        "y": float(rect["y"]),
-        "width": float(rect["width"]),
-        "height": float(rect["height"]),
-    }
+# Kept as a module-level name because callers and tests import it from here.
+_as_box = dom_search.as_box
 
 
 class WebEngine(BaseEngine):
@@ -344,66 +332,21 @@ class WebEngine(BaseEngine):
         picture of the element for self-healing, which a centre point cannot
         describe.
         """
-        box = await self.find_text_box(text)
-        if box is None:
-            return None
-        return (
-            int(box["x"] + box["width"] / 2),
-            int(box["y"] + box["height"] / 2),
-        )
+        return await dom_search.find_text_position(self.page, text)
 
     async def find_text_box(self, text: str) -> dict[str, float] | None:
         """Find element on page and scroll into view if needed.
 
-        Strategy:
-        1. get_by_label — input/textarea linked to label (highest priority)
-        2. get_by_placeholder — placeholder text
-        3. get_by_role("button") — buttons
-        4. get_by_role("link") — links
-        5. get_by_text — general text fallback
-
-        Automatically scrolls elements into the viewport before returning the
-        bounding box (CSS pixels, as Playwright reports it), or ``None``.
+        The bounding box is in CSS pixels as Playwright reports it, or
+        ``None``. The search order lives in :mod:`aat.engine.dom_search`,
+        which is also where it is described -- repeating it here is how the
+        description and the search drift apart.
         """
-        # If text looks like a CSS selector, try it directly first
-        if text.startswith(("#", "[", ".")) or text.startswith("input"):
-            try:
-                locator = self.page.locator(text).first
-                if await locator.count() > 0:
-                    await locator.scroll_into_view_if_needed(timeout=3000)
-                    box = await locator.bounding_box()
-                    if box:
-                        return _as_box(box)
-            except Exception:
-                pass
-
-        strategies = [
-            lambda: self.page.get_by_label(text, exact=False).first,
-            lambda: self.page.get_by_placeholder(text, exact=False).first,
-            lambda: self.page.get_by_role("button", name=text, exact=False).first,
-            lambda: self.page.get_by_role("link", name=text, exact=False).first,
-            lambda: self.page.get_by_text(text, exact=False).first,
-        ]
-
-        for strategy in strategies:
-            try:
-                locator = strategy()  # type: ignore[no-untyped-call]
-                # Check element exists in DOM (even if off-screen)
-                if await locator.count() == 0:
-                    continue
-                # Scroll into viewport so we can click it
-                await locator.scroll_into_view_if_needed(timeout=3000)
-                box = await locator.bounding_box()
-                if box:
-                    return _as_box(box)
-            except Exception:
-                continue
-
-        return None
+        return await dom_search.find_text_box(self.page, text)
 
     async def scroll_to_top(self) -> None:
         """Scroll page to top (0, 0)."""
-        await self.page.evaluate("window.scrollTo(0, 0)")
+        await dom_search.scroll_to_top(self.page)
 
     async def force_click_by_text(self, text: str) -> bool:
         """Find element by text strategies and force-click it.
@@ -411,33 +354,7 @@ class WebEngine(BaseEngine):
         Uses Playwright's force option to bypass actionability checks
         (e.g. element hidden behind sticky header). Returns True if clicked.
         """
-        strategies = [
-            lambda: self.page.get_by_label(text, exact=False).first,
-            lambda: self.page.get_by_placeholder(text, exact=False).first,
-            lambda: self.page.get_by_role("button", name=text, exact=False).first,
-            lambda: self.page.get_by_role("link", name=text, exact=False).first,
-            lambda: self.page.get_by_text(text, exact=False).first,
-        ]
-        for strategy in strategies:
-            try:
-                locator = strategy()  # type: ignore[no-untyped-call]
-                if await locator.count() > 0:
-                    await locator.click(force=True, timeout=3000)
-                    return True
-            except Exception:
-                continue
-
-        # CSS selector fallback
-        if text.startswith(("#", "[", ".")) or text.startswith("input"):
-            try:
-                locator = self.page.locator(text).first
-                if await locator.count() > 0:
-                    await locator.click(force=True, timeout=3000)
-                    return True
-            except Exception:
-                pass
-
-        return False
+        return await dom_search.force_click_by_text(self.page, text)
 
     async def save_screenshot(self, path: Path) -> Path:
         """Save screenshot to file and return path (progress bar hidden)."""

@@ -330,9 +330,21 @@ class TestDesktopEngineFindTextPosition:
         self,
         box: dict[str, int] | None = None,
     ) -> MagicMock:
-        """Create a mock locator that is visible with a bounding box."""
+        """A locator that is in the DOM and reports a box once scrolled to.
+
+        ``count`` and ``scroll_into_view_if_needed`` are here because the real
+        search asks for them, not because a test does. Since AAT-125 the
+        question at search time is "is it in the document", not "is it on the
+        first screen" -- an element below the fold answers no to the second
+        and is reached by scrolling, which is the whole repair. A fake that
+        still only knows ``is_visible`` would not fail; it would make the
+        search fall through every strategy and return ``None``, which is a
+        mock reporting on itself.
+        """
         loc = MagicMock()
+        loc.count = AsyncMock(return_value=1)
         loc.is_visible = AsyncMock(return_value=True)
+        loc.scroll_into_view_if_needed = AsyncMock(return_value=None)
         loc.bounding_box = AsyncMock(
             return_value=box or {"x": 100, "y": 200, "width": 80, "height": 30},
         )
@@ -340,10 +352,26 @@ class TestDesktopEngineFindTextPosition:
         wrapper.first = loc
         return wrapper
 
-    def _make_invisible_locator(self) -> MagicMock:
-        """Create a mock locator that is not visible."""
+    def _make_absent_locator(self) -> MagicMock:
+        """A locator matching nothing in the document."""
         loc = MagicMock()
-        loc.is_visible = AsyncMock(return_value=False)
+        loc.count = AsyncMock(return_value=0)
+        wrapper = MagicMock()
+        wrapper.first = loc
+        return wrapper
+
+    def _make_boxless_locator(self) -> MagicMock:
+        """In the DOM, but with no box -- what ``display: none`` looks like.
+
+        This is the case visibility used to screen out, and it still is
+        screened out: ``bounding_box()`` answers ``None`` and the search moves
+        on. Dropping the ``is_visible`` question did not widen what counts as
+        found.
+        """
+        loc = MagicMock()
+        loc.count = AsyncMock(return_value=1)
+        loc.scroll_into_view_if_needed = AsyncMock(return_value=None)
+        loc.bounding_box = AsyncMock(return_value=None)
         wrapper = MagicMock()
         wrapper.first = loc
         return wrapper
@@ -408,6 +436,131 @@ class TestDesktopEngineFindTextPosition:
         engine._page = None
         result = await engine.find_text_position("Email")
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_an_element_with_no_box_is_still_skipped(
+        self, engine_with_page: DesktopEngine
+    ) -> None:
+        """Dropping the visibility question did not widen what counts as found."""
+        engine_with_page._page.get_by_label = MagicMock(return_value=self._make_boxless_locator())
+        engine_with_page._page.get_by_placeholder = MagicMock(
+            return_value=self._make_absent_locator()
+        )
+        engine_with_page._page.get_by_role = MagicMock(return_value=self._make_absent_locator())
+        engine_with_page._page.get_by_text = MagicMock(return_value=self._make_absent_locator())
+        assert await engine_with_page.find_text_position("Email") is None
+
+    @pytest.mark.asyncio
+    async def test_the_element_is_scrolled_to_before_it_is_measured(
+        self, engine_with_page: DesktopEngine
+    ) -> None:
+        """The repair, as far as a mock can state it.
+
+        What it can say is that the search asks the element to come into view
+        before reading its box. What it cannot say is what Chromium does in
+        response, or what number comes back -- measured against a real browser
+        in ``tests/integration/test_dom_search.py``, the same element reported
+        y = 2727 unscrolled and y = 374 scrolled, on a 600px screen.
+        """
+        wrapper = self._make_visible_locator()
+        engine_with_page._page.get_by_label = MagicMock(return_value=wrapper)
+
+        await engine_with_page.find_text_position("Email")
+
+        wrapper.first.scroll_into_view_if_needed.assert_awaited_once()
+
+
+class TestDesktopEngineReachesBelowTheFold:
+    """The three methods the executor probes for and used to not find here.
+
+    ``StepExecutor`` guards each of these with ``hasattr`` and skips what is
+    missing, so on this engine the scroll-to-top retry, the force-click past a
+    sticky header, and the box the picture bank needs did not fail -- they did
+    not run. These check they are present, that they go through the page this
+    engine owns, and that each has a safe answer before ``start()``.
+    """
+
+    @pytest.fixture
+    def engine_with_page(self) -> DesktopEngine:
+        engine = DesktopEngine()
+        engine._page = MagicMock()
+        return engine
+
+    @pytest.mark.asyncio
+    async def test_find_text_box_returns_the_box_not_a_point(
+        self, engine_with_page: DesktopEngine
+    ) -> None:
+        """A centre point cannot describe an element well enough to photograph it."""
+        loc = MagicMock()
+        loc.count = AsyncMock(return_value=1)
+        loc.scroll_into_view_if_needed = AsyncMock(return_value=None)
+        loc.bounding_box = AsyncMock(return_value={"x": 10, "y": 20, "width": 100, "height": 40})
+        wrapper = MagicMock()
+        wrapper.first = loc
+        engine_with_page._page.get_by_label = MagicMock(return_value=wrapper)
+
+        box = await engine_with_page.find_text_box("Email")
+
+        assert box == {"x": 10.0, "y": 20.0, "width": 100.0, "height": 40.0}
+
+    @pytest.mark.asyncio
+    async def test_scroll_to_top_goes_through_the_page(
+        self, engine_with_page: DesktopEngine
+    ) -> None:
+        """Through the page, not PyAutoGUI.
+
+        A wheel event is approximate and lands wherever the pointer is; the
+        document offset is exact and this engine owns the document. The
+        ``*_on_screen`` methods are the ones that leave the viewport.
+        """
+        engine_with_page._page.evaluate = AsyncMock(return_value=None)
+
+        await engine_with_page.scroll_to_top()
+
+        engine_with_page._page.evaluate.assert_awaited_once()
+        assert "scrollTo" in engine_with_page._page.evaluate.await_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_force_click_reports_whether_a_click_went_out(
+        self, engine_with_page: DesktopEngine
+    ) -> None:
+        loc = MagicMock()
+        loc.count = AsyncMock(return_value=1)
+        loc.click = AsyncMock(return_value=None)
+        wrapper = MagicMock()
+        wrapper.first = loc
+        engine_with_page._page.get_by_label = MagicMock(return_value=wrapper)
+
+        assert await engine_with_page.force_click_by_text("Submit") is True
+        assert loc.click.await_args.kwargs["force"] is True
+
+    @pytest.mark.asyncio
+    async def test_force_click_says_no_when_nothing_matched(
+        self, engine_with_page: DesktopEngine
+    ) -> None:
+        """``False``, not an exception, because the caller has further fallbacks."""
+        absent = MagicMock()
+        absent.first = MagicMock(count=AsyncMock(return_value=0))
+        for finder in (
+            "get_by_label",
+            "get_by_placeholder",
+            "get_by_role",
+            "get_by_text",
+            "locator",
+        ):
+            setattr(engine_with_page._page, finder, MagicMock(return_value=absent))
+
+        assert await engine_with_page.force_click_by_text("Submit") is False
+
+    @pytest.mark.asyncio
+    async def test_every_one_of_them_is_safe_before_start(self) -> None:
+        """No page yet is not an error; it is simply nothing to say."""
+        engine = DesktopEngine()
+        engine._page = None
+
+        assert await engine.find_text_box("Email") is None
+        assert await engine.force_click_by_text("Submit") is False
+        await engine.scroll_to_top()  # must not raise
 
 
 class TestDesktopEngineRegistry:

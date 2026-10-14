@@ -30,6 +30,7 @@ from playwright.async_api import (
 
 from aat.core.exceptions import EngineError
 from aat.core.models import EngineConfig, ScreenshotSpace
+from aat.engine import dom_search
 from aat.engine.base import BaseEngine
 from aat.engine.overlay import overlay_hidden
 
@@ -426,40 +427,49 @@ class DesktopEngine(BaseEngine):
             return None
         return await locator.inner_text()
 
+    # ------------------------------------------------------------------
+    # DOM text search — the same one WebEngine runs, for the same reason
+    #
+    # This engine owns a real page, so "where is the element labelled X" has
+    # the same answer here as anywhere else, and every box below is in
+    # viewport CSS pixels -- which is what ``click`` takes (it goes through
+    # ``page.mouse``; only the ``*_on_screen`` methods leave the viewport).
+    #
+    # Until AAT-125 this engine had only ``find_text_position``, and that one
+    # asked ``is_visible`` instead of scrolling. The executor probes for the
+    # other three with ``hasattr`` and silently skips what it does not find,
+    # so on this engine the "scroll to top and look again" fallback, the
+    # force-click past a sticky header, and the picture banking that needs a
+    # box rather than a point were all absent -- and an element below the
+    # fold was simply not visible, which is the one thing scrolling fixes.
+    # ------------------------------------------------------------------
+
     async def find_text_position(self, text: str) -> tuple[int, int] | None:
-        """Find element on page, prioritizing input fields over labels.
-
-        Strategy:
-        1. get_by_label — input/textarea linked to label (highest priority)
-        2. get_by_placeholder — placeholder text
-        3. get_by_role("button") — buttons
-        4. get_by_role("link") — links
-        5. get_by_text — general text fallback
-
-        Returns (x, y) center coordinates in viewport pixels, or None.
-        """
+        """Centre of the element matching ``text`` in viewport pixels, or ``None``."""
         if not self._page:
             return None
+        return await dom_search.find_text_position(self._page, text)
 
-        strategies = [
-            lambda: self._page.get_by_label(text, exact=False).first,
-            lambda: self._page.get_by_placeholder(text, exact=False).first,
-            lambda: self._page.get_by_role("button", name=text, exact=False).first,
-            lambda: self._page.get_by_role("link", name=text, exact=False).first,
-            lambda: self._page.get_by_text(text, exact=False).first,
-        ]
+    async def find_text_box(self, text: str) -> dict[str, float] | None:
+        """Box of the element matching ``text``, scrolled into view, or ``None``."""
+        if not self._page:
+            return None
+        return await dom_search.find_text_box(self._page, text)
 
-        for strategy in strategies:
-            try:
-                locator = strategy()  # type: ignore[no-untyped-call]
-                if await locator.is_visible(timeout=1000):
-                    box = await locator.bounding_box()
-                    if box:
-                        return (
-                            int(box["x"] + box["width"] / 2),
-                            int(box["y"] + box["height"] / 2),
-                        )
-            except Exception:  # noqa: BLE001
-                continue
+    async def scroll_to_top(self) -> None:
+        """Scroll the page document back to (0, 0)."""
+        if not self._page:
+            return
+        await dom_search.scroll_to_top(self._page)
 
-        return None
+    async def force_click_by_text(self, text: str) -> bool:
+        """Force-click the element matching ``text``; returns whether one went out.
+
+        Through the page, not the OS, so it is a viewport click like
+        :meth:`click`. Reaching for PyAutoGUI here would mean converting a
+        viewport box to screen points to press something the browser can press
+        directly -- more steps, more places to be wrong, and no more reach.
+        """
+        if not self._page:
+            return False
+        return await dom_search.force_click_by_text(self._page, text)

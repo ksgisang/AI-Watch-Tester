@@ -1306,12 +1306,19 @@ class StepExecutor:
             if step.target:
                 t_name = step.target.text or step.target.selector or ""
             if t_name:
+                # Read here, not when the position is committed: the action
+                # that was just performed may itself have scrolled the page,
+                # and the offset that gives this coordinate its meaning is the
+                # one it was measured at.
+                scroll_x, scroll_y = await self._scroll_offset()
                 self._pending_learn = {
                     "name": t_name,
                     "x": x,
                     "y": y,
                     "confidence": confidence,
                     "from_learned": False,
+                    "scroll_x": scroll_x,
+                    "scroll_y": scroll_y,
                 }
 
         return result
@@ -1415,6 +1422,57 @@ class StepExecutor:
 
         return template_store.scope_for(self._last_url)
 
+    async def _scroll_offset(self) -> tuple[int, int]:
+        """How far the page is scrolled, as the other half of a remembered position.
+
+        A remembered position is replayed through ``click()``, which measures
+        from the top-left of what is on screen. The same pair of numbers is
+        therefore two different places on the page at two different offsets,
+        and storing one without the other is how a button two screens down
+        became a click on whatever was two screens up.
+
+        An engine that cannot be asked reads as ``(0, 0)`` rather than as
+        unknown. That is exactly what every position written before this
+        existed already assumed, so nothing gets worse; what changes is that a
+        page which *can* say it has scrolled no longer has that fact thrown
+        away. Rows written before the columns existed stay unknown and are
+        never reused -- see :data:`aat.learning.store.UNKNOWN_SCROLL`.
+        """
+        page = getattr(self._engine, "page", None)
+        if page is None:
+            return (0, 0)
+        try:
+            offset = await page.evaluate("() => [window.scrollX, window.scrollY]")
+        except Exception:
+            logger.debug("Could not read the scroll offset", exc_info=True)
+            return (0, 0)
+        if not isinstance(offset, (list, tuple)) or len(offset) != 2:
+            return (0, 0)
+        try:
+            return (round(float(offset[0])), round(float(offset[1])))
+        except (TypeError, ValueError):
+            return (0, 0)
+
+    async def _restore_scroll(self, offset: tuple[int, int]) -> None:
+        """Put the page back where a probe found it.
+
+        Nothing here needs to be clever: the only thing that moves the page on
+        the path that calls this is ``scroll_to_top``, which is a plain
+        ``window.scrollTo``, so undoing it is the same call with the numbers it
+        was given. Failure is ignored -- the step is already on its way to a
+        richer error than "could not scroll back".
+        """
+        page = getattr(self._engine, "page", None)
+        if page is None or offset == (0, 0):
+            return
+        try:
+            await page.evaluate(
+                "([x, y]) => window.scrollTo(x, y)",
+                [offset[0], offset[1]],
+            )
+        except Exception:
+            logger.debug("Could not restore the scroll offset", exc_info=True)
+
     def _settle_pending_bank(self, effect_ok: bool | None) -> None:
         """Write the proposed visual baseline, unless the action did nothing.
 
@@ -1467,6 +1525,8 @@ class StepExecutor:
 
         name = str(pending["name"])
         x, y = int(pending["x"]), int(pending["y"])
+        scroll_x = int(pending.get("scroll_x", 0))
+        scroll_y = int(pending.get("scroll_y", 0))
 
         if effect_ok is False:
             # The click landed somewhere that did nothing. Never store that, and
@@ -1482,6 +1542,8 @@ class StepExecutor:
                     name,
                     self._current_page_state,
                     host=self._learned_host(),
+                    scroll_x=scroll_x,
+                    scroll_y=scroll_y,
                 )
                 if removed:
                     logger.warning(
@@ -1493,10 +1555,26 @@ class StepExecutor:
         post_state = await self._detect_page_state()
         self._current_page_state = post_state
         confidence = float(pending["confidence"])
-        logger.info("Learning: '%s' at (%d,%d) state=%s", name, x, y, post_state)
+        logger.info(
+            "Learning: '%s' at (%d,%d) state=%s scroll=(%d,%d)",
+            name,
+            x,
+            y,
+            post_state,
+            scroll_x,
+            scroll_y,
+        )
         with contextlib.suppress(Exception):
             host = self._learned_host()
-            self._learned_store.save_or_update_by_name(name, x, y, confidence, host=host)
+            self._learned_store.save_or_update_by_name(
+                name,
+                x,
+                y,
+                confidence,
+                host=host,
+                scroll_x=scroll_x,
+                scroll_y=scroll_y,
+            )
             self._learned_store.save_state_coords(
                 name,
                 post_state,
@@ -1504,6 +1582,8 @@ class StepExecutor:
                 y,
                 confidence,
                 host=host,
+                scroll_x=scroll_x,
+                scroll_y=scroll_y,
             )
 
     async def _find_and_act(self, step: StepConfig) -> MatchResult:
@@ -1717,12 +1797,25 @@ class StepExecutor:
             if text_hit is not None:
                 return await self._act_at_pos(step, text_hit[0], text_hit[1], box=text_hit[2])
 
-            # Fallback 2: scroll to top + retry
+            # Fallback 2: scroll to top + retry.
+            #
+            # A probe that found nothing must leave the page where it found it.
+            # This one used to walk off: it scrolled to the top and stayed
+            # there, so everything consulted afterwards -- the picture bank, the
+            # remembered position, the failure screenshot -- was answering about
+            # a screen the step had never been on. A remembered position is a
+            # viewport coordinate keyed by the offset it was measured at, so the
+            # abandoned scroll turned every such lookup into a miss. Restoring
+            # is symmetric with ``scroll_to_top`` (both move the document and
+            # nothing else), and only the miss path reaches it: a hit is acted
+            # on where it was found.
             if hasattr(self._engine, "scroll_to_top"):
+                before = await self._scroll_offset()
                 await self._engine.scroll_to_top()
                 text_hit = await self._find_text_with_synonyms(target.text)
                 if text_hit is not None:
                     return await self._act_at_pos(step, text_hit[0], text_hit[1], box=text_hit[2])
+                await self._restore_scroll(before)
 
             # Fallback 3: JS force click via locator (bypasses sticky headers)
             if hasattr(self._engine, "force_click_by_text"):
@@ -1945,16 +2038,25 @@ class StepExecutor:
 
         page_state = await self._detect_page_state()
         host = self._learned_host()
-        coords = self._learned_store.find_state_coords(target_name, page_state, host=host)
+        scroll_x, scroll_y = await self._scroll_offset()
+        coords = self._learned_store.find_state_coords(
+            target_name,
+            page_state,
+            host=host,
+            scroll_x=scroll_x,
+            scroll_y=scroll_y,
+        )
         if coords:
             lx, ly, lconf = coords
             logger.info(
-                "Learned[%s]: '%s' at (%d,%d) conf=%.2f",
+                "Learned[%s]: '%s' at (%d,%d) conf=%.2f scroll=(%d,%d)",
                 page_state,
                 target_name,
                 lx,
                 ly,
                 lconf,
+                scroll_x,
+                scroll_y,
             )
             try:
                 result = await self._act_at_pos(
@@ -1972,9 +2074,17 @@ class StepExecutor:
                     self._pending_learn["from_learned"] = True
                 return result
 
-        # Fallback: try state-agnostic learned coords -- still host-scoped, because
-        # dropping the page state widens *when* a position applies, not *where*.
-        learned = self._learned_store.find_by_name(target_name, host=host)
+        # Fallback: try state-agnostic learned coords -- still host-scoped and
+        # still scroll-scoped, because dropping the page state widens *when* a
+        # position applies, not *where*. A position measured two screens down
+        # names a different element at the top of the page whatever state the
+        # page is in.
+        learned = self._learned_store.find_by_name(
+            target_name,
+            host=host,
+            scroll_x=scroll_x,
+            scroll_y=scroll_y,
+        )
         if learned and learned.confidence >= 0.8:
             try:
                 result = await self._act_at_pos(

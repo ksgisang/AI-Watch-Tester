@@ -22,6 +22,7 @@ import cv2
 import numpy as np
 import pytest
 
+import aat.engine.sweep as sweep_module
 from aat.core.models import ScreenshotSpace
 from aat.engine.sweep import (
     MAX_SCREENS,
@@ -250,6 +251,61 @@ class TestRestoringAfterAMiss:
         await sweep_viewports(engine, probe, max_screens=2)
         restores = [c for c in page.calls if "scrollTo" in c[0]]
         assert restores == [(restores[0][0], 640.0)]
+
+    @pytest.mark.asyncio
+    async def test_the_exact_correction_waits_for_the_wheel_to_land(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A wheel event is dispatched, not applied.
+
+        Correct the document offset before the wheel-back lands and the wheel
+        arrives afterwards and undoes the correction: the page comes to rest
+        one screen away from where the sweep found it. Measured against real
+        Chromium, a page restored from 1200 ended at 588 -- far enough to click
+        the wrong thing, close enough to look deliberate. So the order the
+        restore has to keep is wheel, wait, correct.
+        """
+        import asyncio as _asyncio
+
+        order: list[str] = []
+
+        class _Page:
+            async def evaluate(self, script: str, arg: object = None) -> object:
+                if "scrollY" in script:
+                    return 640.0
+                order.append("correct")
+                return None
+
+        engine = _FakeEngine(frames=9)
+        engine.page = _Page()  # type: ignore[assignment]
+        original_scroll = engine.scroll
+
+        async def recording_scroll(x: int, y: int, delta: int) -> None:
+            order.append("wheel-back" if delta < 0 else "wheel")
+            await original_scroll(x, y, delta)
+
+        engine.scroll = recording_scroll  # type: ignore[assignment]
+
+        real_sleep = _asyncio.sleep
+
+        async def recording_sleep(seconds: float) -> None:
+            order.append("wait")
+            await real_sleep(0)
+
+        monkeypatch.setattr(sweep_module.asyncio, "sleep", recording_sleep)
+
+        async def probe(_frame: bytes) -> None:
+            return None
+
+        await sweep_viewports(engine, probe, max_screens=2)
+
+        assert "correct" in order, "the exact correction never ran"
+        correct_at = order.index("correct")
+        last_wheel_back = len(order) - 1 - order[::-1].index("wheel-back")
+        assert last_wheel_back < correct_at
+        assert "wait" in order[last_wheel_back:correct_at], (
+            "the offset was corrected before the wheel-back had landed"
+        )
 
     @pytest.mark.asyncio
     async def test_a_page_that_cannot_report_an_offset_still_wheels_back(self) -> None:

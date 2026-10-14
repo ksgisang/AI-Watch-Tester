@@ -133,7 +133,7 @@ async def sweep_viewports(
                 return found
     finally:
         if found is None and scrolled:
-            await _restore(engine, centre_x, centre_y, delta, scrolled, start_offset)
+            await _restore(engine, centre_x, centre_y, delta, scrolled, start_offset, settle)
     return None
 
 
@@ -144,6 +144,7 @@ async def _restore(
     delta: int,
     scrolled: int,
     start_offset: float | None,
+    settle: float,
 ) -> None:
     """Put the scroll position back after a sweep that found nothing.
 
@@ -153,6 +154,14 @@ async def _restore(
     document itself never scrolled. Wheeling back and then correcting the
     document offset leaves an ordinary page exactly where it was, and a canvas
     app as close as a wheel can get it.
+
+    The pause between the two matters, and is not padding. A wheel event is
+    dispatched, not applied: the browser moves the page a moment later. Correct
+    the offset before that lands and the wheel arrives *after* the correction
+    and undoes it -- the page ends up one screen away from where it started,
+    which is both too far to be a rounding error and too close to look like a
+    bug. Measured, not reasoned: without the wait a page restored from 1200
+    came to rest at 588.
     """
     for _ in range(scrolled):
         try:
@@ -165,6 +174,7 @@ async def _restore(
     page = getattr(engine, "page", None)
     if page is None:
         return
+    await asyncio.sleep(settle)
     try:
         await page.evaluate("(y) => window.scrollTo(0, y)", start_offset)
     except Exception:
