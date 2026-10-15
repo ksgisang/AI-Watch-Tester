@@ -6,6 +6,7 @@ All Enum and Model definitions live here.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime
 from enum import StrEnum
 from pathlib import PurePosixPath, PureWindowsPath
@@ -978,6 +979,74 @@ class MatchResult(BaseModel):
     elapsed_ms: float = Field(default=0.0, ge=0.0)
 
 
+class WarningKind(StrEnum):
+    """What *sort* of warning a ``StepStatus.WARNING`` is.
+
+    A warning gets an explanation printed under the run summary, and the
+    explanation is only useful if it describes the warning the reader actually
+    got. Before this existed, every warning drew the same two sentences --
+    "a click that moves nothing usually means it missed its target" and "an
+    expectation written as a sentence was never checked at all" -- so a run
+    whose only warning was "the target is a ``<select>``" sent its reader
+    hunting for a dead click and a prose expectation that were not there.
+
+    The kind is attached where the warning is *raised*, not recovered later by
+    matching on the message text: the wording of these messages is edited
+    often, and a classifier reading it would break silently and go on printing
+    confident advice about the wrong thing.
+    """
+
+    #: A click or navigation left the screen unchanged -- it probably missed.
+    CLICK_NO_EFFECT = "click_no_effect"
+    #: Text was typed but the field could not have taken it: a ``<select>``,
+    #: a disabled or readonly input, or one still empty afterwards.
+    TYPED_VALUE = "typed_value"
+    #: Text was typed and landed, but in a different field from the one the
+    #: step named (AAT-124).
+    TYPED_DESTINATION = "typed_destination"
+    #: A scenario-level ``expected_result`` written as an English sentence,
+    #: which nothing can evaluate, so nothing was checked (AAT-115).
+    PROSE_EXPECTATION = "prose_expectation"
+
+
+#: One explanation per kind of warning, kept next to the enum so that adding a
+#: kind without an explanation is visible in a single file. Phrased as advice
+#: the reader can act on, because the summary is the only place most runs say
+#: anything about a warning at all.
+WARNING_NOTES: dict[WarningKind, str] = {
+    WarningKind.CLICK_NO_EFFECT: (
+        "A click that moves nothing usually means it missed its target — "
+        "check the screenshots for those steps."
+    ),
+    WarningKind.TYPED_VALUE: (
+        "A field that could not take the text was typed into anyway — "
+        "the step message says which, and what to use instead."
+    ),
+    WarningKind.TYPED_DESTINATION: (
+        "Text landed in a different field from the one the step named — "
+        "name the target with `target.selector` to settle where it goes."
+    ),
+    WarningKind.PROSE_EXPECTATION: (
+        "An expectation written as a sentence was never checked at all — "
+        "give it a type and a value."
+    ),
+}
+
+
+def warning_notes(kinds: Iterable[WarningKind]) -> list[str]:
+    """The explanations for the kinds of warning a run actually produced.
+
+    Unknown or untagged warnings contribute nothing. That direction is
+    deliberate: a producer that forgets its tag leaves the summary quiet,
+    which is a smaller harm than the one this replaced -- confident advice
+    about a warning the reader never got.
+
+    Returned in enum declaration order so repeated runs read the same way.
+    """
+    present = set(kinds)
+    return [note for kind, note in WARNING_NOTES.items() if kind in present]
+
+
 class StepResult(BaseModel):
     """Individual step execution result."""
 
@@ -985,6 +1054,10 @@ class StepResult(BaseModel):
     action: ActionType
     status: StepStatus
     description: str
+    #: Set only when ``status`` is ``WARNING``; tells the summary which
+    #: explanation to print. ``None`` means the producer did not say, and the
+    #: summary stays silent rather than guessing.
+    warning_kind: WarningKind | None = None
     match_result: MatchResult | None = None
     screenshot_before: str | None = None
     screenshot_after: str | None = None

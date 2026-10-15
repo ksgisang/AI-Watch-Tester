@@ -17,7 +17,14 @@ import cv2
 import numpy as np
 
 from aat.core.exceptions import StepExecutionError
-from aat.core.models import ActionType, AssertType, ExpectedResult, StepResult, StepStatus
+from aat.core.models import (
+    ActionType,
+    AssertType,
+    ExpectedResult,
+    StepResult,
+    StepStatus,
+    WarningKind,
+)
 from aat.engine.overlay import overlay_hidden
 from aat.engine.sweep import sweep_viewports
 
@@ -575,6 +582,7 @@ async def evaluate_scenario_expectations(
                     action=ActionType.ASSERT,
                     status=StepStatus.WARNING,
                     description=description,
+                    warning_kind=WarningKind.PROSE_EXPECTATION,
                     error_message=PROSE_WARNING,
                 )
             )

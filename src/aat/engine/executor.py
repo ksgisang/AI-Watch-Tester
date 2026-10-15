@@ -28,6 +28,7 @@ from aat.core.models import (
     ScreenshotSpace,
     StepResult,
     StepStatus,
+    WarningKind,
     compute_region_bounds,
 )
 from aat.engine.dom_search import is_clipped_by_ancestor, is_really_visible
@@ -401,7 +402,16 @@ class StepExecutor:
         self._matcher = matcher
         self._humanizer = humanizer
         self._waiter = waiter
-        self._last_screenshot: bytes | None = None  # for assert_screen_changed
+        #: The frame taken at the start of the current step, before its action.
+        #: Read by the no-effect check, the before/after screenshot mode and
+        #: template cropping — all of which want exactly that meaning.
+        self._last_screenshot: bytes | None = None
+        #: The frame taken at the start of the *previous* step, kept in a slot
+        #: of its own for ``assert_screen_changed``. An assertion that compared
+        #: against ``_last_screenshot`` would be measuring its own step's start
+        #: against its own step's end, with no action in between — structurally
+        #: 0.0%, whatever really happened on screen (AAT-127).
+        self._assert_baseline: bytes | None = None
         self._last_url: str = ""  # pre-action URL, so navigation is judged by URL
         self._comparator = comparator
         self._screenshot_dir = screenshot_dir or Path(".aat/screenshots")
@@ -426,6 +436,10 @@ class StepExecutor:
         # telling the reader it "probably missed its target" sends them looking
         # for a coordinate bug that is not there.
         self._no_effect_reason: str | None = None
+        # The same distinction in a form the summary can branch on. The reason
+        # above is prose and gets reworded; a classifier reading it would
+        # break quietly and keep printing advice about the wrong warning.
+        self._no_effect_kind: WarningKind | None = None
         # Which field each typing target has already written into, this run.
         # Keyed by element identity rather than by the point that was clicked:
         # a long form scrolls while it is filled, so one viewport coordinate
@@ -457,6 +471,7 @@ class StepExecutor:
         self._pending_learn = None
         self._pending_bank = None
         self._no_effect_reason = None
+        self._no_effect_kind = None
 
         try:
             # 0. Resolve runtime variables in step fields
@@ -478,7 +493,12 @@ class StepExecutor:
             if step.screenshot_before:
                 screenshots["before"] = await self._save_screenshot("before")
 
-            # Capture screenshot before action (for assert_screen_changed)
+            # Roll the assertion baseline one slot back before overwriting the
+            # pre-action frame: what an assert step must compare against is the
+            # screen as it stood before the step *in front of it* acted.
+            self._assert_baseline = self._last_screenshot
+
+            # Capture screenshot before action
             with contextlib.suppress(Exception):
                 self._last_screenshot = await self._engine.screenshot()
 
@@ -567,6 +587,11 @@ class StepExecutor:
                 action=step.action,
                 status=(StepStatus.WARNING if no_effect else StepStatus.PASSED),
                 description=step.description,
+                # Nothing claimed the warning, so it came from the click/
+                # navigation path, which sets no reason either.
+                warning_kind=(
+                    (self._no_effect_kind or WarningKind.CLICK_NO_EFFECT) if no_effect else None
+                ),
                 error_message=(
                     (
                         self._no_effect_reason
@@ -3933,8 +3958,11 @@ class StepExecutor:
                     "the keystrokes went somewhere else"
                 )
 
+        kind_tag = WarningKind.TYPED_VALUE if reason else None
+
         if reason is None:
             reason = await self._check_typed_destination(page, step, typed)
+            kind_tag = WarningKind.TYPED_DESTINATION if reason else None
 
         if reason is None:
             return True
@@ -3945,6 +3973,7 @@ class StepExecutor:
             raise StepExecutionError(msg, step=step.step, action=step.action.value)
         logger.warning("[AWT] %s", reason)
         self._no_effect_reason = reason
+        self._no_effect_kind = kind_tag
         return False
 
     async def _check_typed_destination(
@@ -4275,7 +4304,7 @@ class StepExecutor:
     ) -> None:
         """Verify the screen changed since the last screenshot."""
         current = await self._engine.screenshot()
-        previous = self._last_screenshot
+        previous = self._assert_baseline
 
         if previous is None:
             logger.warning("assert_screen_changed: no previous screenshot")

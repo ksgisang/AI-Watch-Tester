@@ -22,7 +22,15 @@ from aat.core.diagnosis import (
     format_skill_diagnosis,
 )
 from aat.core.exceptions import AATError, ReporterError
-from aat.core.models import FIND_ACTIONS, Scenario, StepResult, StepStatus, TestResult
+from aat.core.models import (
+    FIND_ACTIONS,
+    Scenario,
+    StepResult,
+    StepStatus,
+    TestResult,
+    WarningKind,
+    warning_notes,
+)
 from aat.core.platform_detect import detect_platform, format_platform_info
 from aat.core.scenario_loader import load_scenarios
 from aat.core.tally import demote_if_flow_broken, tally_statuses
@@ -704,6 +712,9 @@ async def _run(
     total_warned = 0
     total_unverified = 0  # ran after the scenario had already broken
     warnings: list[str] = []  # steps that ran but changed nothing
+    # Which sorts of warning actually occurred, so the closing advice can be
+    # about those and not about every warning the product can emit.
+    warning_kinds: set[WarningKind] = set()
     had_critical = False
     passed_scenarios: set[str] = set()
     failed_scenarios: set[str] = set()
@@ -775,6 +786,7 @@ async def _run(
                     # 2. Reset executor page state
                     executor._current_page_state = "normal"
                     executor._last_screenshot = None
+                    executor._assert_baseline = None
 
                     if skill_mode:
                         typer.echo("[AWT] State reset for new scenario")
@@ -964,6 +976,8 @@ async def _run(
                         f"{scenario.id} step {result.step} "
                         f"({result.action.value}): {result.error_message}"
                     )
+                    if result.warning_kind is not None:
+                        warning_kinds.add(result.warning_kind)
                     status_str = typer.style("WARNING", fg=typer.colors.YELLOW)
                 else:
                     total_failed += 1
@@ -1107,6 +1121,8 @@ async def _run(
                     warnings.append(
                         f"{scenario.id} {exp_result.description}: {exp_result.error_message}"
                     )
+                    if exp_result.warning_kind is not None:
+                        warning_kinds.add(exp_result.warning_kind)
                     icon, label = "⚠️", typer.style("WARNING", fg=typer.colors.YELLOW)
                 else:
                     total_failed += 1
@@ -1220,11 +1236,8 @@ async def _run(
         )
         for w in warnings:
             typer.echo(typer.style(f"  ⚠ {w}", fg=typer.colors.YELLOW))
-        typer.echo(
-            "  A click that moves nothing usually means it missed its target — "
-            "check the screenshots for those steps. An expectation written as a "
-            "sentence was never checked at all — give it a type and a value."
-        )
+        for note in warning_notes(warning_kinds):
+            typer.echo(f"  {note}")
 
     # -- Reports --------------------------------------------------------------
     if report_format and test_results:

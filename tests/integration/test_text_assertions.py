@@ -56,6 +56,7 @@ from aat.core.models import (
     StepConfig,
     StepStatus,
     TargetSpec,
+    WarningKind,
 )
 from aat.engine.comparator import Comparator, evaluate_scenario_expectations
 from aat.engine.executor import StepExecutor
@@ -769,6 +770,10 @@ class TestScenarioLevelExpectedResult:
 
         assert results[0].status == StepStatus.WARNING
         assert "nothing was checked" in (results[0].error_message or "")
+        # Tagged here, at the point the warning is raised, so the run summary
+        # can explain this warning without reading its wording back. See
+        # tests/integration/test_warning_kinds.py for why that matters.
+        assert results[0].warning_kind == WarningKind.PROSE_EXPECTATION
 
     @pytest.mark.asyncio
     async def test_a_scenario_that_stopped_early_skips_its_expectations(
