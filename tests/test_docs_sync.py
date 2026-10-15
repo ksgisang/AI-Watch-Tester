@@ -5,9 +5,15 @@ actions while the code had 26, so an AI reading it could not write a step that
 the code already supported. Nothing failed — the docs simply lied. This test is
 the alarm that was missing.
 
-`awt-skill` is a git submodule, so the files may be absent (CI checks out the
-main repo without submodules). The check is skipped then rather than failed:
-absent is not stale.
+`awt-skill` is a git submodule, so the files are absent in a clone made without
+`--recursive`. The check is skipped then rather than failed: absent is not
+stale. CI does check it, because `ci.yml` checks out with `submodules: true`.
+
+That skip is also the one way this alarm can be silenced without anyone
+noticing, and it has happened once: moving the skill to `skills/awt` for the
+plugin bundle left this path behind, and the suite stayed green while the check
+did nothing. If these tests skip in a working tree that has the submodule,
+the path below is wrong, not the submodule.
 """
 
 from __future__ import annotations
@@ -22,7 +28,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 GENERATOR = REPO_ROOT / "scripts" / "gen_scenario_schema.py"
-SKILL_ROOT = REPO_ROOT / "awt-skill" / "awt"
+SKILL_ROOT = REPO_ROOT / "awt-skill" / "skills" / "awt"
 
 needs_skill = pytest.mark.skipif(
     not SKILL_ROOT.is_dir(),

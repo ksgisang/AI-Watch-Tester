@@ -77,13 +77,20 @@ npx skills add ksgisang/awt-skill --skill awt -g
 # Install
 pip install aat-devqa
 
-# Add to Claude Code
-claude mcp add awt -- python mcp/server.py
+# Claude Code — the plugin brings the skill and the MCP server together
+claude plugin marketplace add ksgisang/awt-skill
+claude plugin install ai-watch-tester@awt
 
-# Tools available: aat_devqa, aat_run, aat_doctor, aat_list_scenarios,
-#                  aat_validate, aat_generate_from_doc,
-#                  aat_snapshot, aat_diff, aat_watch
+# Tools available: aat_devqa, aat_scan, aat_run, aat_run_skill_mode, aat_doctor,
+#                  aat_list_scenarios, aat_validate, aat_cost,
+#                  aat_generate_from_doc, aat_snapshot, aat_diff, aat_watch
 ```
+
+To register the server by hand instead — or to use it from Claude Desktop,
+Cursor, or Windsurf — see [`mcp/README.md`](mcp/README.md). The server file
+itself lives in the plugin bundle at
+[`awt-skill/mcp/server.py`](https://github.com/ksgisang/awt-skill/blob/main/mcp/server.py),
+so there is only ever one copy of it.
 
 > **Cloud & Local CLI** versions are in active development and will be announced separately.
 
@@ -196,11 +203,12 @@ npx skills add ksgisang/awt-skill --skill awt -g
 
 ```bash
 # Add to Claude Code
-claude mcp add awt -- python mcp/server.py
+claude plugin marketplace add ksgisang/awt-skill
+claude plugin install ai-watch-tester@awt
 
-# Tools available: aat_run, aat_doctor, aat_list_scenarios, aat_validate,
-#                  aat_cost, aat_generate_from_doc,
-#                  aat_snapshot, aat_diff, aat_watch
+# Tools available: aat_devqa, aat_scan, aat_run, aat_run_skill_mode, aat_doctor,
+#                  aat_list_scenarios, aat_validate, aat_cost,
+#                  aat_generate_from_doc, aat_snapshot, aat_diff, aat_watch
 ```
 
 ---

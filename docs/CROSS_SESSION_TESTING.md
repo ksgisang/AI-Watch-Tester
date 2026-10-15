@@ -143,11 +143,11 @@ ModuleNotFoundError: No module named 'aat.engine.sweep'
 
 ## 3. 전역 스킬 동기화
 
-다른 세션이 읽는 스킬은 `~/.claude/skills/awt/`이고, 정본은 저장소의 `awt-skill/awt/`입니다.
+다른 세션이 읽는 스킬은 `~/.claude/skills/awt/`이고, 정본은 저장소의 `awt-skill/skills/awt/`입니다.
 둘은 자동으로 맞춰지지 않으므로 기능을 추가하거나 스킬 문서를 고친 뒤에는 손으로 복사해야 합니다.
 
 ```bash
-SRC=/Users/apple/Documents/Projects/AI_Auto_Tester/awt-skill/awt
+SRC=/Users/apple/Documents/Projects/AI_Auto_Tester/awt-skill/skills/awt
 DST=~/.claude/skills/awt
 
 cp -a "$DST/SKILL.md" "$DST/SKILL.md.bak-$(date +%Y%m%d)"   # 되돌릴 수 있게
@@ -160,7 +160,8 @@ diff -r --exclude='*.bak-*' --exclude=scripts "$DST" "$SRC" && echo "동일합�
 
 `SKILL.md` 본문이 `references/` 세 파일과 `templates/` 두 파일을 직접 가리키므로
 **하위 디렉터리까지 함께 복사해야 합니다.** 본문만 복사하면 링크가 전부 끊어집니다.
-(`scripts/`는 비어 있어 복사 대상이 아닙니다.)
+(`scripts/`는 비어 있어 2026-10-15에 지웠습니다. `diff`의 `--exclude=scripts`는
+그 폴더가 전역 사본에 아직 남아 있는 기기를 위해 남겨 둡니다.)
 
 먼저 지우는 이유가 두 가지입니다.
 `cp -a 원본디렉터리 대상디렉터리`는 **대상이 이미 있으면 그 안으로** 복사해
@@ -172,12 +173,18 @@ diff -r --exclude='*.bak-*' --exclude=scripts "$DST" "$SRC" && echo "동일합�
 이 기기에만 해당하는 사항은 전역 사본을 손보는 대신 §2 브리핑에 적습니다.
 그래야 다음 동기화가 손질한 내용을 조용히 지우지 않습니다.
 
+### 플러그인을 설치한 뒤에는 손으로 복사하지 마십시오
+
+위 절차는 **플러그인을 쓰지 않는 기기**를 위한 것입니다.
+`claude plugin install ai-watch-tester@awt`로 번들을 설치하면 같은 스킬이
+플러그인 안에 들어오므로, `~/.claude/skills/awt/`를 그대로 두면 **같은 스킬이 두 벌**
+존재하게 되고 둘이 갈라집니다. 플러그인을 설치하셨다면 전역 사본을 지우고
+`claude plugin update ai-watch-tester@awt`로 갱신하십시오.
+
 ### 미결 사항
 
-`awt-skill/awt/SKILL.md`의 머리말이 아직 `version: 1.5.0`입니다(실제 꾸러미는 1.7.1).
-저장소본 자체의 표기 오류이고, **`1.8.0` 배포 때 함께 고치기로 했습니다.**
-그 파일은 공개 저장소의 `.claude-plugin/marketplace.json`이 직접 가리키는 자리라
-배포와 묶어 처리하는 편이 안전합니다.
+없습니다. `SKILL.md` 머리말의 `version: 1.5.0` 표기 오류는 2026-10-15에
+`1.8.0`으로 바로잡았습니다(`plugin.json`·`marketplace.json`과 동일).
 
 ---
 

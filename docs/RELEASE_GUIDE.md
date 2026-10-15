@@ -124,7 +124,7 @@ gh run list --limit 1 --workflow publish.yml
 | GitHub Action: visual-regression.yml | ✅ 반영 |
 | `--report pdf` / MCP `report` 인자 | ✅ 반영 |
 | 종료 코드 표 (`0`/`1`/`2`/`3`) | ✅ 반영 (1.8.0) |
-| `aat learned list` / `aat learned clear --templates` | ⬜ 해당 없음 — README에는 `aat` 명령 목록이 없습니다. 정본은 `awt-skill/awt/references/cli-reference.md`이고 거기에 반영되어 있습니다 |
+| `aat learned list` / `aat learned clear --templates` | ⬜ 해당 없음 — README에는 `aat` 명령 목록이 없습니다. 정본은 `awt-skill/skills/awt/references/cli-reference.md`이고 거기에 반영되어 있습니다 |
 
 > 이 표는 배포할 때마다 실제 README를 확인해 갱신합니다. 오래된 ❌ 목록은
 > 이미 끝난 일을 남은 일처럼 보이게 만들어, 다음 배포에서 헛일을 부릅니다.
@@ -152,40 +152,61 @@ git push origin main
 
 ---
 
-## 4. Anthropic Skills PR 업데이트
+## 4. 플러그인 번들 갱신 (기존 "Anthropic Skills PR"을 대체)
 
 ### 현황
-- 저장소: `anthropics/skills`
-- PR: #822
-- 상태: 리뷰 대기 중 (2026-04-04 기준)
+- **`anthropics/skills` PR #822는 더 이상 경로가 아닙니다.** 그 저장소는
+  디렉터리 역할을 넘겼고, 스킬은 단독 제출 항목이 아니라 **플러그인 번들의 일부**로
+  등재됩니다. PR은 닫고 포털 경로를 안내합니다.
+- 번들: `awt-skill` 저장소 **하나**입니다. 스킬(`skills/awt/`)과 MCP
+  서버(`mcp/server.py`)가 같은 저장소에 있고, 사용자는 한 번에 둘 다 받습니다.
+- 매니페스트: `awt-skill/.claude-plugin/plugin.json`,
+  마켓플레이스 항목: `awt-skill/.claude-plugin/marketplace.json`
+- 플러그인 이름 `ai-watch-tester`는 **바꾸지 않습니다** — 이름을 바꾸면 이미 설치한
+  모든 사용자에게 다른 플러그인이 되어 갱신이 끊깁니다.
 
 ### 업데이트가 필요한 경우
 - MCP 도구에 새 파라미터 추가 시
 - 새 MCP 도구 추가 시
-- 스킬 설명/instructions 변경 시
+- 스킬 설명·instructions 변경 시
 
 ### 절차
 
 ```bash
-# 1. awt-skill 저장소에서 수정
-cd ~/Documents/Projects/awt-skill  # 또는 해당 브랜치
+# 1. 번들(서브모듈)에서 수정합니다. 서버 파일의 정본이 여기입니다.
+cd awt-skill
+#    - skills/awt/**          스킬 본문·참조 문서
+#    - mcp/server.py          MCP 도구 정의
+#    - .claude-plugin/plugin.json 의 "version"
 
-# 2. mcp/server.py의 도구 정의 동기화
-# AWT 본체의 mcp/server.py와 동일하게 유지
+# 2. 형식 검증 — 매니페스트와 마켓플레이스를 한 번에 봅니다.
+claude plugin validate .claude-plugin
 
-# 3. 커밋 & 푸시
-git add .
-git commit -m "feat: sync with AWT v1.X.X — add responsive/console/open"
-git push
+# 3. 커밋 & 푸시 (번들 → 본체 포인터 순서)
+git add . && git commit -m "feat: sync with AWT v1.X.X" && git push
+cd .. && git add awt-skill && git commit -m "chore: bump the awt-skill pointer" && git push
 
-# 4. PR #822에 코멘트로 변경사항 알림
-gh pr comment 822 --repo anthropics/skills --body "Updated to match AWT v1.X.X"
+# 4. 설치해서 실제로 들어왔는지 확인합니다.
+claude plugin update ai-watch-tester@awt
+claude plugin details ai-watch-tester@awt   # Skills (1) awt, MCP servers (1) awt
 ```
 
+### 디렉터리 등재 (최초 1회, 대표님 계정)
+- 제출처: `claude.ai/directory/manage` — **유료 claude.ai 플랜의 브라우저**에서
+  대표님이 직접 하셔야 합니다. CLI 경로가 없습니다.
+- **제출한 조직이 등재의 영구 소유자**가 됩니다.
+- 제출물은 보안 스캔을 통과해야 하고, **첫 제출이 스캔에서 걸리면 반려**입니다.
+  그래서 `awt-skill/README.md`에 "What this plugin runs, sends, and fetches"
+  절을 두어 실행·기록·전송·내려받기를 전부 적어 두었습니다. 서버가 하는 일이
+  바뀌면 **그 절을 같이 고쳐야 합니다.**
+
 ### ⚠️ 주의
-- anthropics/skills PR이 아직 머지 안 된 상태
-- 머지 전에 로컬 스킬로 먼저 사용 가능: `~/.claude/skills/awt/`
-- PR이 오래 방치되면 close 후 새 PR 제출 고려
+- `.mcp.json`이 서버 선언의 정본입니다. `plugin.json` 안의 인라인 `mcpServers`는
+  이 기기의 Claude Code 2.1.220에서 **반영되지 않는 것을 실측**했으므로 두지 않습니다.
+- 플러그인 폴더는 **저장소 최상위**여야 합니다. 하위 폴더에 두면 비셸 MCP 서버가
+  리뷰 보류 대상이 됩니다.
+- 전역 스킬(`~/.claude/skills/awt/`)을 따로 쓰고 계시면 플러그인과 **중복**됩니다.
+  동기화 절차는 `docs/CROSS_SESSION_TESTING.md` §3입니다.
 
 ---
 

@@ -72,13 +72,19 @@ npx skills add ksgisang/awt-skill --skill awt -g
 # 설치
 pip install aat-devqa
 
-# Claude Code에 추가
-claude mcp add awt -- python mcp/server.py
+# Claude Code — 플러그인 하나로 스킬과 MCP 서버가 함께 들어옵니다
+claude plugin marketplace add ksgisang/awt-skill
+claude plugin install ai-watch-tester@awt
 
-# 사용 가능한 도구: aat_devqa, aat_run, aat_doctor, aat_list_scenarios,
-#                  aat_validate, aat_generate_from_doc,
-#                  aat_snapshot, aat_diff, aat_watch
+# 사용 가능한 도구: aat_devqa, aat_scan, aat_run, aat_run_skill_mode, aat_doctor,
+#                  aat_list_scenarios, aat_validate, aat_cost,
+#                  aat_generate_from_doc, aat_snapshot, aat_diff, aat_watch
 ```
+
+서버를 손으로 등록하거나 Claude Desktop·Cursor·Windsurf에서 쓰시려면
+[`mcp/README.md`](mcp/README.md)를 보십시오. 서버 파일 자체는 플러그인 번들의
+[`awt-skill/mcp/server.py`](https://github.com/ksgisang/awt-skill/blob/main/mcp/server.py)
+한 벌뿐입니다.
 
 > **클라우드 & 로컬 CLI** 버전은 현재 개발 중이며 별도로 공개 예정입니다.
 
@@ -159,11 +165,12 @@ npx skills add ksgisang/awt-skill --skill awt -g
 
 ```bash
 # Claude Code에 추가
-claude mcp add awt -- python mcp/server.py
+claude plugin marketplace add ksgisang/awt-skill
+claude plugin install ai-watch-tester@awt
 
-# 사용 가능한 도구: aat_run, aat_doctor, aat_list_scenarios, aat_validate,
-#                  aat_cost, aat_generate_from_doc,
-#                  aat_snapshot, aat_diff, aat_watch
+# 사용 가능한 도구: aat_devqa, aat_scan, aat_run, aat_run_skill_mode, aat_doctor,
+#                  aat_list_scenarios, aat_validate, aat_cost,
+#                  aat_generate_from_doc, aat_snapshot, aat_diff, aat_watch
 ```
 
 ---

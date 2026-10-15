@@ -18,9 +18,9 @@ When code changes, the corresponding documentation must be updated in the same P
 | `cloud/BACKUP_RECOVERY.md` | Database and file backup/restore procedures |
 | `cloud/frontend/messages/en.json` | Frontend UI strings (English, source of truth) |
 | `cloud/frontend/messages/ko.json` | Frontend UI strings (Korean, must mirror en.json keys) |
-| `awt-skill/awt/SKILL.md` | Agent skill instructions — workflow, scenario rules (action table generated) |
-| `awt-skill/awt/references/scenario-schema.md` | **Generated** from `src/aat/core/models.py`; never edit by hand |
-| `mcp/README.md`, `mcp/server.py` docstrings | What the MCP tools promise to the calling AI |
+| `awt-skill/skills/awt/SKILL.md` | Agent skill instructions — workflow, scenario rules (action table generated) |
+| `awt-skill/skills/awt/references/scenario-schema.md` | **Generated** from `src/aat/core/models.py`; never edit by hand |
+| `mcp/README.md`, `awt-skill/mcp/server.py` docstrings | What the MCP tools promise to the calling AI |
 
 ---
 
@@ -43,17 +43,17 @@ When code changes, the corresponding documentation must be updated in the same P
 | WebSocket event added | `API_REFERENCE.md` |
 | File upload limits changed | `API_REFERENCE.md`, `en.json` (fileUpload.formats) |
 | Scenario model / enum changed (`core/models.py`) | Run `python scripts/gen_scenario_schema.py` — see below |
-| DEVQA block fields changed (`core/diagnosis.py`) | `awt-skill/awt/references/cli-reference.md`, `awt-skill/awt/SKILL.md`, `mcp/server.py`, `mcp/README.md` |
-| Approval gate changed (`scenario_reviewer.py`, `approval_token.py`, `audit.py`) | `QUICK_START.md` (Running a Test from the CLI), `awt-skill/awt/references/cli-reference.md`, `CLAUDE.md` |
-| Step status or exit code changed (`core/models.py` `StepStatus`, `cli/commands/run_cmd.py` `_exit_code`) | `QUICK_START.md` (Exit codes), `awt-skill/awt/references/cli-reference.md`, `mcp/server.py` |
-| Report format added/changed (`src/aat/reporters/`) | `QUICK_START.md` (A report you can send to someone), `README.md` (Features), `awt-skill/awt/references/cli-reference.md` + `awt-skill/awt/SKILL.md` (CLI Commands, Key Flags), `mcp/server.py` (`report` argument), `mcp/README.md` |
-| Coordinate learning changed (`engine/executor.py`, `learning/store.py`) | `awt-skill/awt/references/cli-reference.md` (`aat run --no-learn`, `aat learn reset`), `awt-skill/awt/SKILL.md` (when to write `learn: false`) |
-| Approval mode behaviour changed (`core/loop.py` handlers, `ApprovalMode`) | `README.md` (Approval modes), `QUICK_START.md` (Letting AWT fix it), `awt-skill/awt/references/cli-reference.md` (`aat loop` → Approval Modes), `awt-skill/awt/SKILL.md` (Critical rule 7) |
-| Fix validation rules changed (`core/loop.py` `_validate_fix`, `_removed_guards`) | `README.md` (What AWT refuses to write), `QUICK_START.md`, `awt-skill/awt/references/cli-reference.md` (What screening exists) — **state the limit, not just the rule**: a reader who thinks the screen catches test-relaxing fixes will trust `auto` |
-| Closing summary changed (`core/verdict.py`) | `README.md` (How a loop ends), `QUICK_START.md` (the sample output), `awt-skill/awt/references/cli-reference.md` (Verdict). Both registers come from one `Verdict`; if a command starts printing its own ending, that is the bug |
+| DEVQA block fields changed (`core/diagnosis.py`) | `awt-skill/skills/awt/references/cli-reference.md`, `awt-skill/skills/awt/SKILL.md`, `awt-skill/mcp/server.py`, `mcp/README.md` |
+| Approval gate changed (`scenario_reviewer.py`, `approval_token.py`, `audit.py`) | `QUICK_START.md` (Running a Test from the CLI), `awt-skill/skills/awt/references/cli-reference.md`, `CLAUDE.md` |
+| Step status or exit code changed (`core/models.py` `StepStatus`, `cli/commands/run_cmd.py` `_exit_code`) | `QUICK_START.md` (Exit codes), `awt-skill/skills/awt/references/cli-reference.md`, `awt-skill/mcp/server.py` |
+| Report format added/changed (`src/aat/reporters/`) | `QUICK_START.md` (A report you can send to someone), `README.md` (Features), `awt-skill/skills/awt/references/cli-reference.md` + `awt-skill/skills/awt/SKILL.md` (CLI Commands, Key Flags), `awt-skill/mcp/server.py` (`report` argument), `mcp/README.md` |
+| Coordinate learning changed (`engine/executor.py`, `learning/store.py`) | `awt-skill/skills/awt/references/cli-reference.md` (`aat run --no-learn`, `aat learn reset`), `awt-skill/skills/awt/SKILL.md` (when to write `learn: false`) |
+| Approval mode behaviour changed (`core/loop.py` handlers, `ApprovalMode`) | `README.md` (Approval modes), `QUICK_START.md` (Letting AWT fix it), `awt-skill/skills/awt/references/cli-reference.md` (`aat loop` → Approval Modes), `awt-skill/skills/awt/SKILL.md` (Critical rule 7) |
+| Fix validation rules changed (`core/loop.py` `_validate_fix`, `_removed_guards`) | `README.md` (What AWT refuses to write), `QUICK_START.md`, `awt-skill/skills/awt/references/cli-reference.md` (What screening exists) — **state the limit, not just the rule**: a reader who thinks the screen catches test-relaxing fixes will trust `auto` |
+| Closing summary changed (`core/verdict.py`) | `README.md` (How a loop ends), `QUICK_START.md` (the sample output), `awt-skill/skills/awt/references/cli-reference.md` (Verdict). Both registers come from one `Verdict`; if a command starts printing its own ending, that is the bug |
 | AWT injects anything into the page under test (`cli/commands/run_cmd.py` `_OVERLAY_INIT_JS`, dashboard banners, debug markers) | Nothing. **This is a review rule, not a document**: whatever you inject must stay out of the DOM AWT judges (closed shadow root — an *open* one is pierced by Playwright's text engine) and out of every capture (`engine/overlay.py`, reference-counted). A light-DOM element carrying the step's own expected text makes assertions read AWT's words and pass — see §11-23 |
 | Matching, healing, OCR or any behaviour another session should exercise | `docs/CROSS_SESSION_TESTING.md` §2 `[4]`/`[5]` — replace the focus list with what *this* change fixed, and name the log phrase it emits |
-| `awt-skill/awt/**` edited for any reason | Re-sync the global copy at `~/.claude/skills/awt/` — procedure in `docs/CROSS_SESSION_TESTING.md` §3. They do not sync themselves |
+| `awt-skill/skills/awt/**` edited for any reason | Re-sync the global copy at `~/.claude/skills/awt/` — procedure in `docs/CROSS_SESSION_TESTING.md` §3. They do not sync themselves |
 
 ---
 
@@ -67,8 +67,8 @@ python scripts/gen_scenario_schema.py          # regenerate
 python scripts/gen_scenario_schema.py --check  # fail if out of date
 ```
 
-This writes `awt-skill/awt/references/scenario-schema.md` in full, and the
-action table inside `awt-skill/awt/SKILL.md` between the `BEGIN GENERATED` and
+This writes `awt-skill/skills/awt/references/scenario-schema.md` in full, and the
+action table inside `awt-skill/skills/awt/SKILL.md` between the `BEGIN GENERATED` and
 `END GENERATED` markers. Everything else in `SKILL.md` stays hand-written.
 
 Only prose that has no home in the code — what an action is for, what its value

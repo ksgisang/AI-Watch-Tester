@@ -48,7 +48,7 @@ from aat.core.models import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SKILL_ROOT = REPO_ROOT / "awt-skill" / "awt"
+SKILL_ROOT = REPO_ROOT / "awt-skill" / "skills" / "awt"
 OUTPUT = SKILL_ROOT / "references" / "scenario-schema.md"
 SKILL_DOC = SKILL_ROOT / "SKILL.md"
 GENERATOR = "scripts/gen_scenario_schema.py"
