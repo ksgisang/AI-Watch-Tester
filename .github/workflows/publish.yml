@@ -74,4 +74,15 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" dist/* --generate-notes --latest
+        # A hand-written note, when there is one, goes *above* the generated
+        # commit list — a release that changes what counts as a pass has to say
+        # so before the reader reaches 66 commit subjects. Releases without a
+        # note file behave exactly as before.
+        run: |
+          NOTES="docs/releases/${{ github.ref_name }}.md"
+          if [ -f "$NOTES" ]; then
+            gh release create "${{ github.ref_name }}" dist/* \
+              --notes-file "$NOTES" --generate-notes --latest
+          else
+            gh release create "${{ github.ref_name }}" dist/* --generate-notes --latest
+          fi

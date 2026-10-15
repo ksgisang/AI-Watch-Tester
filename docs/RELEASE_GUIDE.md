@@ -60,9 +60,15 @@ grep '^version' pyproject.toml
 
 # 2. 버전 수정
 # pyproject.toml의 version = "X.Y.Z" 수정
+# src/aat/__init__.py의 __version__도 같이 올립니다 (둘이 어긋나면 시험이 잡습니다)
+
+# 2-1. 릴리스 노트 (선택이지만, 동작이 달라지는 판에서는 필수)
+# docs/releases/vX.Y.Z.md 를 작성합니다. 이 파일이 있으면 publish.yml이
+# 자동 생성 커밋 목록 '위에' 붙여 줍니다. 없으면 예전과 똑같이 동작합니다.
+# 통과가 실패로 바뀔 수 있는 판은 첫 줄에 그 사실을 적습니다.
 
 # 3. 커밋
-git add pyproject.toml
+git add pyproject.toml src/aat/__init__.py docs/releases/
 git commit -m "chore: bump version to X.Y.Z"
 git push origin main
 
@@ -105,7 +111,7 @@ gh run list --limit 1 --workflow publish.yml
 - 새 MCP 도구 추가 시
 - 지원 플랫폼/도구 변경 시
 
-### README 반영 현황 (2026-09-19 기준)
+### README 반영 현황 (2026-10-15 기준)
 
 | 기능 | README 반영 여부 |
 |---|---|
@@ -117,6 +123,8 @@ gh run list --limit 1 --workflow publish.yml
 | MCP 도구: `aat_snapshot`, `aat_diff`, `aat_watch` | ✅ 반영 |
 | GitHub Action: visual-regression.yml | ✅ 반영 |
 | `--report pdf` / MCP `report` 인자 | ✅ 반영 |
+| 종료 코드 표 (`0`/`1`/`2`/`3`) | ✅ 반영 (1.8.0) |
+| `aat learned list` / `aat learned clear --templates` | ⬜ 해당 없음 — README에는 `aat` 명령 목록이 없습니다. 정본은 `awt-skill/awt/references/cli-reference.md`이고 거기에 반영되어 있습니다 |
 
 > 이 표는 배포할 때마다 실제 README를 확인해 갱신합니다. 오래된 ❌ 목록은
 > 이미 끝난 일을 남은 일처럼 보이게 만들어, 다음 배포에서 헛일을 부릅니다.
@@ -254,6 +262,7 @@ curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.ks
 
 | 버전 | 날짜 | 주요 변경 |
 |---|---|---|
+| 1.8.0 | 2026-10-15 | **통과가 실패로 바뀔 수 있는 판** — 검증되지 않은 단계를 `WARNING`(종료코드 3)·`UNVERIFIED`로 보고(AAT-115·123·124), `if_visible`이 접힌 용기 안 요소를 건너뜀(AAT-126). 통과할 수 없던 `assert_screen_changed` 수정(AAT-127), 자기 치유 실제 작동(AAT-112), Flutter CanvasKit 세 겹(AAT-116~118), 접힌 선 아래 탐색(AAT-121), 좌표계 분리(AAT-120), 자동 수정 안전장치(AAT-122), `aat learned list/clear --templates`, `.aat/runs/` 실행 이력 |
 | 1.7.1 | 2026-09-19 | 상대 경로 `reports_dir`에서 PDF가 인쇄되지 않던 결함 수정, `--report-screenshots failures\|all\|none` 신설 |
 | 1.7.0 | 2026-09-19 | PDF 리포트 (`aat run --report pdf`, MCP `report` 인자), 학습 좌표 신뢰성 수정(AAT-109) |
 | 1.6.2 | — | MCP Registry 등록, 승인 우회 방지 4계층 |

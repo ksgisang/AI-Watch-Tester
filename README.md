@@ -242,6 +242,22 @@ aat run scenarios/
 
 This turns AWT into an **automated quality gate** — your AI writes code, AWT verifies it works, and the loop continues until everything passes.
 
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Every step passed and was verified |
+| `1` | A step failed (or a step was skipped, under `--strict`) |
+| `2` | A step marked `critical: true` failed, so the run stopped there |
+| `3` | Nothing failed, but something was not actually verified |
+
+Code `3` is the one worth wiring up. It covers the cases AWT used to report as
+a pass: a click that moved nothing on screen, text that went into a different
+field than the step named, a target that was `disabled` or `readonly`, and a
+scenario-level `expected_result` written as an ordinary sentence, which is
+never checked at all. Treating `3` as a failure is the stricter and more useful
+setting; treating it as a pass is the older behaviour.
+
 ---
 
 ## Visual Regression — Catch UI Changes Automatically
