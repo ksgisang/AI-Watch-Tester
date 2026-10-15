@@ -125,6 +125,82 @@ async def find_text_position(page: Page, text: str) -> tuple[int, int] | None:
     )
 
 
+#: True when some ancestor has no room in a direction it does not let content
+#: escape from. Walks up rather than testing the element itself, because the
+#: clipped child keeps a box of its own -- that is the whole reason Playwright
+#: is fooled.
+#:
+#: The border box, not ``clientHeight``. An inline ``<span>`` has
+#: ``clientHeight`` 0 while being plainly on screen, so the cheaper property
+#: would hide ordinary text inside any ``<span>`` that happens to carry
+#: ``overflow: hidden``. Measured: the span case reads as clipped under
+#: ``clientHeight`` and as visible under the border box.
+#:
+#: ``overflow !== 'visible'`` rather than a list of clipping values: ``hidden``,
+#: ``clip``, ``auto`` and ``scroll`` all clip at zero size, and ``visible`` is
+#: the only one that does not.
+_ANCESTOR_CLIPS_TO_NOTHING = """
+(el) => {
+  let node = el;
+  while (node) {
+    const parent = node.parentElement;
+    if (!parent) return false;
+    const cs = getComputedStyle(parent);
+    const rect = parent.getBoundingClientRect();
+    if (cs.overflowY !== 'visible' && rect.height === 0) return true;
+    if (cs.overflowX !== 'visible' && rect.width === 0) return true;
+    node = parent;
+  }
+  return false;
+}
+"""
+
+
+async def is_clipped_by_ancestor(locator: Locator) -> bool:
+    """True when *locator* sits inside a container collapsed to nothing.
+
+    Playwright's ``is_visible`` answers for the node itself, and a node inside
+    a ``height: 0; overflow: hidden`` parent still has its own box, its own
+    size and a position on the page. So a collapsed menu holding the words a
+    step is watching for reads as visible, and ``if_visible`` runs a dismiss
+    block against a popup that is not open -- the 2026-03-24 report arriving
+    by a second route after ``display: none`` was closed off.
+
+    Why this shape and not the obvious one: the direct test is "does a click at
+    the element's centre land on the element" (``document.elementFromPoint``),
+    which is correct *and* answers "no" for everything below the fold, because
+    that function only sees the viewport. It would close this hole by undoing
+    AAT-121. Asking instead whether an ancestor has collapsed never consults
+    the scroll position, so an element 2,000px down the page is untouched
+    (measured: ``y = 2119.9``, not clipped).
+
+    What this deliberately does not catch: an element scrolled out of view
+    *inside* a scroll container that has a real size. That is still reported
+    visible, exactly as before -- no better, and no worse.
+
+    Returns ``False`` if the question cannot be asked. An element that has gone
+    away mid-check is not evidence that the page is hiding something.
+    """
+    try:
+        return bool(await locator.evaluate(_ANCESTOR_CLIPS_TO_NOTHING))
+    except Exception:
+        return False
+
+
+async def is_really_visible(locator: Locator) -> bool:
+    """``is_visible`` plus the ancestor-clip question, as one answer.
+
+    The two are always asked together; keeping them in one place stops a
+    caller from getting half the check.
+    """
+    try:
+        if not await locator.is_visible():
+            return False
+    except Exception:
+        return False
+    return not await is_clipped_by_ancestor(locator)
+
+
 async def scroll_to_top(page: Page) -> None:
     """Scroll the document back to (0, 0)."""
     await page.evaluate("window.scrollTo(0, 0)")

@@ -37,6 +37,44 @@ modes are the four states that question has:
     no box at all, the second leaves the child its own box inside a clipped
     parent.
 
+The last two modes are the opposite question. Closing ``collapsed`` means
+teaching the check to refuse some elements it used to accept, and the cost of
+getting that wrong is invisible -- a popup that *is* up stops being dismissed,
+and the scenario fails somewhere else entirely. So the fixture also carries two
+pages where the popup is genuinely on screen and a careless implementation
+would reject it:
+
+``belowfold``
+    The popup is real and pressable, 2,000px down the page. The direct
+    implementation of "is this on screen" -- ask ``document.elementFromPoint``
+    whether a click at the element's centre would land on it -- answers no for
+    everything outside the viewport, because that function only sees the
+    viewport. It would close ``collapsed`` by undoing AAT-121, which taught
+    the search to scroll.
+
+``inline``
+    The popup text sits inside an inline ``<span>`` carrying
+    ``overflow: hidden``, and is plainly readable. A non-replaced inline
+    element reports ``clientHeight`` 0 no matter how tall it looks, so an
+    implementation that asks for ``clientHeight`` instead of the border box
+    hides ordinary text. Measured here: ``clientHeight`` 0, border box 18px.
+
+    The nesting is load-bearing, which is why it is one level deeper than it
+    looks like it needs to be. Playwright's text engine matches the *smallest*
+    element containing the text, so with the text directly inside the clipping
+    span, the span **is** the match and the ancestor walk starts above it --
+    the page would then pose no question at all. The text is wrapped in a
+    ``<b>`` so that the clipping span is genuinely an ancestor. The first
+    version of this page got that wrong and passed under both candidate
+    implementations.
+
+    ``in-text`` is load-bearing for a second reason. Sharing ``#popup`` with
+    the other modes brings ``position: fixed`` along, which takes the ``<b>``
+    out of its parent's flow and leaves the clipping span 0 *wide* -- so the
+    page quietly became another copy of ``collapsed``. Both versions passed,
+    the wrong one because OCR read the words off the screenshot after the DOM
+    said no.
+
 Every mode serves the same witness button, always present, always clickable,
 and always *outside* the popup. It is what ``then`` presses, and it leaves two
 marks: it bumps a counter the test can read, and it closes the popup if one is
@@ -114,6 +152,24 @@ _PAGE = """<!doctype html>
   /* The two ways a page hides text it still keeps in the DOM. */
   .display-none {{ display: none; }}
   .clipped {{ height: 0; overflow: hidden; }}
+  /* ...and two ways a page shows it that a careless check could mistake for
+     hiding. `in-flow` undoes the fixed positioning so the popup can actually
+     be pushed below the fold; `inline-clip` is an inline element with
+     overflow:hidden, whose clientHeight is 0 while it is 18px tall. */
+  .spacer {{ height: 2000px; background: linear-gradient(#f6f6f6, #fff); }}
+  #popup.in-flow {{
+    position: static; transform: none; width: 460px; margin: 0 auto;
+  }}
+  /* The inline mode needs the popup back in the flow too, and for a sharper
+     reason: `position: fixed` takes it out of its parent's flow, so the
+     clipping span ends up 0 *wide* and the page tests the hole instead of the
+     trap. Found by measuring -- it read as clipped, and the step still passed
+     because OCR read the words off the screenshot. */
+  #popup.in-text {{
+    position: static; transform: none; width: auto; padding: 0;
+    border: none; background: none; font-size: inherit;
+  }}
+  .inline-clip {{ overflow: hidden; }}
 </style></head>
 <body>
 <button id="witness" onclick="witnessed()">WITNESS</button>
@@ -139,11 +195,29 @@ _POPUP = f'<div id="popup" onclick="witnessed()">{POPUP_TEXT}</div>'
 _HIDDEN_NAV = f'<nav class="display-none"><a href="#">{POPUP_TEXT}</a></nav>'
 _CLIPPED_NAV = f'<nav class="clipped"><a href="#">{POPUP_TEXT}</a></nav>'
 
+#: The popup, real and pressable, 2,000px down the page.
+_BELOW_FOLD = (
+    '<div class="spacer"></div>'
+    f'<div id="popup" class="in-flow" onclick="witnessed()">{POPUP_TEXT}</div>'
+)
+
+#: The popup, real and readable, with an inline clipping ancestor. The ``<b>``
+#: is what makes the ``<span>`` an *ancestor* of the matched node rather than
+#: the matched node itself -- see the module docstring.
+_INLINE_CLIPPED = (
+    '<p style="font-size:26px">Please read: '
+    '<span class="inline-clip">'
+    f'<b id="popup" class="in-text" onclick="witnessed()">{POPUP_TEXT}</b>'
+    "</span></p>"
+)
+
 _MODES = {
     "modal": ("", _POPUP),
     "clean": ("", ""),
     "hidden": (_HIDDEN_NAV, ""),
     "collapsed": (_CLIPPED_NAV, ""),
+    "belowfold": ("", _BELOW_FOLD),
+    "inline": ("", _INLINE_CLIPPED),
 }
 
 

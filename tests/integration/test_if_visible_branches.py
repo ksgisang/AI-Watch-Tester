@@ -25,10 +25,28 @@ Chromium -- and they are the whole question. Measured against this fixture:
     hidden      1      False       None          <- display: none
     collapsed   1      True        y = 194.5     <- height: 0; overflow: hidden
 
-The third row is the 2026-03-24 report and the reason the fix works. The fourth
-is a hole the fix did not close, found by writing this file: see
-``TestAClippedAncestorIsStillHidden`` at the bottom, which is marked ``xfail``
-rather than quietly deleted, because a comment does not run.
+The third row is the 2026-03-24 report and the reason ``0516fd9`` works. The
+fourth is a hole that fix did not close, found by writing this file: a child of
+a collapsed container keeps a box of its own, so ``is_visible`` says yes and
+the dismiss block runs against a popup nobody can see. It was pinned here as a
+strict ``xfail`` for one working day and then closed by
+:func:`aat.engine.dom_search.is_clipped_by_ancestor`.
+
+Closing it meant teaching the check to *refuse* elements it used to accept,
+which is the direction that fails silently -- a popup that really is up stops
+being dismissed, and the scenario dies several steps later under another
+name. So the last class here serves two pages where the popup is genuinely on
+screen and shaped like a plausible implementation's blind spot: one below the
+fold, one behind an inline ``overflow: hidden`` ancestor. Both must still run
+``then``.
+
+Four separate places decide this question, and a step reaches exactly one of
+them depending on how it names its target -- selector, region, text, or text
+with no box. Each has a class here, because a guard on a path no test walks
+can be deleted without anything going red; two of them were added only after
+a mutation sweep proved that. One class goes below the executor entirely and
+calls the predicate directly, for the one choice the OCR fallback would
+otherwise answer in its place.
 """
 
 from __future__ import annotations
@@ -44,11 +62,13 @@ from aat.core.models import (
     ActionType,
     EngineConfig,
     MatchingConfig,
+    ScreenRegion,
     StepConfig,
     StepStatus,
     TargetSpec,
 )
 from aat.engine.comparator import Comparator
+from aat.engine.dom_search import is_clipped_by_ancestor
 from aat.engine.executor import StepExecutor
 from aat.engine.humanizer import Humanizer
 from aat.engine.waiter import Waiter
@@ -132,6 +152,36 @@ def _gated_step() -> StepConfig:
         if_visible=True,
         description=f"click '{POPUP_TEXT}' only if it is up",
     )
+
+
+def _dismiss_step_by_selector(selector: str) -> StepConfig:
+    """The dismiss block, naming its target by selector instead of by text.
+
+    A fourth place can answer "is it visible", and it is the first one tried:
+    when the step carries a selector, the check resolves it and measures the
+    box, never reaching the text search below. Every test above names its
+    target by text, so this path was guarded and unexercised -- deletable
+    without anything going red, which a mutation sweep duly demonstrated.
+    """
+    step = _dismiss_step()
+    step.target = TargetSpec(selector=selector)
+    return step
+
+
+def _dismiss_step_in_region(region: ScreenRegion) -> StepConfig:
+    """The dismiss block, scoped to part of the screen.
+
+    A third place can answer "is it visible", reached only when the step names
+    a region: instead of asking `is_visible`, it takes the bounding box and
+    checks the centre point falls inside the region. It was written for the
+    same reason the others were and inherited the same hole, so it needs its
+    own pages -- a region step has never appeared in this file before, and a
+    check that is never exercised is a check that can be deleted without
+    anything going red.
+    """
+    step = _dismiss_step()
+    step.region = region
+    return step
 
 
 async def _open(engine: WebEngine, base_url: str, mode: str) -> None:
@@ -293,56 +343,312 @@ class TestTextInTheDomIsNotTextOnTheScreen:
 
 
 class TestAClippedAncestorIsStillHidden:
-    """A hole ``0516fd9`` did not close, found by writing the file above.
+    """The second route into the 2026-03-24 report, found by writing the file
+    above and closed by :func:`aat.engine.dom_search.is_clipped_by_ancestor`.
 
     ``display: none`` and ``height: 0; overflow: hidden`` both hide text, and
     Playwright tells them apart: the first leaves the child no box, so
-    ``is_visible`` is False and the fix catches it; the second leaves the child
-    its own box inside a clipped parent, so ``is_visible`` is **True** and a
-    box comes back at y = 194.5 -- measured, not reasoned. The predicate
-    therefore says the popup is up, ``then`` runs, nothing can be dismissed,
-    and the step fails after three attempts. That is the 2026-03-24 report
-    again, through a different stylesheet.
+    ``is_visible`` is False and ``0516fd9`` caught it; the second leaves the
+    child its own box inside a clipped parent, so ``is_visible`` is **True**
+    and a box comes back at y = 194.5 -- measured, not reasoned. So the
+    predicate used to say the popup was up, ``then`` ran, nothing could be
+    dismissed, and the step failed after three attempts: the same report
+    through a different stylesheet.
 
     It matters because ``height: 0`` is how an animated accordion or dropdown
     is normally built -- arguably more common than ``display: none``, since it
     is the one that can transition.
 
-    Marked ``xfail(strict=True)`` and not fixed here on purpose. Closing it
-    means changing what "visible" means for every ``if_visible`` step in every
-    user's scenarios, and the candidate check (is the element actually painted
-    at its own centre?) also rejects anything below the fold -- a change of
-    behaviour that is not this work item's to make. Strict, so that whoever
-    does make it is told by a red test rather than by reading this paragraph.
+    The check asks whether an ancestor has collapsed, not whether a click at
+    the element's centre would land on it. The second question is the obvious
+    one and is wrong here: ``document.elementFromPoint`` only sees the
+    viewport, so it would also reject everything below the fold and undo
+    AAT-121. ``TestAVisibleElementIsStillVisible`` holds that line.
     """
 
     @pytest.mark.asyncio
     async def test_playwright_calls_the_clipped_node_visible(
         self, engine: WebEngine, base_url: str
     ) -> None:
-        """Not xfail: this one passes today and is the measurement itself.
+        """The measurement the repair rests on, kept as a test.
 
-        It pins the browser behaviour the hole rests on, so that if a future
-        Chromium starts reporting clipped nodes as hidden, the xfail below
-        turns green for a real reason and says so.
+        It pins the browser behaviour that makes the extra check necessary. If
+        a future Chromium starts reporting clipped nodes as hidden, this turns
+        red and whoever sees it learns that the check below has become
+        redundant -- rather than carrying it forever because a comment said so.
         """
         await _open(engine, base_url, "collapsed")
         locator = engine.page.get_by_text(POPUP_TEXT, exact=False).first
         assert await locator.is_visible() is True
         assert await locator.bounding_box() is not None
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="height:0/overflow:hidden still reads as visible; see the class docstring",
-    )
     @pytest.mark.asyncio
     async def test_then_does_not_run(
         self, engine: WebEngine, base_url: str, tmp_path: Path
     ) -> None:
         await _open(engine, base_url, "collapsed")
-        # The step failing is part of the defect, not a separate one: the
-        # block runs against a popup that is not there, finds nothing to
-        # press, and takes the step down with it.
+        # The step failing was part of the defect, not a separate one: the
+        # block ran against a popup that was not there, found nothing to
+        # press, and took the step down with it. Suppressed rather than
+        # asserted against, because the tally is the claim being made.
         with contextlib.suppress(StepExecutionError):
             await _executor(engine, tmp_path).execute_step(_dismiss_step())
+        assert await _tally(engine) == 0, (
+            "a node inside a zero-height clipped parent convinced if_visible "
+            "the popup was up -- the 2026-03-24 report by its second route"
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_step_does_not_fail_trying_to_dismiss_nothing(
+        self, engine: WebEngine, base_url: str, tmp_path: Path
+    ) -> None:
+        """The symptom, named separately from its cause -- as for ``hidden``.
+
+        What a user saw was not "the branch ran"; it was a red step on a page
+        that was fine.
+        """
+        await _open(engine, base_url, "collapsed")
+        try:
+            result = await _executor(engine, tmp_path).execute_step(_dismiss_step())
+        except StepExecutionError as e:  # pragma: no cover — the regression
+            pytest.fail(f"if_visible failed the step on a page with no popup: {e}")
+        assert result.status != StepStatus.FAILED
+
+    @pytest.mark.asyncio
+    async def test_the_gated_step_is_skipped_too(
+        self, engine: WebEngine, base_url: str, tmp_path: Path
+    ) -> None:
+        await _open(engine, base_url, "collapsed")
+        result = await _executor(engine, tmp_path).execute_step(_gated_step())
+
+        assert result.status == StepStatus.SKIPPED
         assert await _tally(engine) == 0
+
+
+class TestTheRegionPathAnswersTheSameWay:
+    """Both branches again, through the third visibility check.
+
+    A step that names a region never reaches `is_visible` at all: it measures
+    the bounding box and asks whether the centre lands inside the region. Same
+    question, separate code, and it was wrong in the same way. Both modes sit
+    in the top half of a 720px viewport -- the popup at y = 160, the clipped
+    nav at y = 194.5 -- so the region itself is not what separates them.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_real_popup_in_the_region_still_runs_then(
+        self, engine: WebEngine, base_url: str, tmp_path: Path
+    ) -> None:
+        await _open(engine, base_url, "modal")
+        result = await _executor(engine, tmp_path).execute_step(
+            _dismiss_step_in_region(ScreenRegion.TOP)
+        )
+
+        assert result.status == StepStatus.PASSED
+        assert await _tally(engine) == 1, "the region path stopped seeing a real popup"
+
+    @pytest.mark.asyncio
+    async def test_a_clipped_node_in_the_region_does_not(
+        self, engine: WebEngine, base_url: str, tmp_path: Path
+    ) -> None:
+        await _open(engine, base_url, "collapsed")
+        with contextlib.suppress(StepExecutionError):
+            await _executor(engine, tmp_path).execute_step(
+                _dismiss_step_in_region(ScreenRegion.TOP)
+            )
+
+        assert await _tally(engine) == 0, (
+            "the region path accepted a clipped node -- the box is inside the "
+            "region, but nobody can see what is in it"
+        )
+
+
+class TestTheSelectorPathAnswersTheSameWay:
+    """Both branches again, through the check that runs *first*.
+
+    A step that names a selector is resolved and measured before the text
+    search is ever reached, so none of the tests above touch this path. The
+    selector here points straight at the clipped link -- the author has said
+    exactly which node they mean, and the answer still has to be no, because
+    naming an element is not the same as being able to see it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_real_popup_named_by_selector_still_runs_then(
+        self, engine: WebEngine, base_url: str, tmp_path: Path
+    ) -> None:
+        await _open(engine, base_url, "modal")
+        result = await _executor(engine, tmp_path).execute_step(
+            _dismiss_step_by_selector("#popup")
+        )
+
+        assert result.status == StepStatus.PASSED
+        assert await _tally(engine) == 1, "the selector path stopped seeing a real popup"
+
+    @pytest.mark.asyncio
+    async def test_a_clipped_node_named_by_selector_does_not(
+        self, engine: WebEngine, base_url: str, tmp_path: Path
+    ) -> None:
+        await _open(engine, base_url, "collapsed")
+        with contextlib.suppress(StepExecutionError):
+            await _executor(engine, tmp_path).execute_step(
+                _dismiss_step_by_selector("nav.clipped a")
+            )
+
+        assert await _tally(engine) == 0, (
+            "the selector path accepted a clipped node -- it has a box and a "
+            "width, and nobody can see it"
+        )
+
+
+class TestThePredicateByItself:
+    """The one choice inside the predicate that the executor cannot pin.
+
+    ``test_an_inline_clipping_ancestor_is_not_a_clipped_one`` below is the
+    scenario-level claim, and it is not enough on its own: if the DOM path
+    wrongly calls the inline text clipped, the OCR fallback at the end of
+    ``_check_target_visible`` reads the same words off the screenshot -- they
+    really are painted, at 26px -- and the step passes anyway. Measured: with
+    the border box swapped for ``clientHeight``, the predicate answers
+    ``True`` on the inline page and the executor still answers ``True``.
+
+    So the border-box choice is pinned here, where it is made, with nothing
+    downstream able to answer in its place.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_collapsed_ancestor_is_clipped(self, engine: WebEngine, base_url: str) -> None:
+        await _open(engine, base_url, "collapsed")
+        locator = engine.page.get_by_text(POPUP_TEXT, exact=False).first
+        assert await is_clipped_by_ancestor(locator) is True
+
+    @pytest.mark.asyncio
+    async def test_an_inline_clipping_ancestor_is_not(
+        self, engine: WebEngine, base_url: str
+    ) -> None:
+        """The border box, not ``clientHeight``.
+
+        The two properties disagree on exactly this page -- 0 against 18px --
+        and ``clientHeight`` is 0 for every non-replaced inline element, so an
+        implementation reading it hides ordinary text inside any ``<span>``
+        carrying ``overflow: hidden``.
+        """
+        await _open(engine, base_url, "inline")
+        locator = engine.page.get_by_text(POPUP_TEXT, exact=False).first
+        assert await is_clipped_by_ancestor(locator) is False
+
+    @pytest.mark.asyncio
+    async def test_an_ordinary_popup_is_not(self, engine: WebEngine, base_url: str) -> None:
+        await _open(engine, base_url, "modal")
+        locator = engine.page.get_by_text(POPUP_TEXT, exact=False).first
+        assert await is_clipped_by_ancestor(locator) is False
+
+    @pytest.mark.asyncio
+    async def test_below_the_fold_is_not(self, engine: WebEngine, base_url: str) -> None:
+        """Scroll position is not part of the question.
+
+        The predicate asks whether an ancestor has collapsed, which is true or
+        false regardless of where the page happens to be scrolled to.
+        """
+        await _open(engine, base_url, "belowfold")
+        locator = engine.page.get_by_text(POPUP_TEXT, exact=False).first
+        assert await is_clipped_by_ancestor(locator) is False
+
+
+class TestAVisibleElementIsStillVisible:
+    """The other direction, and the reason the check has the shape it does.
+
+    A visibility check can fail in two ways, and only one of them announces
+    itself. Accepting something hidden produces the noisy failure above, three
+    dismiss attempts and a red step. Rejecting something visible produces
+    silence: ``if_visible`` skips a popup that really is up, the scenario
+    carries on into a page covered by a modal, and the failure surfaces several
+    steps later wearing somebody else's name. So both pages here hold a popup
+    that is genuinely on screen, each shaped like a plausible implementation's
+    blind spot.
+    """
+
+    @pytest.mark.asyncio
+    async def test_below_the_fold_still_counts(
+        self, engine: WebEngine, base_url: str, tmp_path: Path
+    ) -> None:
+        """2,000px down and unscrolled. AAT-121's line, held.
+
+        ``document.elementFromPoint`` at the element's centre is the direct way
+        to ask "would a click land here", and it answers no for every element
+        outside the viewport. An implementation built on it closes the clipped
+        case and quietly reintroduces the defect AAT-121 spent a work item
+        removing.
+        """
+        await _open(engine, base_url, "belowfold")
+        assert await _tally(engine) == 0
+
+        result = await _executor(engine, tmp_path).execute_step(_dismiss_step())
+
+        assert result.status == StepStatus.PASSED
+        assert await _tally(engine) == 1, (
+            "a popup below the fold was treated as not on screen -- this is AAT-121 undone"
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_inline_clipping_ancestor_is_not_a_clipped_one(
+        self, engine: WebEngine, base_url: str, tmp_path: Path
+    ) -> None:
+        """``clientHeight`` is 0 for every non-replaced inline element.
+
+        Measured on this page: the clipping ``<span>`` reports ``clientHeight``
+        0 and a border box 18px tall. The cheaper property would therefore
+        hide ordinary text inside any inline element that happens to carry
+        ``overflow: hidden``, which is a far larger blast radius than the
+        defect being fixed.
+
+        This is the scenario-level claim and not the thing that pins the
+        choice: the step passes here even with the wrong property, because the
+        OCR fallback reads the words off the screenshot. See
+        ``TestThePredicateByItself``.
+        """
+        await _open(engine, base_url, "inline")
+        result = await _executor(engine, tmp_path).execute_step(_dismiss_step())
+
+        assert result.status == StepStatus.PASSED
+        assert await _tally(engine) == 1, (
+            "readable text inside an inline overflow:hidden ancestor was "
+            "treated as clipped -- the clientHeight trap"
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_inline_ancestor_really_poses_the_question(
+        self, engine: WebEngine, base_url: str
+    ) -> None:
+        """The premise, asserted rather than assumed.
+
+        Playwright's text engine matches the smallest element containing the
+        text. Put the text directly inside the clipping span and the span
+        *is* the match, so the ancestor walk starts above it and the page
+        proves nothing -- which is exactly how the first version of this
+        fixture passed under both candidate implementations. This pins the
+        nesting that makes the question real.
+
+        The width is asserted for the same reason and against a second way of
+        losing it: the ``<b>`` shares ``#popup`` with every other mode, and
+        that rule's ``position: fixed`` empties the span horizontally, turning
+        this page into another ``collapsed``. Which is to say the span has to
+        have *both* dimensions, or the only thing being measured is the hole
+        again.
+        """
+        await _open(engine, base_url, "inline")
+        locator = engine.page.get_by_text(POPUP_TEXT, exact=False).first
+        shape = await locator.evaluate(
+            "(el) => {"
+            "  const p = el.parentElement;"
+            "  const r = p.getBoundingClientRect();"
+            "  return {tag: el.tagName, cls: p.className,"
+            "          clientH: p.clientHeight,"
+            "          rectH: r.height, rectW: r.width};"
+            "}"
+        )
+        assert shape["tag"] == "B", "the match must be *inside* the clipping span"
+        assert shape["cls"] == "inline-clip"
+        assert shape["clientH"] == 0, "no clientHeight trap left to fall into"
+        assert shape["rectH"] > 0, "the span must really be on screen"
+        assert shape["rectW"] > 0, "the span is 0 wide -- this is `collapsed`, not `inline`"

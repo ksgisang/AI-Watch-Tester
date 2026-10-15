@@ -18,6 +18,11 @@ Pinned here:
   * `text_visible` is the same, which is what it is *for* -- "is this word
     anywhere on the page" is a legitimate question and narrowing it would turn
     passing scenarios red.
+  * `text_visible` does, however, accept text inside a `height: 0;
+    overflow: hidden` ancestor, which no reader can see. Measured 2026-10-14,
+    pinned as a strict `xfail`, and deliberately not fixed: the repair is one
+    line and already written, but unlike the `if_visible` version of the same
+    hole it can only turn other people's green scenarios red.
   * `text_equals` scoped to a selector is the check that catches the leak, and
     it is new: unscoped, it compares against `inner_text("body")`, so it demands
     the whole visible page equal the value and essentially never passes.
@@ -59,6 +64,7 @@ from aat.engine.waiter import Waiter
 from aat.engine.web import WebEngine
 from aat.matchers.hybrid import HybridMatcher
 from aat.matchers.template import TemplateMatcher
+from tests.fixtures.dismissible_popup_server import POPUP_TEXT, dismissible_popup_server
 from tests.fixtures.rendered_text_server import LEAKED, NOTICE, WORD, rendered_text_server
 
 
@@ -458,6 +464,100 @@ class TestHiddenText:
 
         assert result.status == StepStatus.FAILED
         assert "Step 0" not in (result.error_message or "")
+
+
+class TestClippedTextStillSatisfiesTextVisible:
+    """A hole `display: none` does not cover, left open on purpose.
+
+    AAT-115 taught `text_visible` to stop accepting `display: none` text, and
+    `_any_visible_match` does that by asking Playwright's `is_visible()` of
+    each candidate. On 2026-10-14 the same question, asked by `if_visible`,
+    turned out to have a second answer: a node inside a `height: 0;
+    overflow: hidden` parent keeps a box of its own, so `is_visible()` says
+    True and the text reads as on screen. `if_visible` was fixed;
+    `text_visible` was measured and left alone, and this is that measurement.
+
+    Measured against the same six pages, `text_visible` is correct on five and
+    wrong on `collapsed` only — so the shape of the hole is known exactly, and
+    so is the one-line repair (`dom_search.is_really_visible`, already written
+    and already used by `if_visible`).
+
+    Why it was not applied here, when it was there: the two changes point in
+    opposite directions. Adding the check to `if_visible` can only turn red
+    runs green — a dismiss block that used to fire at a popup nobody could see,
+    fail three times and take the step down now simply does not fire. Adding
+    it to `text_visible` can only turn green runs red: every scenario that
+    today asserts on text inside a collapsed accordion starts failing. That is
+    a release-note change to other people's suites, and this repository's rule
+    is that such a change is the owner's to make, not the implementer's.
+
+    `xfail(strict=True)`, so the day someone applies the one-line repair this
+    goes red and tells them this paragraph is now out of date. A comment would
+    not.
+    """
+
+    @pytest.fixture(scope="class")
+    def clipped_url(self) -> Iterator[str]:
+        with dismissible_popup_server() as url:
+            yield url
+
+    @pytest.mark.asyncio
+    async def test_the_page_really_hides_it(self, engine: WebEngine, clipped_url: str) -> None:
+        """The premise: nothing of the phrase is on screen to be read."""
+        await engine.navigate(f"{clipped_url}/?mode=collapsed")
+        locator = engine.page.get_by_text(POPUP_TEXT, exact=False).first
+        assert await locator.count() == 1, "the words must still be in the DOM"
+        box = await locator.evaluate("(el) => el.parentElement.getBoundingClientRect().height")
+        assert box == 0, "the clipping ancestor must have no height"
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "text_visible accepts text inside a height:0 clipped ancestor; "
+            "the repair exists but changes other people's passing scenarios "
+            "— see the class docstring"
+        ),
+    )
+    @pytest.mark.asyncio
+    async def test_clipped_text_should_not_satisfy_text_visible(
+        self, engine: WebEngine, clipped_url: str, tmp_path: Path
+    ) -> None:
+        await engine.navigate(f"{clipped_url}/?mode=collapsed")
+
+        result = await _executor(engine, tmp_path).execute_step(
+            _assert_type(AssertType.TEXT_VISIBLE, POPUP_TEXT)
+        )
+
+        assert result.status == StepStatus.FAILED
+
+    @pytest.mark.asyncio
+    async def test_the_same_assertion_is_right_about_display_none(
+        self, engine: WebEngine, clipped_url: str, tmp_path: Path
+    ) -> None:
+        """The control, so the xfail above cannot be read as "it is all broken".
+
+        Five of the six pages are answered correctly. The gap is one CSS route,
+        not the assertion.
+        """
+        await engine.navigate(f"{clipped_url}/?mode=hidden")
+
+        result = await _executor(engine, tmp_path).execute_step(
+            _assert_type(AssertType.TEXT_VISIBLE, POPUP_TEXT)
+        )
+
+        assert result.status == StepStatus.FAILED
+
+    @pytest.mark.asyncio
+    async def test_and_right_about_a_popup_that_is_really_up(
+        self, engine: WebEngine, clipped_url: str, tmp_path: Path
+    ) -> None:
+        await engine.navigate(f"{clipped_url}/?mode=modal")
+
+        result = await _executor(engine, tmp_path).execute_step(
+            _assert_type(AssertType.TEXT_VISIBLE, POPUP_TEXT)
+        )
+
+        assert result.status == StepStatus.PASSED, result.error_message
 
 
 class TestGetElementText:

@@ -30,6 +30,7 @@ from aat.core.models import (
     StepStatus,
     compute_region_bounds,
 )
+from aat.engine.dom_search import is_clipped_by_ancestor, is_really_visible
 from aat.engine.sweep import sweep_viewports
 
 if TYPE_CHECKING:
@@ -2711,6 +2712,14 @@ class StepExecutor:
 
         Searches main page + all iframes.
         Uses substring matching to handle punctuation differences.
+
+        Every DOM answer here asks :func:`is_clipped_by_ancestor` as well,
+        because a node inside a container collapsed to zero height keeps its
+        own box, its own size and its own ``is_visible() == True``. Without
+        that second question a dismiss block runs against a popup that is not
+        open, finds nothing to press, and fails a healthy page. Four separate
+        places below can say yes; all four ask, because the hole only needs one
+        unguarded path to stay open.
         """
         target = step.target
         if not target:
@@ -2727,7 +2736,7 @@ class StepExecutor:
                     loc = frame.locator(target.selector).first
                     if await loc.count() > 0:
                         box = await loc.bounding_box()
-                        if box and box["width"] > 0:
+                        if box and box["width"] > 0 and not await is_clipped_by_ancestor(loc):
                             return True
                 except Exception:
                     continue
@@ -2752,14 +2761,18 @@ class StepExecutor:
                                 if box:
                                     cx = box["x"] + box["width"] / 2
                                     cy = box["y"] + box["height"] / 2
-                                    if rx <= cx <= rx + rw and ry <= cy <= ry + rh:
+                                    if (
+                                        rx <= cx <= rx + rw
+                                        and ry <= cy <= ry + rh
+                                        and not await is_clipped_by_ancestor(el)
+                                    ):
                                         self._found_frame = frame
                                         return True
                                 else:
                                     # bounding_box() returned None (iframe coord mismatch)
                                     # Fall back to is_visible() check
                                     try:
-                                        if await el.is_visible():
+                                        if await is_really_visible(el):
                                             self._found_frame = frame
                                             return True
                                     except Exception:
@@ -2768,7 +2781,7 @@ class StepExecutor:
                             # FULL region: verify the element is actually visible on screen
                             for idx in range(min(count, 5)):
                                 try:
-                                    if await loc.nth(idx).is_visible():
+                                    if await is_really_visible(loc.nth(idx)):
                                         self._found_frame = frame
                                         return True
                                 except Exception:
