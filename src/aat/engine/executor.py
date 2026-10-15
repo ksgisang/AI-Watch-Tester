@@ -747,13 +747,18 @@ class StepExecutor:
                     page = self._engine.page  # type: ignore[attr-defined]
                     loc = page.locator(selector).first
                     if await loc.count() > 0:
-                        if not await loc.is_visible():
+                        if not await is_really_visible(loc):
                             # The element is in the DOM but nobody can read it.
                             # `innerText` falls back to `textContent` on a
                             # non-rendered element, so without this check a
                             # `display:none` block satisfied the assertion --
                             # which is how a deleted notice went on "passing"
                             # after the code that hid it shipped.
+                            #
+                            # `is_really_visible`, not `is_visible`: a child of
+                            # a `height: 0; overflow: hidden` parent keeps a box
+                            # of its own, so a collapsed accordion got past the
+                            # `display:none` check by the other route.
                             #
                             # Reported here rather than falling through to OCR:
                             # OCR would answer "not found on screen", which is
@@ -4231,6 +4236,11 @@ class StepExecutor:
         repeats a word hundreds of times -- at that point one of the first
         twenty being visible is near certain, and the alternative is one round
         trip per node.
+
+        ``is_really_visible`` rather than ``is_visible``: a child of a
+        ``height: 0; overflow: hidden`` parent -- how a collapsed accordion is
+        usually built -- keeps its own box, so Playwright calls it visible and
+        the assertion used to pass on words no reader could see.
         """
         try:
             count = await locator.count()
@@ -4238,7 +4248,7 @@ class StepExecutor:
             return False
         for i in range(min(count, limit)):
             try:
-                if await locator.nth(i).is_visible():
+                if await is_really_visible(locator.nth(i)):
                     return True
             except Exception:
                 continue

@@ -53,6 +53,59 @@ class TestComparatorTextVisible:
             await comparator.check(expected, engine)
 
 
+class _DomOpinionEngine:
+    """Engine that holds the text and has an opinion on whether it is readable.
+
+    Deliberately not a :class:`MockEngine` subclass and deliberately not a
+    ``MagicMock``: it must have **no** ``screenshot`` attribute. The comparator
+    probes with ``hasattr`` before falling back to OCR, and a mock answers every
+    probe, so a mock here would let the pixel path rescue a demoted assertion
+    and the test would pass no matter what the DOM check decided.
+    """
+
+    def __init__(self, page_text: str, readable: bool | None) -> None:
+        self._page_text = page_text
+        self._readable = readable
+
+    async def get_page_text(self) -> str:
+        return self._page_text
+
+    async def get_url(self) -> str:
+        return "https://example.com"
+
+    async def text_is_really_visible(self, text: str) -> bool | None:  # noqa: ARG002
+        return self._readable
+
+
+class TestComparatorDemotesOnlyOnPositiveEvidence:
+    """``text_visible`` may overrule its own DOM hit, but only on a hard ``False``.
+
+    ``None`` means the engine has no opinion -- a phrase assembled out of two
+    sibling elements is in the page text and in nobody's ``get_by_text``.
+    Treating that silence as "hidden" would fail assertions over how the page
+    happens to be marked up.
+    """
+
+    @pytest.mark.asyncio
+    async def test_no_opinion_leaves_the_dom_hit_alone(self) -> None:
+        engine = _DomOpinionEngine("Welcome to the dashboard", readable=None)
+        expected = ExpectedResult(type=AssertType.TEXT_VISIBLE, value="dashboard")
+        await Comparator().check(expected, engine)  # Should not raise
+
+    @pytest.mark.asyncio
+    async def test_readable_leaves_the_dom_hit_alone(self) -> None:
+        engine = _DomOpinionEngine("Welcome to the dashboard", readable=True)
+        expected = ExpectedResult(type=AssertType.TEXT_VISIBLE, value="dashboard")
+        await Comparator().check(expected, engine)  # Should not raise
+
+    @pytest.mark.asyncio
+    async def test_unreadable_overrules_the_dom_hit(self) -> None:
+        engine = _DomOpinionEngine("Welcome to the dashboard", readable=False)
+        expected = ExpectedResult(type=AssertType.TEXT_VISIBLE, value="dashboard")
+        with pytest.raises(StepExecutionError, match="not visible on page"):
+            await Comparator().check(expected, engine)
+
+
 class TestComparatorTextVisibleCaseInsensitive:
     @pytest.mark.asyncio
     async def test_text_visible_case_insensitive_pass(self) -> None:

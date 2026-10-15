@@ -201,6 +201,37 @@ async def is_really_visible(locator: Locator) -> bool:
     return not await is_clipped_by_ancestor(locator)
 
 
+async def any_text_node_really_visible(page: Page, text: str) -> bool | None:
+    """Whether some node holding *text* can actually be read.
+
+    ``None`` means "no opinion", and the distinction from ``False`` is the
+    whole point. A caller that already found the phrase in the page's text may
+    only overrule itself on positive evidence: the phrase is held by nodes, and
+    every one of them is hidden or clipped. Playwright's text engine matches a
+    single element, so a phrase assembled out of two sibling elements is in the
+    page text and in nobody's ``get_by_text`` -- reading that absence as
+    "hidden" would fail assertions over how the page is marked up.
+
+    Matching is Playwright's own: case-insensitive, whitespace-folded,
+    substring. That is wider than a case-sensitive caller asked for, which is
+    the safe direction here -- a wider filter can only decline to overrule.
+    """
+    try:
+        locator = page.get_by_text(text, exact=False)
+        count = await locator.count()
+    except Exception:
+        return None
+    if count == 0:
+        return None
+    for i in range(min(count, 20)):
+        try:
+            if await is_really_visible(locator.nth(i)):
+                return True
+        except Exception:
+            continue
+    return False
+
+
 async def scroll_to_top(page: Page) -> None:
     """Scroll the document back to (0, 0)."""
     await page.evaluate("window.scrollTo(0, 0)")

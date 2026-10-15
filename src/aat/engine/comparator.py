@@ -95,6 +95,27 @@ class Comparator:
             else:
                 found = expected.value in page_text
 
+            # 1b. ...but `inner_text("body")` carries text nobody can read.
+            # It drops `display: none` descendants and keeps everything else,
+            # so words inside a `height: 0; overflow: hidden` container -- how
+            # a collapsed accordion is normally built -- satisfied this
+            # assertion while being invisible on screen.
+            #
+            # Only ever demotes, and only on positive evidence: the phrase is
+            # held by nodes and every one of them is clipped or hidden. When no
+            # single node holds it (a phrase split across two elements is in
+            # the page text and in nobody's `get_by_text`) the engine answers
+            # `None` and this says nothing.
+            if found and hasattr(engine, "text_is_really_visible"):
+                readable = await engine.text_is_really_visible(expected.value)
+                if readable is False:
+                    logger.info(
+                        "text_visible %r is in the DOM but inside a collapsed "
+                        "container; falling through to the pixels",
+                        expected.value,
+                    )
+                    found = False
+
             # 2. Fallback: OCR on screenshot (Canvas/Flutter/WebGL)
             if not found and hasattr(engine, "screenshot"):
                 found = await self._ocr_text_check(

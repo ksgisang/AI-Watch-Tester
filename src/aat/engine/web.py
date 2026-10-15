@@ -344,6 +344,15 @@ class WebEngine(BaseEngine):
         """
         return await dom_search.find_text_box(self.page, text)
 
+    async def text_is_really_visible(self, text: str) -> bool | None:
+        """Whether a node holding ``text`` can be read, or ``None`` for no opinion.
+
+        Not on :class:`~aat.engine.base.BaseEngine`, like the rest of this
+        block: it is a DOM question, and callers probe for it with ``hasattr``
+        so an engine with no page is simply not asked.
+        """
+        return await dom_search.any_text_node_really_visible(self.page, text)
+
     async def scroll_to_top(self) -> None:
         """Scroll page to top (0, 0)."""
         await dom_search.scroll_to_top(self.page)

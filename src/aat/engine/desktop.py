@@ -456,6 +456,12 @@ class DesktopEngine(BaseEngine):
             return None
         return await dom_search.find_text_box(self._page, text)
 
+    async def text_is_really_visible(self, text: str) -> bool | None:
+        """Whether a node holding ``text`` can be read, or ``None`` for no opinion."""
+        if not self._page:
+            return None
+        return await dom_search.any_text_node_really_visible(self._page, text)
+
     async def scroll_to_top(self) -> None:
         """Scroll the page document back to (0, 0)."""
         if not self._page:
