@@ -10,7 +10,7 @@
   <em>E2E 테스트 짜는 게 지겨워서, 직접 테스트를 만들고 고치는 도구를 만들었습니다.</em>
   <br/><br/>
   <a href="https://github.com/ksgisang/AI-Watch-Tester/actions"><img src="https://img.shields.io/github/actions/workflow/status/ksgisang/AI-Watch-Tester/ci.yml?label=CI&logo=github" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?logo=opensourceinitiative&logoColor=white" alt="MIT License"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-green?logo=gnu&logoColor=white" alt="AGPL-3.0 License"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white" alt="Python 3.11+"></a>
   <a href="https://ai-watch-tester.vercel.app"><img src="https://img.shields.io/badge/Cloud-바로_시작-00d4aa?logo=vercel&logoColor=white" alt="Cloud"></a>
   <a href="https://github.com/ksgisang/awt-skill"><img src="https://img.shields.io/badge/Agent_Skill-사용_가능-brightgreen?logo=npm&logoColor=white" alt="Agent Skill"></a>
@@ -146,7 +146,7 @@ aat devqa "체크아웃 플로우 테스트" --url http://localhost:3000
 | **브라우저** | 헤드리스 (서버) | 내 머신의 실제 Chrome | 내 머신의 실제 Chrome | 내 머신의 실제 Chrome |
 | **AI 키 필요** | 불필요 (서버 제공 또는 BYOK) | 필요 (OpenAI / Anthropic / Ollama) | **불필요** — AI 도구가 두뇌 역할 | **불필요** |
 | **적합한 용도** | 빠른 테스트, 기획자, PM | 개발자, CI/CD | AI 보조 개발 | Claude Desktop, Cursor, Windsurf |
-| **가격** | 무료 (5회/월) · Pro $28.99 · Team $98.99 | 영구 무료 (MIT) | 영구 무료 | 영구 무료 |
+| **가격** | 무료 (5회/월) · Pro $28.99 · Team $98.99 | 영구 무료 (AGPL-3.0) | 영구 무료 | 영구 무료 |
 
 ### Agent Skill — AI 코딩 도구가 AWT를 직접 제어
 
@@ -369,8 +369,8 @@ Playwright와 Cypress는 훌륭한 도구입니다 — AWT도 Playwright 위에 
 |---|---------|---------------|
 | 테스트 작성 | AI가 URL에서 자동 생성 — 아무것도 안 써도 됨 | 평이한 영어로 명령 작성 |
 | 자가 수복 | DevQA Loop (AI가 자동 재생성) | 내장 자동 유지보수 |
-| 가격 | 무료 (MIT, 셀프 호스팅) | 엔터프라이즈 (~$800+/월) |
-| 오픈소스 | ✅ MIT 라이선스 | ❌ |
+| 가격 | 무료 (AGPL-3.0, 셀프 호스팅) | 엔터프라이즈 (~$800+/월) |
+| 오픈소스 | ✅ AGPL-3.0 | ❌ |
 
 ### vs Applitools
 
@@ -563,7 +563,23 @@ AWT는 SSIM(구조적 유사도 지수)을 사용합니다 — AI 토큰이 필�
 
 ## 라이선스
 
-[MIT](LICENSE) — 개인 및 상업적 용도 모두 무료.
+[AGPL-3.0](LICENSE) — 개인 및 상업적 용도 모두 무료입니다.
+
+**AWT로 여러분의 앱을 테스트한다고 그 앱이 AGPL이 되지는 않습니다.** AWT는 코드에
+링크하는 라이브러리가 아니라 옆에서 돌리는 도구입니다. 여러분의 소스는 그대로
+여러분의 것입니다.
+
+카피레프트가 적용되는 대상은 AWT 자신입니다. AWT를 고쳐서 **배포**하거나, 고친
+판본을 **다른 사람이 쓰는 네트워크 서비스로 운영**한다면 그 수정분을 공개해야
+합니다. 자기 컴퓨터나 자기 CI에서 돌리는 것은 고쳤든 아니든 아무 의무도 발생시키지
+않습니다.
+
+조직 사정상 AGPL-3.0이 곤란하다면 상용 라이선스를 협의할 수 있습니다. AWT는
+저작권자가 한 명이므로 물어볼 상대가 있습니다.
+[이슈를 남겨 주십시오](https://github.com/ksgisang/AI-Watch-Tester/issues).
+
+AWT가 무엇을 바깥으로 보내고 무엇을 보내지 않는지는 [PRIVACY.md](PRIVACY.md)에
+적어 두었습니다.
 
 ---
 

@@ -11,7 +11,7 @@
   <em>I got tired of writing E2E tests. So I built something that writes and fixes them for me.</em>
   <br/><br/>
   <a href="https://github.com/ksgisang/AI-Watch-Tester/actions"><img src="https://img.shields.io/github/actions/workflow/status/ksgisang/AI-Watch-Tester/ci.yml?label=CI&logo=github" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?logo=opensourceinitiative&logoColor=white" alt="MIT License"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-green?logo=gnu&logoColor=white" alt="AGPL-3.0 License"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white" alt="Python 3.11+"></a>
   <a href="https://ai-watch-tester.vercel.app"><img src="https://img.shields.io/badge/Cloud-Try_Now-00d4aa?logo=vercel&logoColor=white" alt="Cloud"></a>
   <a href="https://github.com/ksgisang/awt-skill"><img src="https://img.shields.io/badge/Agent_Skill-Available-brightgreen?logo=npm&logoColor=white" alt="Agent Skill"></a>
@@ -184,7 +184,7 @@ at it, rather than reporting a pass.
 | **Browser** | Headless (server) | Real Chrome on your machine | Real Chrome on your machine | Real Chrome on your machine |
 | **AI key needed** | No (server-provided or BYOK) | Yes (your OpenAI / Anthropic / Ollama) | **No** — your AI tool is the brain | **No** |
 | **Best for** | Quick tests, PMs, planners | Developers, CI/CD | AI-assisted development | Claude Desktop, Cursor, Windsurf |
-| **Price** | Free (5/mo) · Pro $28.99 · Team $98.99 | Free forever (MIT) | Free forever | Free forever |
+| **Price** | Free (5/mo) · Pro $28.99 · Team $98.99 | Free forever (AGPL-3.0) | Free forever | Free forever |
 
 ### Agent Skill — Let your AI coding tool drive AWT
 
@@ -427,8 +427,8 @@ Playwright and Cypress are excellent — and AWT is built on top of Playwright. 
 |---|---------|---------------|
 | Test authoring | AI generates from URL — you write nothing | Plain English (you write commands) |
 | Self-healing | DevQA Loop (AI re-generates automatically) | Built-in auto-maintenance |
-| Pricing | Free (MIT, self-host) | Enterprise (~$800+/mo) |
-| Open source | ✅ MIT License | ❌ |
+| Pricing | Free (AGPL-3.0, self-host) | Enterprise (~$800+/mo) |
+| Open source | ✅ AGPL-3.0 | ❌ |
 
 ### vs Applitools
 
@@ -695,7 +695,21 @@ See the [CI/CD Guide](cloud/docs/CI_CD_GUIDE.md) for GitHub Actions and GitLab C
 
 ## License
 
-[MIT](LICENSE) — free for personal and commercial use.
+[AGPL-3.0](LICENSE) — free to use, personally and commercially.
+
+**Testing your app with AWT does not make your app AGPL.** AWT is a tool you run
+alongside your code, not a library you link into it. Your source stays yours.
+
+The copyleft applies to AWT itself: if you modify AWT and then distribute it, or
+run your modified version as a network service that other people use, you have to
+publish those modifications. Running it on your own machine or in your own CI,
+modified or not, triggers nothing.
+
+If AGPL-3.0 does not work for your organisation, a commercial licence is possible.
+AWT has a single copyright holder, so there is someone to ask:
+[open an issue](https://github.com/ksgisang/AI-Watch-Tester/issues).
+
+See [PRIVACY.md](PRIVACY.md) for what AWT does and does not send anywhere.
 
 ---
 
