@@ -103,15 +103,31 @@ them deletes them.
 
 ## The MCP server and the Claude Code plugin
 
-The bundled MCP server (`mcp/server.py`) reads no credentials of its own. It
-builds `aat` command lines and runs them as subprocesses; anything about keys is
-handled by the CLI exactly as described above. The server speaks stdio to your
-local MCP client and opens no network connections.
+The bundled MCP server (`mcp/server.py`) reads no credentials of its own: it
+never touches `os.environ`, and it passes no environment of its own to the
+processes it starts. It builds `aat` command lines and runs them as
+subprocesses. The server speaks stdio to your local MCP client and opens no
+network connections.
+
+The CLI those subprocesses run does read a key, and it is worth stating plainly
+rather than leaving it to be inferred. `aat` reads **your own** AI provider key
+from **your own** config file in the project you are testing, exactly as
+described under [About AI providers](#about-ai-providers), and sends it only to
+the provider that key belongs to. Nothing in the plugin collects it, stores it
+elsewhere, or sends it to AWT.
 
 The plugin's skill files are documentation. `references/cli-reference.md` and
 `references/config-reference.md` show `export AAT_AI__API_KEY=...` as **guidance
 for configuring your own key**. They are Markdown; they do not execute, and
 nothing in AWT reads a key in order to send it anywhere but the provider.
+
+The `.github/workflows/` directory is **not part of the plugin**. Those files are
+this repository's own CI, run by GitHub Actions on GitHub's runners. They are not
+in the `files` list in `package.json`, they are never installed, and they never
+execute on your machine. `publish-mcp.yml` in particular publishes `server.json`
+to the MCP Registry; its only credential is a short-lived OIDC token GitHub
+issues to the job itself, so there is no stored secret and nothing is read from
+any user's environment.
 
 ---
 
