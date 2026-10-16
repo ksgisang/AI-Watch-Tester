@@ -693,6 +693,17 @@ aat run --skill-mode --fast <scenario>
 - **현재 단계**: 보고서(`docs/awt_project_analysis_and_strategy.md`) **1~3순위 + 판단 대기 3건 전량 마감**(AAT-115까지), 그 위에 **Flutter CanvasKit 세 겹 수리**(AAT-116~118)와 그 CI가 드러낸 `doctor` 결손(AAT-119), 그리고 대표님의 지시 한 건에서 나온 **좌표계 혼용**(AAT-120)·**접힌 선 아래 미탐색**(AAT-121), 그리고 대표님 질문에서 나온 **자동 수정 안전장치 + 두 겹 결말**(AAT-122)과, 최대리 세션의 SC-901 보고에서 나온 **판정 무결성 세 겹**(AAT-123), 그 수리를 확인하신 뒤 전달받은 **같은 계열의 네 번째 자리 — 다른 칸에 들어간 글자**(AAT-124), 그리고 최대리 시험 보고에서 뽑은 작업지시서(`decisions/2026-10-14_작업지시_남은수리.md`) **§B 여섯 건 + §C-1**(AAT-125)을 더했고, 그 재현 중에 찾아 보류해 두었던 **접혀 있는 것을 보인다고 읽던 네 번째 CSS 경로**를 같은 날 닫았습니다(AAT-126). 그리고 2026-10-15 자내공 라이브 실행 네 벌에서 드러난 **통과할 수 없던 `assert_screen_changed`와 종류를 모르던 경고 꼬리말**을 수리했습니다(AAT-127, 지시서 §B-7·§B-8 + §B-1·§C-3 종결). 마지막으로 AAT-126이 방향 때문에 남겨 두었던 **`text_visible`의 같은 구멍**을 대표님 승인으로 닫았습니다(AAT-128). `1.8.0` 배포가 끝나고 작업이 품질 수리에서 **등재와 홍보**로 넘어가, `awt-skill`을 **Claude Code 플러그인 번들**로 묶고 MCP 서버 사본을 한 벌로 줄였습니다(AAT-129)
 - **완료**: Phase 1~6 (Ultra-MVP) + AAT-060~065 + AAT-070~076 + AAT-080~081 + AAT-090~092 + AAT-093~095 + AAT-100~129 (Post-MVP)
 - **블로커**: 없음. 품질 쪽 **판단 대기는 0건**이고 **저장소에 `xfail`이 0건**입니다. 남은 것은 코드가 아니라 절차입니다 — ① 번들·본체 커밋과 푸시(**사람 게이트**) ② `anthropics/skills` PR #822 닫기 ③ `claude.ai/directory/manage` 제출(**대표님 브라우저에서만 가능**)
+
+### ⛔ 심사 중 — `awt-skill` 저장소에 푸시하지 말 것 (2026-10-16 제출)
+
+`ai-watch-tester` 플러그인을 디렉터리에 제출했고 **`ksgisang/awt-skill` `main @ d396fa7`에 고정**되어 심사 중입니다(자격증명 보류 2건, 구조적). 그 저장소에 푸시하면 **새 플러그인 버전이 생깁니다.** 웹훅은 `awt-skill`만 지켜보므로 **본체 `AI-Watch-Tester` 작업은 심사 중에도 안전합니다.**
+
+심사 결과가 나온 뒤 **아래 두 건을 한 커밋·한 푸시로 묶어** 올립니다(따로 올리면 버전이 둘 생깁니다):
+
+1. `awt-skill/README.md` 76행·93행 — `npx skills add` 옆에 플러그인 경로 병기(`claude plugin marketplace add ksgisang/awt-skill` + `claude plugin install ai-watch-tester@awt`). 본체 `README.md`·`README.ko.md`는 `c762909`에서 이미 반영했고 **번들만 남았습니다**
+2. `1.8.1` 판올림 — `awt-skill/server.json` + `awt-skill/.claude-plugin/plugin.json`(MCP Registry 재게시용). **PyPI `aat-devqa 1.8.1`이 먼저** 올라가 있어야 합니다
+
+미결 1건(본체만 건드리므로 **심사 중에도 진행 가능**): `PRIVACY.md`가 "There is currently no flag to disable it"이라고 적어 둔 **업데이트 확인 비활성화 플래그** — 만들지, 방화벽 안내로 둘지 미정입니다
 - **대표님 터미널이 필요한 재검증 2건**(승인 관문이 `/dev/tty`를 읽고 그 우회는 금지): 하늘고 SC-008 10단계·SC-009 13단계(최이사 확인까지가 종결), SC-911 7·9·10단계
 - **Flutter 웹 실측 상태**(2026-10-03): ClasRing CanvasKit 앱에서 **23/23 통과**, `wait` 단계를 전부 뺀 대본도 **5/5 통과**, 증거 사진의 한국어가 또렷합니다. Semantics 라벨 기반 `find_and_click`·`find_and_type`를 권하십시오 — 손좌표를 권하던 이전 조언은 실측으로 뒤집혔습니다(AAT-118)
 - **Python**: 3.12.12 (.venv), `source .venv/bin/activate`
