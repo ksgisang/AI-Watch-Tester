@@ -59,7 +59,11 @@ You give AWT a URL. It opens a real Chrome window, reads the page, writes test s
 ### Option 1 — Agent Skill (works with Claude Code, Cursor, Copilot...)
 
 ```bash
-# One-line install
+# Claude Code — one install brings the skill and the MCP server together
+claude plugin marketplace add ksgisang/awt-skill
+claude plugin install ai-watch-tester@awt
+
+# Any other tool (Cursor, Codex, Gemini CLI, Copilot...) — skill only
 npx skills add ksgisang/awt-skill --skill awt -g
 
 # Then just ask your AI tool:
@@ -186,10 +190,19 @@ at it, rather than reporting a pass.
 | **Best for** | Quick tests, PMs, planners | Developers, CI/CD | AI-assisted development | Claude Desktop, Cursor, Windsurf |
 | **Price** | Free (5/mo) · Pro $28.99 · Team $98.99 | Free forever (AGPL-3.0) | Free forever | Free forever |
 
+> **On Claude Code, one install covers two of these columns.**
+> `claude plugin install ai-watch-tester@awt` brings the Agent Skill and the
+> MCP Server together. The `npx` route stays the way in for Cursor, Codex,
+> Gemini CLI, and the other tools the plugin format does not reach.
+
 ### Agent Skill — Let your AI coding tool drive AWT
 
 ```bash
-# One-line install
+# Claude Code — one install brings the skill and the MCP server together
+claude plugin marketplace add ksgisang/awt-skill
+claude plugin install ai-watch-tester@awt
+
+# Any other tool (Cursor, Codex, Gemini CLI, Copilot...) — skill only
 npx skills add ksgisang/awt-skill --skill awt -g
 
 # Then ask your AI tool:

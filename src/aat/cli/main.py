@@ -68,7 +68,7 @@ def _show_update_hint(latest: str) -> None:
         typer.echo(
             typer.style(
                 f"  💡 AWT update available: v{__version__} → v{latest}. "
-                "Run: npx skills add ksgisang/awt-skill --skill awt -g -y",
+                "Update the CLI: pip install -U aat-devqa",
                 fg=typer.colors.YELLOW,
             )
         )

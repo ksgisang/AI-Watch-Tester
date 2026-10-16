@@ -56,7 +56,11 @@ URL을 주면 AWT가 실제 Chrome 창을 열고, 페이지를 읽고, 테스트
 ### 방법 1 — Agent Skill (Claude Code, Cursor, Copilot 등과 함께)
 
 ```bash
-# 한 줄 설치
+# Claude Code — 플러그인 하나로 스킬과 MCP 서버를 함께 설치
+claude plugin marketplace add ksgisang/awt-skill
+claude plugin install ai-watch-tester@awt
+
+# 그 외 도구 (Cursor, Codex, Gemini CLI, Copilot...) — 스킬만
 npx skills add ksgisang/awt-skill --skill awt -g
 
 # 그 다음 AI 도구에게:
@@ -148,10 +152,19 @@ aat devqa "체크아웃 플로우 테스트" --url http://localhost:3000
 | **적합한 용도** | 빠른 테스트, 기획자, PM | 개발자, CI/CD | AI 보조 개발 | Claude Desktop, Cursor, Windsurf |
 | **가격** | 무료 (5회/월) · Pro $28.99 · Team $98.99 | 영구 무료 (AGPL-3.0) | 영구 무료 | 영구 무료 |
 
+> **Claude Code에서는 한 번의 설치가 위 표의 두 칸을 덮습니다.**
+> `claude plugin install ai-watch-tester@awt` 하나로 Agent Skill과 MCP 서버가
+> 함께 들어옵니다. `npx` 경로는 플러그인이 닿지 못하는 Cursor·Codex·
+> Gemini CLI 등을 위해 그대로 둡니다.
+
 ### Agent Skill — AI 코딩 도구가 AWT를 직접 제어
 
 ```bash
-# 한 줄 설치
+# Claude Code — 플러그인 하나로 스킬과 MCP 서버를 함께 설치
+claude plugin marketplace add ksgisang/awt-skill
+claude plugin install ai-watch-tester@awt
+
+# 그 외 도구 (Cursor, Codex, Gemini CLI, Copilot...) — 스킬만
 npx skills add ksgisang/awt-skill --skill awt -g
 
 # 그 다음 AI 도구에게:

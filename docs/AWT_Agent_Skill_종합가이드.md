@@ -196,7 +196,7 @@ steps:
 
 ## More Info
 
-- GitHub: https://github.com/[your-org]/ai-watch-tester
+- GitHub: https://github.com/ksgisang/AI-Watch-Tester
 - 문서: https://ai-watch-tester.onrender.com/docs
 ```
 
@@ -265,16 +265,16 @@ ai-watch-tester-skill/        ← 새 레포 이름
 
 **설치 명령어**:
 ```bash
-# Claude Code 플러그인으로 설치
-/plugin marketplace add [your-org]/ai-watch-tester-skill
-/plugin install awt@awt-skill
+# Claude Code 플러그인으로 설치 (스킬 + MCP 서버)
+claude plugin marketplace add ksgisang/awt-skill
+claude plugin install ai-watch-tester@awt
 
-# 또는 npx로 직접 설치
-npx skills add [your-org]/ai-watch-tester-skill --skill awt
+# 또는 npx로 스킬만 설치 (Cursor·Codex·Gemini CLI 등도 함께 지원)
+npx skills add ksgisang/awt-skill --skill awt -g
 
 # 또는 수동 설치
-git clone https://github.com/[your-org]/ai-watch-tester-skill.git
-cp -r ai-watch-tester-skill/skills/awt ~/.claude/skills/
+git clone https://github.com/ksgisang/awt-skill.git
+cp -r awt-skill/skills/awt ~/.claude/skills/
 ```
 
 #### ② Awesome Lists에 PR 제출 (가장 효과적인 무료 홍보)
@@ -291,7 +291,7 @@ cp -r ai-watch-tester-skill/skills/awt ~/.claude/skills/
 ```markdown
 ## Testing & QA
 
-- [AI Watch Tester](https://github.com/[your-org]/ai-watch-tester-skill) - 
+- [AI Watch Tester](https://github.com/ksgisang/awt-skill) - 
   AI-powered E2E testing with declarative YAML scenarios, self-healing tests, 
   vision AI matching (OpenCV), and DevQA Loop (test failure → AI fix → auto PR → retest). 
   Supports OpenAI, Claude, DeepSeek, Ollama.
