@@ -179,8 +179,9 @@ cd awt-skill
 #    - mcp/server.py          MCP 도구 정의
 #    - .claude-plugin/plugin.json 의 "version"
 
-# 2. 형식 검증 — 매니페스트와 마켓플레이스를 한 번에 봅니다.
-claude plugin validate .claude-plugin
+# 2. 형식 검증 — 인자는 **플러그인 폴더**(= 저장소 최상위)이지 `.claude-plugin`이
+#    아닙니다. `.claude-plugin`을 주면 그 안에서 매니페스트를 다시 찾아 실패합니다.
+cd .. && claude plugin validate ./awt-skill && cd awt-skill
 
 # 3. 커밋 & 푸시 (번들 → 본체 포인터 순서)
 git add . && git commit -m "feat: sync with AWT v1.X.X" && git push
@@ -194,11 +195,26 @@ claude plugin details ai-watch-tester@awt   # Skills (1) awt, MCP servers (1) aw
 ### 디렉터리 등재 (최초 1회, 대표님 계정)
 - 제출처: `claude.ai/directory/manage` — **유료 claude.ai 플랜의 브라우저**에서
   대표님이 직접 하셔야 합니다. CLI 경로가 없습니다.
-- **제출한 조직이 등재의 영구 소유자**가 됩니다.
+- **제출한 조직이 등재의 영구 소유자**가 됩니다. 저장소와 폴더 조합은 한 조직에
+  하나뿐이고, **제출 뒤에는 저장소·폴더를 바꿀 수 없습니다**(바꾸려면 새 제출).
+- **GitHub 계정을 claude.ai에 연결**해 두어야 하고, 포털이 그 계정의 **푸시 권한**을
+  확인합니다. 다른 Claude 조직에서 연결한 것은 넘어오지 않습니다.
+- 양식에서 **Plugin bundle**을 고르고, 저장소에 `ksgisang/awt-skill`을 넣습니다.
+  **Plugin path는 비웁니다**(플러그인이 최상위에 있습니다). **Branch는 비우면
+  기본 브랜치 `main`** 을 따릅니다 — 이것이 **추적 브랜치**입니다.
 - 제출물은 보안 스캔을 통과해야 하고, **첫 제출이 스캔에서 걸리면 반려**입니다.
   그래서 `awt-skill/README.md`에 "What this plugin runs, sends, and fetches"
   절을 두어 실행·기록·전송·내려받기를 전부 적어 두었습니다. 서버가 하는 일이
   바뀌면 **그 절을 같이 고쳐야 합니다.**
+
+#### 등재 뒤의 갱신 — 포털에 다시 들어갈 일은 없습니다
+- **추적 브랜치(`main`)에 푸시하면 디렉터리가 알아서 집어 갑니다.** 위 「절차」의
+  1~3번이 곧 릴리스이고, 포털은 **버전이 보류되거나 설정을 바꿀 때만** 엽니다.
+- 다만 **처음 몇 판은 `Publish`를 눌러야 할 수 있습니다.** 기본값이 「매 버전을
+  Anthropic 리뷰어가 게시」이고, 리뷰어가 승인하면서 자동 게시로 올려 줍니다.
+  현재 설정은 플러그인 페이지 **Overview 탭의 `Auto-publish` 줄**에 적혀 있습니다.
+- `plugin.json`의 `version`은 **릴리스마다 올려야 합니다.**
+- 새 버전이 스캔에 걸려도 **이미 게시된 버전은 계속 서비스**됩니다.
 
 ### ⚠️ 주의
 - `.mcp.json`이 서버 선언의 정본입니다. `plugin.json` 안의 인라인 `mcpServers`는
