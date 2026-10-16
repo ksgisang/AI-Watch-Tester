@@ -121,13 +121,13 @@ The plugin's skill files are documentation. `references/cli-reference.md` and
 for configuring your own key**. They are Markdown; they do not execute, and
 nothing in AWT reads a key in order to send it anywhere but the provider.
 
-The `.github/workflows/` directory is **not part of the plugin**. Those files are
-this repository's own CI, run by GitHub Actions on GitHub's runners. They are not
-in the `files` list in `package.json`, they are never installed, and they never
-execute on your machine. `publish-mcp.yml` in particular publishes `server.json`
-to the MCP Registry; its only credential is a short-lived OIDC token GitHub
-issues to the job itself, so there is no stored secret and nothing is read from
-any user's environment.
+The `.github/workflows/` directory **ships with the plugin, and it is inert**.
+Those files are this repository's own CI: GitHub Actions runs them on GitHub's
+runners when someone pushes to the repository. Claude Code never reads or
+executes them, and installing the plugin does not run them. `publish-mcp.yml` in
+particular publishes `server.json` to the MCP Registry; its only credential is a
+short-lived OIDC token GitHub issues to the job itself, so there is no stored
+secret and nothing is read from any user's environment.
 
 ---
 
