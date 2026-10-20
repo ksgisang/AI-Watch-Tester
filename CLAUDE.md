@@ -696,12 +696,13 @@ aat run --skill-mode --fast <scenario>
 
 ### ⛔ 심사 중 — `awt-skill` 저장소에 푸시하지 말 것 (2026-10-16 제출)
 
-`ai-watch-tester` 플러그인을 디렉터리에 제출했고 **`ksgisang/awt-skill` `main @ d396fa7`에 고정**되어 심사 중입니다(자격증명 보류 2건, 구조적). 그 저장소에 푸시하면 **새 플러그인 버전이 생깁니다.** 웹훅은 `awt-skill`만 지켜보므로 **본체 `AI-Watch-Tester` 작업은 심사 중에도 안전합니다.**
+`ai-watch-tester` 플러그인을 디렉터리에 제출했고 **`ksgisang/awt-skill` `main @ d396fa7`에 고정**되어 심사 중입니다. **2026-10-20 기준 `보안 스캔 passed`, 사람 심사 대기**이고 남은 지적은 전부 참고용 경고입니다(포털이 *"nothing you need to do"*라고 적고 있습니다). 그 저장소에 푸시하면 **새 플러그인 버전이 생깁니다.** 웹훅은 `awt-skill`만 지켜보므로 **본체 `AI-Watch-Tester` 작업은 심사 중에도 안전합니다.**
 
 심사 결과가 나온 뒤 **아래 두 건을 한 커밋·한 푸시로 묶어** 올립니다(따로 올리면 버전이 둘 생깁니다):
 
 1. `awt-skill/README.md` 76행·93행 — `npx skills add` 옆에 플러그인 경로 병기(`claude plugin marketplace add ksgisang/awt-skill` + `claude plugin install ai-watch-tester@awt`). 본체 `README.md`·`README.ko.md`는 `c762909`에서 이미 반영했고 **번들만 남았습니다**
 2. `1.8.1` 판올림 — `awt-skill/server.json` + `awt-skill/.claude-plugin/plugin.json`(MCP Registry 재게시용). **PyPI `aat-devqa 1.8.1`이 먼저** 올라가 있어야 합니다
+3. 디렉터리 `Uses a credential from the user's machine` **잔여 2건** — **고치기 전에 먼저 펼쳐서 어느 두 자리인지 확인할 것.** 포털 권고(`user_config` + `sensitive: true`)를 그대로 받으면 **거짓을 선언하게 됩니다**: stdio MCP 서버는 자격증명을 읽지 않습니다(`mcp/server.py`는 `os.environ`을 건드리지 않고, 호출하는 `aat` CLI는 사용자 설정 파일에서 키를 읽습니다). 같은 이유로 `server.json`의 `environmentVariables`를 **이미 제거해 보류가 풀렸고**(2026-10-20 `보안 스캔 passed`), 되돌리면 보류가 다시 열립니다. `.github/workflows/publish-mcp.yml` 48~60행에 경위가 적혀 있습니다 — **그 파일 안에서 해당 변수 이름을 입력하지 마십시오**(`curl`로 github.com에 닿는 파일이라 스캐너가 원격 URL 옆의 자격증명 이름을 보류 대상으로 잡습니다)
 
 미결 1건(본체만 건드리므로 **심사 중에도 진행 가능**): `PRIVACY.md`가 "There is currently no flag to disable it"이라고 적어 둔 **업데이트 확인 비활성화 플래그** — 만들지, 방화벽 안내로 둘지 미정입니다
 - **대표님 터미널이 필요한 재검증 2건**(승인 관문이 `/dev/tty`를 읽고 그 우회는 금지): 하늘고 SC-008 10단계·SC-009 13단계(최이사 확인까지가 종결), SC-911 7·9·10단계
