@@ -103,11 +103,16 @@ them deletes them.
 
 ## The MCP server and the Claude Code plugin
 
-The bundled MCP server (`mcp/server.py`) reads no credentials of its own: it
-never touches `os.environ`, and it passes no environment of its own to the
-processes it starts. It builds `aat` command lines and runs them as
-subprocesses. The server speaks stdio to your local MCP client and opens no
-network connections.
+**The Claude Code plugin ships the `awt` skill and nothing else.** It carries no
+MCP server and no executable code: the skill is Markdown and YAML templates
+that tell your AI coding tool which `aat` commands to run. The MCP server lives
+in this repository at `mcp/server.py` and is installed separately, by hand; see
+[`mcp/README.md`](mcp/README.md). Installing the plugin does not install it.
+
+That server reads no credentials of its own: it never touches `os.environ`, and
+it passes no environment of its own to the processes it starts. It builds `aat`
+command lines and runs them as subprocesses. It speaks stdio to your local MCP
+client and opens no network connections.
 
 The CLI those subprocesses run does read a key, and it is worth stating plainly
 rather than leaving it to be inferred. `aat` reads **your own** AI provider key
@@ -121,13 +126,13 @@ The plugin's skill files are documentation. `references/cli-reference.md` and
 for configuring your own key**. They are Markdown; they do not execute, and
 nothing in AWT reads a key in order to send it anywhere but the provider.
 
-The `.github/workflows/` directory **ships with the plugin, and it is inert**.
-Those files are this repository's own CI: GitHub Actions runs them on GitHub's
-runners when someone pushes to the repository. Claude Code never reads or
-executes them, and installing the plugin does not run them. `publish-mcp.yml` in
-particular publishes `server.json` to the MCP Registry; its only credential is a
-short-lived OIDC token GitHub issues to the job itself, so there is no stored
-secret and nothing is read from any user's environment.
+The plugin bundle carries no CI of its own. This repository's workflows live
+here, under `.github/workflows/`, and GitHub Actions runs them on GitHub's
+runners when someone pushes; nothing on your machine reads or executes them.
+`publish-mcp.yml` in particular publishes `server.json` to the MCP Registry,
+and its only credential is a short-lived OIDC token GitHub issues to the job
+itself, so there is no stored secret and nothing is read from any user's
+environment.
 
 ---
 

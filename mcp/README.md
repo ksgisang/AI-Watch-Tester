@@ -3,11 +3,11 @@
 AWT를 [Model Context Protocol (MCP)](https://modelcontextprotocol.io) 서버로 사용하면,
 Claude Code, Claude Desktop, Cursor, Windsurf 등 MCP 지원 도구에서 AWT를 직접 호출할 수 있습니다.
 
-> **서버 파일의 정본은 이 저장소가 아니라 `awt-skill` 번들입니다.**
-> 실제 파일은 [`awt-skill/mcp/server.py`](https://github.com/ksgisang/awt-skill/blob/main/mcp/server.py)에
-> 있고, 이 저장소에서는 서브모듈 경로 `awt-skill/mcp/server.py`로 접근합니다.
-> 사용자가 설치하는 플러그인이 그 파일을 그대로 실행하므로, 사본을 두 벌 두지 않고
-> 한 벌만 둡니다. 아래 경로는 모두 그 한 벌을 가리킵니다.
+> **서버 파일의 정본은 이 저장소의 `mcp/server.py` 한 벌입니다.**
+> 전에는 `awt-skill` 번들에 두었습니다. 플러그인 디렉터리가 **사용자 기기에서
+> 실행되는 MCP 서버를 Verified 조직에서만** 받으므로 번들은 스킬만 싣게 되었고,
+> 서버는 이쪽으로 옮겨 왔습니다. 플러그인을 설치해도 이 서버는 따라오지 않습니다 —
+> MCP 도구를 쓰시려면 아래 절차로 **따로** 등록하십시오.
 
 ## 사전 요구사항
 
@@ -50,36 +50,30 @@ AWT 도구를 사용할 때 반드시 아래 순서를 지켜야 합니다:
 
 ## 설치 방법
 
-### Claude Code — 플러그인 (권장)
+### Claude Code
 
-플러그인 번들을 설치하면 `awt` 스킬과 이 MCP 서버가 **한 번에** 들어옵니다.
-경로를 손으로 적을 필요가 없습니다.
-
-```bash
-claude plugin marketplace add ksgisang/awt-skill
-claude plugin install ai-watch-tester@awt
-```
-
-확인:
-```bash
-claude plugin details ai-watch-tester@awt
-```
-
-`Skills (1) awt`와 `MCP servers (1) awt`가 함께 보이면 정상입니다.
-
-### Claude Code — 서버만 직접 등록
-
-스킬 없이 MCP 서버만 붙이고 싶다면 번들을 내려받아 그 안의 파일을 가리킵니다.
+이 저장소를 내려받아 그 안의 서버 파일을 가리킵니다.
 
 ```bash
-git clone https://github.com/ksgisang/awt-skill.git ~/awt-skill
-claude mcp add awt -- python ~/awt-skill/mcp/server.py
+git clone https://github.com/ksgisang/AI-Watch-Tester.git ~/AI-Watch-Tester
+claude mcp add awt -- python3 ~/AI-Watch-Tester/mcp/server.py
 ```
 
 확인:
 ```bash
 claude mcp list
 ```
+
+`awt` 스킬은 이 서버 없이도 동작합니다 — 스킬은 `aat` 명령을 직접 부릅니다.
+스킬만 원하시면 플러그인 번들을 설치하십시오.
+
+```bash
+claude plugin marketplace add ksgisang/awt-skill
+claude plugin install ai-watch-tester@awt
+```
+
+`Skills (1) awt`가 보이면 정상입니다. **`MCP servers`는 0입니다** —
+번들은 서버를 싣지 않으므로 위의 `claude mcp add`가 따로 필요합니다.
 
 ### Claude Desktop
 
@@ -91,7 +85,7 @@ claude mcp list
   "mcpServers": {
     "awt": {
       "command": "python",
-      "args": ["/path/to/awt-skill/mcp/server.py"]
+      "args": ["/path/to/AI-Watch-Tester/mcp/server.py"]
     }
   }
 }
@@ -106,7 +100,7 @@ claude mcp list
   "mcpServers": {
     "awt": {
       "command": "python",
-      "args": ["/path/to/awt-skill/mcp/server.py"]
+      "args": ["/path/to/AI-Watch-Tester/mcp/server.py"]
     }
   }
 }
@@ -121,14 +115,13 @@ claude mcp list
   "mcpServers": {
     "awt": {
       "command": "python",
-      "args": ["/path/to/awt-skill/mcp/server.py"]
+      "args": ["/path/to/AI-Watch-Tester/mcp/server.py"]
     }
   }
 }
 ```
 
-> `/path/to/awt-skill`을 번들을 내려받은 실제 경로로 변경하세요.
-> Claude Code 사용자는 위의 플러그인 설치를 쓰면 경로를 적지 않아도 됩니다.
+> `/path/to/AI-Watch-Tester`를 저장소를 내려받은 실제 경로로 변경하세요.
 
 ## 사용 예시
 
@@ -239,8 +232,8 @@ AI 도구가 이 블록을 파싱해서 시나리오를 수정하고 재실행�
 
 ```bash
 # MCP Inspector로 서버 테스트
-mcp dev awt-skill/mcp/server.py
+mcp dev mcp/server.py
 
 # 또는 직접 실행 (stdio 모드)
-python awt-skill/mcp/server.py
+python mcp/server.py
 ```

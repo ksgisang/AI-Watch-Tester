@@ -59,11 +59,11 @@ You give AWT a URL. It opens a real Chrome window, reads the page, writes test s
 ### Option 1 — Agent Skill (works with Claude Code, Cursor, Copilot...)
 
 ```bash
-# Claude Code — one install brings the skill and the MCP server together
+# Claude Code — the plugin bundle ships the skill
 claude plugin marketplace add ksgisang/awt-skill
 claude plugin install ai-watch-tester@awt
 
-# Any other tool (Cursor, Codex, Gemini CLI, Copilot...) — skill only
+# Any other tool (Cursor, Codex, Gemini CLI, Copilot...)
 npx skills add ksgisang/awt-skill --skill awt -g
 
 # Then just ask your AI tool:
@@ -79,22 +79,23 @@ npx skills add ksgisang/awt-skill --skill awt -g
 
 ```bash
 # Install
-pip install aat-devqa
+pip install aat-devqa "mcp[cli]"
 
-# Claude Code — the plugin brings the skill and the MCP server together
-claude plugin marketplace add ksgisang/awt-skill
-claude plugin install ai-watch-tester@awt
+# Claude Code — the server is a file in this repository, registered by hand
+git clone https://github.com/ksgisang/AI-Watch-Tester.git ~/AI-Watch-Tester
+claude mcp add awt -- python3 ~/AI-Watch-Tester/mcp/server.py
 
 # Tools available: aat_devqa, aat_scan, aat_run, aat_run_skill_mode, aat_doctor,
 #                  aat_list_scenarios, aat_validate, aat_cost,
 #                  aat_generate_from_doc, aat_snapshot, aat_diff, aat_watch
 ```
 
-To register the server by hand instead — or to use it from Claude Desktop,
-Cursor, or Windsurf — see [`mcp/README.md`](mcp/README.md). The server file
-itself lives in the plugin bundle at
-[`awt-skill/mcp/server.py`](https://github.com/ksgisang/awt-skill/blob/main/mcp/server.py),
-so there is only ever one copy of it.
+To use it from Claude Desktop, Cursor, or Windsurf instead, see
+[`mcp/README.md`](mcp/README.md). The server file is
+[`mcp/server.py`](mcp/server.py) in this repository, which is the only copy of
+it. The Claude Code plugin does not bundle it: the plugin directory accepts MCP
+servers that run on the user's own machine only from verified organizations, so
+the bundle ships the `awt` skill alone.
 
 > **Cloud & Local CLI** versions are in active development and will be announced separately.
 
@@ -190,19 +191,21 @@ at it, rather than reporting a pass.
 | **Best for** | Quick tests, PMs, planners | Developers, CI/CD | AI-assisted development | Claude Desktop, Cursor, Windsurf |
 | **Price** | Free (5/mo) · Pro $28.99 · Team $98.99 | Free forever (AGPL-3.0) | Free forever | Free forever |
 
-> **On Claude Code, one install covers two of these columns.**
-> `claude plugin install ai-watch-tester@awt` brings the Agent Skill and the
-> MCP Server together. The `npx` route stays the way in for Cursor, Codex,
-> Gemini CLI, and the other tools the plugin format does not reach.
+> **On Claude Code, the plugin covers the Agent Skill column.**
+> `claude plugin install ai-watch-tester@awt` installs the `awt` skill, and
+> that is all it installs. The MCP Server is a separate, by-hand step —
+> see [`mcp/README.md`](mcp/README.md). The `npx` route stays the way in for
+> Cursor, Codex, Gemini CLI, and the other tools the plugin format does not
+> reach.
 
 ### Agent Skill — Let your AI coding tool drive AWT
 
 ```bash
-# Claude Code — one install brings the skill and the MCP server together
+# Claude Code — the plugin bundle ships the skill
 claude plugin marketplace add ksgisang/awt-skill
 claude plugin install ai-watch-tester@awt
 
-# Any other tool (Cursor, Codex, Gemini CLI, Copilot...) — skill only
+# Any other tool (Cursor, Codex, Gemini CLI, Copilot...)
 npx skills add ksgisang/awt-skill --skill awt -g
 
 # Then ask your AI tool:

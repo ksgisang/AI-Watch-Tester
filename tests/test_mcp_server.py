@@ -4,10 +4,12 @@ The server is not part of the installed package — it is a script the MCP host
 runs — so it is loaded from its path here, and the whole module is skipped when
 the `mcp` SDK is not installed (CI installs only the project's own extras).
 
-It lives in the `awt-skill` submodule, which is the plugin bundle users install,
-so that the file a user runs is the file these tests measure. A clone without
-`--recursive` has no such file, so the module skips there too, the same way
-`tests/test_docs_sync.py` skips on the skill docs in that submodule.
+It used to live in the `awt-skill` plugin bundle, and these tests loaded it from
+that submodule so the file a user runs was the file they measure. The bundle no
+longer carries it: the plugin directory accepts an MCP server that runs on the
+user's machine only from a verified organization, so the bundle ships the skill
+alone and `mcp/server.py` here is the server's only copy. These tests therefore
+no longer skip on a non-recursive clone.
 """
 
 from __future__ import annotations
@@ -21,13 +23,7 @@ import pytest
 
 pytest.importorskip("mcp.server.fastmcp", reason="the MCP SDK is an optional, separate install")
 
-_SERVER = Path(__file__).resolve().parents[1] / "awt-skill" / "mcp" / "server.py"
-
-if not _SERVER.is_file():  # pragma: no cover - only in a non-recursive clone
-    pytest.skip(
-        "the awt-skill submodule is not checked out; run `git submodule update --init`",
-        allow_module_level=True,
-    )
+_SERVER = Path(__file__).resolve().parents[1] / "mcp" / "server.py"
 
 
 def _load() -> ModuleType:

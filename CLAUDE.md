@@ -643,6 +643,26 @@ aat run --skill-mode --fast <scenario>
   - **대표님만 할 수 있는 일**: 제출은 `claude.ai/directory/manage`에서 **유료 claude.ai 플랜의 브라우저**로 하셔야 하고 CLI 경로가 없습니다. **제출한 조직이 등재의 영구 소유자**가 됩니다
   - **설치 잔여물**: 이 기기에 마켓플레이스 `awt`와 플러그인 `ai-watch-tester@awt`가 시험 설치되어 있고, 전역 스킬 `~/.claude/skills/awt/`가 플러그인의 스킬과 **중복**됩니다. 정리 절차를 `docs/CROSS_SESSION_TESTING.md` §3에 적어 두었습니다
 
+### Post-MVP: 번들을 스킬 전용으로 되돌림 (AAT-130)
+
+- [x] **AAT-130** 디렉터리 거부에 맞춰 로컬 MCP 서버를 번들에서 내리고 본체로 옮김 — 완료 2026-11-06
+  - 배경: AAT-129의 제출본이 **거부**되었습니다. 사유는 하나였고 품질과 무관합니다 — *"The directory accepts MCP servers that run on the user's computer only from Verified organizations, and your organization isn't one, so this version is refused."* 보안 스캔은 이미 통과한 상태였고, 걸린 것은 결함이 아니라 **조직 등급**입니다
+  - **「Verified를 먼저 받자」는 길은 조사로 사라졌습니다.** 제가 처음 올린 선택지에 그것을 추구 가능한 안으로 넣었는데, `docs/directory/publish`와 `docs/connectors/verification`이 둘 다 *"There's no separate application for the Verified label"*, *"Anthropic decides both during review"*라고 적고 있습니다. **신청 창구가 없으므로 선택지가 아닙니다** — 그 전제가 사라졌다고 대표님께 그대로 보고하고 권고를 `A + D`로 고쳤습니다
+  - 대표님 지시 **`A + D로 진행해줘`** — A는 번들을 **스킬 전용**으로 만들어 지금 등재를 확보하는 것, D는 **문서가 서로 어긋난다는 점을 들어 Anthropic에 묻는** 것입니다
+  - **D의 근거가 문서 세 벌의 어긋남입니다.** `docs/directory/publish`는 *"To distribute a local MCP server through the directory, include it in a plugin bundle"* 이라고 **AAT-129가 한 바로 그 일을 지시**하고, `docs/plugins/pre-submission-checklist`의 로컬 MCP 두 항목은 결말이 **`Held for a reviewer`**(거부가 아님)이며 "Verified organization"이라는 말이 **한 번도 나오지 않습니다.** 디렉터리 정책 문서는 로컬 MCP를 「의존성을 최신으로」로만 다룹니다. 즉 **문서가 지시한 경로를 그대로 따랐는데 거부되었습니다**
+  - **번들에서 내린 것은 선언 하나가 아니라 넷입니다** — `.mcp.json` / `plugin.json`의 인라인 `mcpServers` / `transport: stdio`인 `server.json` / `publish-mcp.yml`. 마지막 것까지 옮긴 이유는 플러그인 폴더가 **저장소 최상위**라서 추적되는 모든 파일이 **스캔 대상이자 배포물**이기 때문입니다. 번들은 추적 파일 14개로 줄었고, 공시문도 *"This bundle contains no executable code."* 로 다시 썼습니다
+  - **네임스페이스는 측정으로 확인했습니다.** `server.json`을 본체로 옮기면 MCP Registry 게시가 막히는지가 관문이었는데, Registry 소스(`internal/api/handlers/v0/auth/github_oidc.go`)가 `ResourcePattern: fmt.Sprintf("io.github.%s/*", claims.RepositoryOwner)`로 **`repository_owner` 하나만** 봅니다. `ksgisang` 소유 저장소라면 어디서든 `io.github.ksgisang/*`를 게시할 수 있습니다. `repository.url`은 모양만 검사되고 OIDC 저장소와 대조되지 않습니다
+  - **옮기자마자 CI가 깨질 자리를 먼저 막았습니다.** 워크플로 방아쇠가 `paths: ["server.json"]`이므로 그 파일이 본체에 **착지하는 순간** 게시가 돌고, `1.8.0`은 **이미 게시되어 있으며 게시된 판본은 불변**입니다. Registry를 먼저 조회해 있으면 건너뛰는 단계를 넣었습니다. 기존 세 관문(판본 일치·자격증명 미선언·PyPI 존재)은 한 글자도 건드리지 않았습니다
+  - **판본을 일부러 갈라 두었습니다.** 번들(`plugin.json`·`marketplace.json`·`package.json`·`SKILL.md`)은 `1.8.1`, `server.json`은 `1.8.0` 그대로 — 후자는 **PyPI에 실제로 있는 판본**을 가리켜야 하고 `aat-devqa 1.8.1`은 없습니다. 두 값을 묶어 두는 시험이 없음을 확인했습니다
+  - **번들 판올림이 거짓 알림을 만들 수 없음도 확인했습니다** — CLI의 업데이트 안내는 **릴리스 태그**(`releases/latest`)를 읽고 매니페스트를 읽지 않습니다. 덤으로 그 확인은 **지금까지 한 번도 발화한 적이 없습니다**(`awt-skill`에 릴리스가 0건이라 404이고 `except Exception: pass`가 삼킵니다)
+  - **MCP 시험이 이제 사용자가 실행하는 파일을 잽니다.** 전에는 서브모듈이 없으면 `pytest.skip`으로 조용히 넘어갔습니다. 서버가 본체로 왔으므로 그 분기를 지웠고 6건이 실제로 돕니다 — **「초록불이 빨간불로 갈 수 없는」 자리를 하나 없앤 것**입니다(§11-14가 여섯 번째로 만난 모양)
+  - **문서에서 거짓이 된 주장을 지우지 않고 고쳤습니다.** 「한 번 설치로 스킬과 MCP 서버를 함께 받는다」가 `README.md` 네 곳·`README.ko.md` 네 곳에 **코드 주석과 인용 블록으로** 박혀 있었습니다. 경로만 바꾸는 1차 목록이 이 여덟 자리를 전부 놓쳤습니다 — **경로를 grep하면 산문은 걸리지 않습니다.** MCP 사용자는 네 곳(`mcp/README.md`·본체 두 README·번들 README)에서 `git clone` + `claude mcp add awt -- python3 .../mcp/server.py`로 안내됩니다
+  - **`docs/RELEASE_GUIDE.md`는 경로보다 산문이 더 낡아 있었습니다.** §4의 「사용자는 한 번에 둘 다 받습니다」, `.mcp.json`이 정본이라는 주의 항목, `MCP servers (1) awt` 확인 주석, §5의 서브모듈 절차 전체를 다시 썼습니다. MCP 도구만 바뀐 경우에는 **번들을 건드리지 않는다**는 규칙도 명시했습니다
+  - **고치지 않고 확인만 한 둘**: `smithery.yaml:23`의 `args: ['mcp/server.py']`는 본체 최상위 기준 상대 경로라 **이동으로 자동 수리**되었고, `docs/CROSS_SESSION_TESTING.md:179`는 원래 스킬만 주장하고 있었습니다. 고치면 그냥 흔들기입니다
+  - **새 문서를 만들지 않았습니다**(★기존 우선). D 문의문은 대표님이 포털에 붙이실 글이므로 응답으로 드리고, 열린 문의 기록은 `docs/RELEASE_GUIDE.md` §4와 이 항목에 남깁니다
+  - **곁따라 드러난 별개 결손(미수정, 기록됨)**: PyPI `aat-devqa`는 `[project.scripts]`에 `aat` 하나만 실어 **MCP 서버를 포함하지 않습니다.** 그래서 `server.json`이 Registry에 대고 하는 주장은 **아직 참이 아닙니다** — 그 패키지로는 서버를 띄울 수 없습니다. `aat mcp` 하위 명령으로 묶으면 주장이 참이 되고 사용자도 `git clone` 없이 끝납니다. **AAT-129 이전부터 있던 문제**이고 이번 거부와 무관합니다
+  - 검증: `pytest tests/test_mcp_server.py tests/test_docs_sync.py` **8건 통과**(MCP 6건이 건너뛰지 않고 실행), `ruff check`·`ruff format --check`·`mypy src/aat/` 깨끗
+
 ---
 
 ## 협업 프로젝트 연동 (ClasRing + DSL)
@@ -690,21 +710,29 @@ aat run --skill-mode --fast <scenario>
 
 ## Current Status
 
-- **현재 단계**: 보고서(`docs/awt_project_analysis_and_strategy.md`) **1~3순위 + 판단 대기 3건 전량 마감**(AAT-115까지), 그 위에 **Flutter CanvasKit 세 겹 수리**(AAT-116~118)와 그 CI가 드러낸 `doctor` 결손(AAT-119), 그리고 대표님의 지시 한 건에서 나온 **좌표계 혼용**(AAT-120)·**접힌 선 아래 미탐색**(AAT-121), 그리고 대표님 질문에서 나온 **자동 수정 안전장치 + 두 겹 결말**(AAT-122)과, 최대리 세션의 SC-901 보고에서 나온 **판정 무결성 세 겹**(AAT-123), 그 수리를 확인하신 뒤 전달받은 **같은 계열의 네 번째 자리 — 다른 칸에 들어간 글자**(AAT-124), 그리고 최대리 시험 보고에서 뽑은 작업지시서(`decisions/2026-10-14_작업지시_남은수리.md`) **§B 여섯 건 + §C-1**(AAT-125)을 더했고, 그 재현 중에 찾아 보류해 두었던 **접혀 있는 것을 보인다고 읽던 네 번째 CSS 경로**를 같은 날 닫았습니다(AAT-126). 그리고 2026-10-15 자내공 라이브 실행 네 벌에서 드러난 **통과할 수 없던 `assert_screen_changed`와 종류를 모르던 경고 꼬리말**을 수리했습니다(AAT-127, 지시서 §B-7·§B-8 + §B-1·§C-3 종결). 마지막으로 AAT-126이 방향 때문에 남겨 두었던 **`text_visible`의 같은 구멍**을 대표님 승인으로 닫았습니다(AAT-128). `1.8.0` 배포가 끝나고 작업이 품질 수리에서 **등재와 홍보**로 넘어가, `awt-skill`을 **Claude Code 플러그인 번들**로 묶고 MCP 서버 사본을 한 벌로 줄였습니다(AAT-129)
-- **완료**: Phase 1~6 (Ultra-MVP) + AAT-060~065 + AAT-070~076 + AAT-080~081 + AAT-090~092 + AAT-093~095 + AAT-100~129 (Post-MVP)
-- **블로커**: 없음. 품질 쪽 **판단 대기는 0건**이고 **저장소에 `xfail`이 0건**입니다. 남은 것은 코드가 아니라 절차입니다 — ① 번들·본체 커밋과 푸시(**사람 게이트**) ② `anthropics/skills` PR #822 닫기 ③ `claude.ai/directory/manage` 제출(**대표님 브라우저에서만 가능**)
+- **현재 단계**: 보고서(`docs/awt_project_analysis_and_strategy.md`) **1~3순위 + 판단 대기 3건 전량 마감**(AAT-115까지), 그 위에 **Flutter CanvasKit 세 겹 수리**(AAT-116~118)와 그 CI가 드러낸 `doctor` 결손(AAT-119), 그리고 대표님의 지시 한 건에서 나온 **좌표계 혼용**(AAT-120)·**접힌 선 아래 미탐색**(AAT-121), 그리고 대표님 질문에서 나온 **자동 수정 안전장치 + 두 겹 결말**(AAT-122)과, 최대리 세션의 SC-901 보고에서 나온 **판정 무결성 세 겹**(AAT-123), 그 수리를 확인하신 뒤 전달받은 **같은 계열의 네 번째 자리 — 다른 칸에 들어간 글자**(AAT-124), 그리고 최대리 시험 보고에서 뽑은 작업지시서(`decisions/2026-10-14_작업지시_남은수리.md`) **§B 여섯 건 + §C-1**(AAT-125)을 더했고, 그 재현 중에 찾아 보류해 두었던 **접혀 있는 것을 보인다고 읽던 네 번째 CSS 경로**를 같은 날 닫았습니다(AAT-126). 그리고 2026-10-15 자내공 라이브 실행 네 벌에서 드러난 **통과할 수 없던 `assert_screen_changed`와 종류를 모르던 경고 꼬리말**을 수리했습니다(AAT-127, 지시서 §B-7·§B-8 + §B-1·§C-3 종결). 마지막으로 AAT-126이 방향 때문에 남겨 두었던 **`text_visible`의 같은 구멍**을 대표님 승인으로 닫았습니다(AAT-128). `1.8.0` 배포가 끝나고 작업이 품질 수리에서 **등재와 홍보**로 넘어가, `awt-skill`을 **Claude Code 플러그인 번들**로 묶고 MCP 서버 사본을 한 벌로 줄였습니다(AAT-129). 그 제출본이 **조직 등급 때문에 거부**되어, 번들을 **스킬 전용**으로 되돌리고 서버를 본체로 옮겼습니다(AAT-130)
+- **완료**: Phase 1~6 (Ultra-MVP) + AAT-060~065 + AAT-070~076 + AAT-080~081 + AAT-090~092 + AAT-093~095 + AAT-100~130 (Post-MVP)
+- **블로커**: 없음. 품질 쪽 **판단 대기는 0건**이고 **저장소에 `xfail`이 0건**입니다. 남은 것은 코드가 아니라 절차입니다 — ① 번들·본체 커밋과 푸시(**사람 게이트**) ② 재심사를 받기 위한 번들 푸시(거부가 떨어졌으므로 새 커밋이 있어야 재심사가 시작됩니다) ③ D 문의를 포털로 보내기(**대표님 브라우저에서만 가능**)
 
-### ⛔ 심사 중 — `awt-skill` 저장소에 푸시하지 말 것 (2026-10-16 제출)
+### ⛔ 번들에 로컬 MCP 서버를 되돌려 놓지 말 것 (AAT-130, 2026-11-06)
 
-`ai-watch-tester` 플러그인을 디렉터리에 제출했고 **`ksgisang/awt-skill` `main @ d396fa7`에 고정**되어 심사 중입니다. **2026-10-20 기준 `보안 스캔 passed`, 사람 심사 대기**이고 남은 지적은 전부 참고용 경고입니다(포털이 *"nothing you need to do"*라고 적고 있습니다). 그 저장소에 푸시하면 **새 플러그인 버전이 생깁니다.** 웹훅은 `awt-skill`만 지켜보므로 **본체 `AI-Watch-Tester` 작업은 심사 중에도 안전합니다.**
+디렉터리가 제출본을 **거부**했고 사유는 단 하나였습니다 — *"The directory accepts MCP servers that run on the user's computer only from Verified organizations, and your organization isn't one, so this version is refused. Remove every MCP server that runs on the user's computer, then push a new commit."* 보안 스캔은 통과한 상태였고, 걸린 것은 결함이 아니라 **조직 등급**입니다.
 
-심사 결과가 나온 뒤 **아래 두 건을 한 커밋·한 푸시로 묶어** 올립니다(따로 올리면 버전이 둘 생깁니다):
+**Verified는 신청할 수 있는 것이 아닙니다.** `docs/directory/publish`와 `docs/connectors/verification`이 둘 다 *"There's no separate application for the Verified label"*, *"Anthropic decides both during review"*라고 적고 있습니다. 그래서 「Verified를 먼저 받는다」는 길은 **존재하지 않습니다.**
 
-1. `awt-skill/README.md` 76행·93행 — `npx skills add` 옆에 플러그인 경로 병기(`claude plugin marketplace add ksgisang/awt-skill` + `claude plugin install ai-watch-tester@awt`). 본체 `README.md`·`README.ko.md`는 `c762909`에서 이미 반영했고 **번들만 남았습니다**
-2. `1.8.1` 판올림 — `awt-skill/server.json` + `awt-skill/.claude-plugin/plugin.json`(MCP Registry 재게시용). **PyPI `aat-devqa 1.8.1`이 먼저** 올라가 있어야 합니다
-3. 디렉터리 `Uses a credential from the user's machine` **잔여 2건** — **고치기 전에 먼저 펼쳐서 어느 두 자리인지 확인할 것.** 포털 권고(`user_config` + `sensitive: true`)를 그대로 받으면 **거짓을 선언하게 됩니다**: stdio MCP 서버는 자격증명을 읽지 않습니다(`mcp/server.py`는 `os.environ`을 건드리지 않고, 호출하는 `aat` CLI는 사용자 설정 파일에서 키를 읽습니다). 같은 이유로 `server.json`의 `environmentVariables`를 **이미 제거해 보류가 풀렸고**(2026-10-20 `보안 스캔 passed`), 되돌리면 보류가 다시 열립니다. `.github/workflows/publish-mcp.yml` 48~60행에 경위가 적혀 있습니다 — **그 파일 안에서 해당 변수 이름을 입력하지 마십시오**(`curl`로 github.com에 닿는 파일이라 스캐너가 원격 URL 옆의 자격증명 이름을 보류 대상으로 잡습니다)
+그 결과 번들은 **스킬 전용**이 되었습니다(추적 파일 14개). 서버 파일의 정본은 본체의 `mcp/server.py`이고 사용자가 `claude mcp add`로 따로 등록합니다. **번들에 되돌려 놓으면 안 되는 것 네 가지** — `.mcp.json` / `plugin.json`의 인라인 `mcpServers` / `transport: stdio`인 `server.json` / 본체용 `.github/workflows/`. 플러그인 폴더가 저장소 최상위라 **추적되는 모든 파일이 스캔 대상이자 배포물**이기 때문입니다.
 
-미결 1건(본체만 건드리므로 **심사 중에도 진행 가능**): `PRIVACY.md`가 "There is currently no flag to disable it"이라고 적어 둔 **업데이트 확인 비활성화 플래그** — 만들지, 방화벽 안내로 둘지 미정입니다
+**문서가 서로 어긋나 있고, 그것이 Anthropic에 문의할 근거입니다**(대표님 지시 `A + D`). `docs/directory/publish`는 *"To distribute a local MCP server through the directory, include it in a plugin bundle"* 이라고 **그 방법을 지시**하고, `docs/plugins/pre-submission-checklist`의 로컬 MCP 두 항목은 결말이 **`Held for a reviewer`**(거부가 아님)이며 "Verified organization"이라는 말이 **한 번도 나오지 않습니다.** 디렉터리 정책 문서도 로컬 MCP를 「의존성을 최신으로 유지할 것」으로만 다룹니다. 문의문은 아래 「미결」에 적어 둔 대로 대표님이 포털로 보내셔야 합니다.
+
+**심사 중 푸시 금지는 해제되었습니다** — 거부가 떨어졌으므로 새 커밋을 올려야 재심사가 시작됩니다. 다만 번들 커밋은 **한 커밋·한 푸시**로 묶습니다(따로 올리면 플러그인 버전이 둘 생깁니다).
+
+판본은 **갈라졌습니다.** 번들(`plugin.json`·`marketplace.json`·`package.json`·`SKILL.md`)은 `1.8.1`, `server.json`은 `1.8.0`에 그대로 둡니다 — 후자는 **PyPI에 실제로 있는 판본**을 가리켜야 하고 `aat-devqa 1.8.1`은 아직 없습니다. 시험 중 어느 것도 두 판본을 묶어 두지 않았음을 확인했습니다.
+
+미결(본체만 건드리므로 언제든 진행 가능):
+1. **D 문의** — 위 세 문서의 어긋남을 들어 「Verified가 아닌 게시자는 문서가 지시한 경로를 어떻게 따라야 하는가」를 포털로 묻습니다. **대표님 브라우저에서만 가능**합니다
+2. 디렉터리 `Uses a credential from the user's machine` **잔여 2건** — **고치기 전에 먼저 펼쳐서 어느 두 자리인지 확인할 것.** 유력한 출처는 스킬 참조 문서 두 곳(`references/cli-reference.md`·`references/config-reference.md`)의 `export AAT_AI__API_KEY=...` 안내문입니다. 포털 권고(`user_config` + `sensitive: true`)를 그대로 받으면 **거짓을 선언하게 됩니다**: stdio MCP 서버는 자격증명을 읽지 않습니다(`mcp/server.py`는 `os.environ`을 건드리지 않고, 호출하는 `aat` CLI는 사용자 설정 파일에서 키를 읽습니다). 같은 이유로 `server.json`의 `environmentVariables`를 **이미 제거해 보류가 풀렸고**, 되돌리면 보류가 다시 열립니다. `.github/workflows/publish-mcp.yml` 48~60행에 경위가 적혀 있습니다 — **그 파일 안에서 해당 변수 이름을 입력하지 마십시오**(`curl`로 github.com에 닿는 파일이라 스캐너가 원격 URL 옆의 자격증명 이름을 보류 대상으로 잡습니다)
+3. **`server.json`의 주장이 아직 참이 아닙니다** — PyPI `aat-devqa`는 `[project.scripts]`에 `aat` 하나만 실어 **MCP 서버를 포함하지 않습니다.** 매니페스트가 가리키는 패키지로는 서버를 띄울 수 없습니다. `aat mcp` 하위 명령으로 묶으면 주장이 참이 되고, 사용자도 `git clone` 없이 `claude mcp add awt -- aat mcp`로 끝납니다. **AAT-129 이전부터 있던 별개 결손**입니다
+4. `PRIVACY.md`가 "There is currently no flag to disable it"이라고 적어 둔 **업데이트 확인 비활성화 플래그** — 만들지, 방화벽 안내로 둘지 미정입니다. 덤으로 그 확인은 **지금까지 한 번도 발화한 적이 없습니다**(`awt-skill`에 GitHub 릴리스가 0건이라 `releases/latest`가 404이고 `except Exception: pass`가 삼킵니다)
 - **대표님 터미널이 필요한 재검증 2건**(승인 관문이 `/dev/tty`를 읽고 그 우회는 금지): 하늘고 SC-008 10단계·SC-009 13단계(최이사 확인까지가 종결), SC-911 7·9·10단계
 - **Flutter 웹 실측 상태**(2026-10-03): ClasRing CanvasKit 앱에서 **23/23 통과**, `wait` 단계를 전부 뺀 대본도 **5/5 통과**, 증거 사진의 한국어가 또렷합니다. Semantics 라벨 기반 `find_and_click`·`find_and_type`를 권하십시오 — 손좌표를 권하던 이전 조언은 실측으로 뒤집혔습니다(AAT-118)
 - **Python**: 3.12.12 (.venv), `source .venv/bin/activate`

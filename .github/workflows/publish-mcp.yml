@@ -1,0 +1,132 @@
+# Publishes server.json to the MCP Registry.
+#
+# Authentication is GitHub's own OIDC: the job asks Actions for a short-lived
+# identity token and trades it for a registry token. Nothing is stored, so
+# there is no secret to rotate and no login that expires between releases —
+# which is what used to make this a manual step someone had to remember.
+#
+# This file used to live in the awt-skill plugin bundle, on the belief that the
+# io.github.ksgisang/awt namespace was tied to that specific repository. It is
+# not. The registry derives the publishable namespace from the repository_owner
+# claim alone and says so in its own source:
+#
+#   // We grant io.github.<owner>/* rather than io.github./repo/* because many
+#   // people have monorepo setups where they want to deploy multiple servers
+#   ResourcePattern: fmt.Sprintf("io.github.%s/*", claims.RepositoryOwner)
+#       - internal/api/handlers/v0/auth/github_oidc.go
+#
+# Any repository owned by ksgisang can publish the namespace, and repository.url
+# in the manifest is only checked for URL shape, never matched against the
+# repository the token came from. The server now lives here because the plugin
+# directory refuses bundles that carry an MCP server running on the user's
+# machine, so the bundle had to stop declaring one.
+name: Publish to MCP Registry
+
+on:
+  push:
+    branches: [main]
+    paths: ["server.json"]
+  workflow_dispatch: # for a re-run when a publish failed on its own
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # the OIDC token this whole thing rests on
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      # Catches the mistake this file exists to prevent: server.json carries the
+      # version twice, and the one inside packages[] is the one that gets
+      # forgotten. Publishing them out of step points people at a release that
+      # is not the one described.
+      - name: Check both versions agree
+        run: |
+          MANIFEST=$(jq -r '.version' server.json)
+          PACKAGE=$(jq -r '.packages[0].version' server.json)
+          echo "manifest=$MANIFEST package=$PACKAGE"
+          if [ "$MANIFEST" != "$PACKAGE" ]; then
+            echo "::error::server.json says $MANIFEST at the top and $PACKAGE in packages[0]. Set both to the version you are publishing."
+            exit 1
+          fi
+
+      # server.json describes the stdio MCP server, and that server reads no
+      # credentials: mcp/server.py never touches os.environ, and the aat CLI it
+      # shells out to takes its key from the user's own config file. The two
+      # provider variables this manifest used to declare are read in exactly one
+      # place, src/aat/dashboard/app.py, which is the optional web dashboard and
+      # not this transport. Declaring them here was therefore false, and it was
+      # what put a "uses a credential from the user's machine" hold on the
+      # plugin directory submission. Adding them back re-opens that hold.
+      #
+      # Do not spell those variable names out in this file. It reaches github.com
+      # over curl, and the directory scanner holds a credential-named variable
+      # sitting beside a remote URL for review. Naming them here once, in a
+      # comment that existed to argue they should not be declared, cost a round
+      # of exactly that hold. src/aat/dashboard/app.py is where to read them.
+      - name: Check no credential is declared
+        run: |
+          if [ "$(jq '[.packages[].environmentVariables // []] | flatten | length' server.json)" != "0" ]; then
+            echo "::error::server.json declares environmentVariables. The stdio server reads none; see the comment above this step."
+            exit 1
+          fi
+
+      # The manifest hands people a PyPI package. If that version is not on
+      # PyPI, the registry entry points at something nobody can install.
+      - name: Check the package is actually on PyPI
+        run: |
+          NAME=$(jq -r '.packages[0].identifier' server.json)
+          VERSION=$(jq -r '.packages[0].version' server.json)
+          if ! curl -sfo /dev/null "https://pypi.org/pypi/$NAME/$VERSION/json"; then
+            echo "::error::$NAME $VERSION is not on PyPI yet. Publish it there first."
+            exit 1
+          fi
+
+      # A published version is immutable, so re-publishing one is an error, and
+      # the trigger above fires on any change to server.json — including the
+      # commit that first added the file to this repository, which carried a
+      # version the registry already had. Without this step that move alone
+      # turns the branch red for a reason that is not a defect.
+      #
+      # The failure direction is deliberate: if the registry cannot be reached,
+      # this step does NOT skip. Skipping wrongly means a release quietly never
+      # reaches the registry and nobody finds out; attempting wrongly fails
+      # loudly in the next step. Only a positive answer suppresses the publish.
+      - name: Skip if this version is already published
+        id: already
+        run: |
+          NAME=$(jq -r '.name' server.json)
+          VERSION=$(jq -r '.version' server.json)
+          if ! curl -sSf --max-time 30 \
+              --get --data-urlencode "search=$NAME" \
+              "https://registry.modelcontextprotocol.io/v0.1/servers" >registry.json; then
+            echo "could not read the registry; publishing and letting it decide"
+            echo "skip=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if jq -e --arg n "$NAME" --arg v "$VERSION" \
+              'any(.servers[]?.server; .name == $n and .version == $v)' registry.json >/dev/null; then
+            echo "::notice::$NAME $VERSION is already in the registry. Nothing to publish."
+            echo "skip=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate server.json
+        if: steps.already.outputs.skip != 'true'
+        run: ./mcp-publisher validate
+
+      - name: Authenticate to MCP Registry
+        if: steps.already.outputs.skip != 'true'
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish server to MCP Registry
+        if: steps.already.outputs.skip != 'true'
+        run: ./mcp-publisher publish

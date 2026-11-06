@@ -20,7 +20,7 @@ When code changes, the corresponding documentation must be updated in the same P
 | `cloud/frontend/messages/ko.json` | Frontend UI strings (Korean, must mirror en.json keys) |
 | `awt-skill/skills/awt/SKILL.md` | Agent skill instructions — workflow, scenario rules (action table generated) |
 | `awt-skill/skills/awt/references/scenario-schema.md` | **Generated** from `src/aat/core/models.py`; never edit by hand |
-| `mcp/README.md`, `awt-skill/mcp/server.py` docstrings | What the MCP tools promise to the calling AI |
+| `mcp/README.md`, `mcp/server.py` docstrings | What the MCP tools promise to the calling AI |
 
 ---
 
@@ -43,10 +43,10 @@ When code changes, the corresponding documentation must be updated in the same P
 | WebSocket event added | `API_REFERENCE.md` |
 | File upload limits changed | `API_REFERENCE.md`, `en.json` (fileUpload.formats) |
 | Scenario model / enum changed (`core/models.py`) | Run `python scripts/gen_scenario_schema.py` — see below |
-| DEVQA block fields changed (`core/diagnosis.py`) | `awt-skill/skills/awt/references/cli-reference.md`, `awt-skill/skills/awt/SKILL.md`, `awt-skill/mcp/server.py`, `mcp/README.md` |
+| DEVQA block fields changed (`core/diagnosis.py`) | `awt-skill/skills/awt/references/cli-reference.md`, `awt-skill/skills/awt/SKILL.md`, `mcp/server.py`, `mcp/README.md` |
 | Approval gate changed (`scenario_reviewer.py`, `approval_token.py`, `audit.py`) | `QUICK_START.md` (Running a Test from the CLI), `awt-skill/skills/awt/references/cli-reference.md`, `CLAUDE.md` |
-| Step status or exit code changed (`core/models.py` `StepStatus`, `cli/commands/run_cmd.py` `_exit_code`) | `QUICK_START.md` (Exit codes), `awt-skill/skills/awt/references/cli-reference.md`, `awt-skill/mcp/server.py` |
-| Report format added/changed (`src/aat/reporters/`) | `QUICK_START.md` (A report you can send to someone), `README.md` (Features), `awt-skill/skills/awt/references/cli-reference.md` + `awt-skill/skills/awt/SKILL.md` (CLI Commands, Key Flags), `awt-skill/mcp/server.py` (`report` argument), `mcp/README.md` |
+| Step status or exit code changed (`core/models.py` `StepStatus`, `cli/commands/run_cmd.py` `_exit_code`) | `QUICK_START.md` (Exit codes), `awt-skill/skills/awt/references/cli-reference.md`, `mcp/server.py` |
+| Report format added/changed (`src/aat/reporters/`) | `QUICK_START.md` (A report you can send to someone), `README.md` (Features), `awt-skill/skills/awt/references/cli-reference.md` + `awt-skill/skills/awt/SKILL.md` (CLI Commands, Key Flags), `mcp/server.py` (`report` argument), `mcp/README.md` |
 | Coordinate learning changed (`engine/executor.py`, `learning/store.py`) | `awt-skill/skills/awt/references/cli-reference.md` (`aat run --no-learn`, `aat learn reset`), `awt-skill/skills/awt/SKILL.md` (when to write `learn: false`) |
 | Approval mode behaviour changed (`core/loop.py` handlers, `ApprovalMode`) | `README.md` (Approval modes), `QUICK_START.md` (Letting AWT fix it), `awt-skill/skills/awt/references/cli-reference.md` (`aat loop` → Approval Modes), `awt-skill/skills/awt/SKILL.md` (Critical rule 7) |
 | Fix validation rules changed (`core/loop.py` `_validate_fix`, `_removed_guards`) | `README.md` (What AWT refuses to write), `QUICK_START.md`, `awt-skill/skills/awt/references/cli-reference.md` (What screening exists) — **state the limit, not just the rule**: a reader who thinks the screen catches test-relaxing fixes will trust `auto` |

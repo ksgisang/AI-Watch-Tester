@@ -56,11 +56,11 @@ URL을 주면 AWT가 실제 Chrome 창을 열고, 페이지를 읽고, 테스트
 ### 방법 1 — Agent Skill (Claude Code, Cursor, Copilot 등과 함께)
 
 ```bash
-# Claude Code — 플러그인 하나로 스킬과 MCP 서버를 함께 설치
+# Claude Code — 플러그인 번들이 스킬을 설치합니다
 claude plugin marketplace add ksgisang/awt-skill
 claude plugin install ai-watch-tester@awt
 
-# 그 외 도구 (Cursor, Codex, Gemini CLI, Copilot...) — 스킬만
+# 그 외 도구 (Cursor, Codex, Gemini CLI, Copilot...)
 npx skills add ksgisang/awt-skill --skill awt -g
 
 # 그 다음 AI 도구에게:
@@ -74,21 +74,22 @@ npx skills add ksgisang/awt-skill --skill awt -g
 
 ```bash
 # 설치
-pip install aat-devqa
+pip install aat-devqa "mcp[cli]"
 
-# Claude Code — 플러그인 하나로 스킬과 MCP 서버가 함께 들어옵니다
-claude plugin marketplace add ksgisang/awt-skill
-claude plugin install ai-watch-tester@awt
+# Claude Code — 서버는 이 저장소의 파일이고, 손으로 등록합니다
+git clone https://github.com/ksgisang/AI-Watch-Tester.git ~/AI-Watch-Tester
+claude mcp add awt -- python3 ~/AI-Watch-Tester/mcp/server.py
 
 # 사용 가능한 도구: aat_devqa, aat_scan, aat_run, aat_run_skill_mode, aat_doctor,
 #                  aat_list_scenarios, aat_validate, aat_cost,
 #                  aat_generate_from_doc, aat_snapshot, aat_diff, aat_watch
 ```
 
-서버를 손으로 등록하거나 Claude Desktop·Cursor·Windsurf에서 쓰시려면
-[`mcp/README.md`](mcp/README.md)를 보십시오. 서버 파일 자체는 플러그인 번들의
-[`awt-skill/mcp/server.py`](https://github.com/ksgisang/awt-skill/blob/main/mcp/server.py)
-한 벌뿐입니다.
+Claude Desktop·Cursor·Windsurf에서 쓰시려면
+[`mcp/README.md`](mcp/README.md)를 보십시오. 서버 파일은 이 저장소의
+[`mcp/server.py`](mcp/server.py) 한 벌뿐입니다. **플러그인에는 들어 있지
+않습니다** — 디렉터리가 사용자 기기에서 실행되는 MCP 서버를 Verified 조직에서만
+받으므로, 번들은 `awt` 스킬만 싣습니다.
 
 > **클라우드 & 로컬 CLI** 버전은 현재 개발 중이며 별도로 공개 예정입니다.
 
@@ -152,19 +153,20 @@ aat devqa "체크아웃 플로우 테스트" --url http://localhost:3000
 | **적합한 용도** | 빠른 테스트, 기획자, PM | 개발자, CI/CD | AI 보조 개발 | Claude Desktop, Cursor, Windsurf |
 | **가격** | 무료 (5회/월) · Pro $28.99 · Team $98.99 | 영구 무료 (AGPL-3.0) | 영구 무료 | 영구 무료 |
 
-> **Claude Code에서는 한 번의 설치가 위 표의 두 칸을 덮습니다.**
-> `claude plugin install ai-watch-tester@awt` 하나로 Agent Skill과 MCP 서버가
-> 함께 들어옵니다. `npx` 경로는 플러그인이 닿지 못하는 Cursor·Codex·
-> Gemini CLI 등을 위해 그대로 둡니다.
+> **Claude Code에서는 플러그인이 위 표의 Agent Skill 칸을 덮습니다.**
+> `claude plugin install ai-watch-tester@awt`는 `awt` 스킬을 설치하고, 설치하는
+> 것은 그것뿐입니다. MCP 서버는 따로 손으로 등록하셔야 합니다 —
+> [`mcp/README.md`](mcp/README.md)를 보십시오. `npx` 경로는 플러그인이 닿지
+> 못하는 Cursor·Codex·Gemini CLI 등을 위해 그대로 둡니다.
 
 ### Agent Skill — AI 코딩 도구가 AWT를 직접 제어
 
 ```bash
-# Claude Code — 플러그인 하나로 스킬과 MCP 서버를 함께 설치
+# Claude Code — 플러그인 번들이 스킬을 설치합니다
 claude plugin marketplace add ksgisang/awt-skill
 claude plugin install ai-watch-tester@awt
 
-# 그 외 도구 (Cursor, Codex, Gemini CLI, Copilot...) — 스킬만
+# 그 외 도구 (Cursor, Codex, Gemini CLI, Copilot...)
 npx skills add ksgisang/awt-skill --skill awt -g
 
 # 그 다음 AI 도구에게:

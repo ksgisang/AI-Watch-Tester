@@ -10,8 +10,8 @@
 | 1 | **GitHub 저장소** | 자동 | `git push origin main` |
 | 2 | **PyPI** (aat-devqa) | 반자동 | `git tag v*` → push → CI가 빌드+업로드 |
 | 3 | **README.md** | 수동 | 기능 추가 시 직접 수정 후 커밋 |
-| 4 | **Anthropic Skills PR** | 수동 | PR 업데이트 또는 새 PR 생성 |
-| 5 | **MCP Registry** | 자동 | `awt-skill/server.json` 버전 올려 푸시 → OIDC 워크플로가 게시 |
+| 4 | **플러그인 번들** (`awt-skill`, 스킬 전용) | 자동 | 번들의 `main`에 푸시 → 디렉터리가 집어 감 |
+| 5 | **MCP Registry** | 자동 | 이 저장소의 `server.json` 버전 올려 푸시 → OIDC 워크플로가 게시 |
 
 ---
 
@@ -158,25 +158,28 @@ git push origin main
 - **`anthropics/skills` PR #822는 더 이상 경로가 아닙니다.** 그 저장소는
   디렉터리 역할을 넘겼고, 스킬은 단독 제출 항목이 아니라 **플러그인 번들의 일부**로
   등재됩니다. PR은 닫고 포털 경로를 안내합니다.
-- 번들: `awt-skill` 저장소 **하나**입니다. 스킬(`skills/awt/`)과 MCP
-  서버(`mcp/server.py`)가 같은 저장소에 있고, 사용자는 한 번에 둘 다 받습니다.
+- 번들: `awt-skill` 저장소 **하나**이고, 싣는 것은 **스킬(`skills/awt/`)뿐입니다.**
+  디렉터리가 **사용자 기기에서 실행되는 MCP 서버를 Verified 조직에서만** 받으므로
+  번들에서 서버를 내렸습니다. 서버 파일의 정본은 이제 **본체 저장소의
+  `mcp/server.py`** 이고 사용자가 손으로 등록합니다(§5, `mcp/README.md`).
 - 매니페스트: `awt-skill/.claude-plugin/plugin.json`,
   마켓플레이스 항목: `awt-skill/.claude-plugin/marketplace.json`
 - 플러그인 이름 `ai-watch-tester`는 **바꾸지 않습니다** — 이름을 바꾸면 이미 설치한
   모든 사용자에게 다른 플러그인이 되어 갱신이 끊깁니다.
 
 ### 업데이트가 필요한 경우
-- MCP 도구에 새 파라미터 추가 시
-- 새 MCP 도구 추가 시
-- 스킬 설명·instructions 변경 시
+- 스킬 본문·참조 문서·템플릿을 고쳤을 때
+- 새 CLI 플래그를 스킬에 노출할 때
+
+MCP 도구만 바뀐 경우에는 번들을 건드리지 않습니다. 서버는 본체에 있으므로
+§5만 따릅니다.
 
 ### 절차
 
 ```bash
-# 1. 번들(서브모듈)에서 수정합니다. 서버 파일의 정본이 여기입니다.
+# 1. 번들(서브모듈)에서 수정합니다.
 cd awt-skill
 #    - skills/awt/**          스킬 본문·참조 문서
-#    - mcp/server.py          MCP 도구 정의
 #    - .claude-plugin/plugin.json 의 "version"
 
 # 2. 형식 검증 — 인자는 **플러그인 폴더**(= 저장소 최상위)이지 `.claude-plugin`이
@@ -189,8 +192,10 @@ cd .. && git add awt-skill && git commit -m "chore: bump the awt-skill pointer" 
 
 # 4. 설치해서 실제로 들어왔는지 확인합니다.
 claude plugin update ai-watch-tester@awt
-claude plugin details ai-watch-tester@awt   # Skills (1) awt, MCP servers (1) awt
+claude plugin details ai-watch-tester@awt   # Skills (1) awt, MCP servers (0)
 ```
+
+`MCP servers`는 **0이 정상입니다.** 번들은 서버를 싣지 않습니다.
 
 ### 디렉터리 등재 (최초 1회, 대표님 계정)
 - 제출처: `claude.ai/directory/manage` — **유료 claude.ai 플랜의 브라우저**에서
@@ -207,6 +212,27 @@ claude plugin details ai-watch-tester@awt   # Skills (1) awt, MCP servers (1) aw
   절을 두어 실행·기록·전송·내려받기를 전부 적어 두었습니다. 서버가 하는 일이
   바뀌면 **그 절을 같이 고쳐야 합니다.**
 
+#### 거부 이력과 열린 문의 (2026-11-06, AAT-130)
+- **첫 제출(2026-10-16)은 거부되었습니다.** 사유는 하나이고 품질과 무관합니다 —
+  *"The directory accepts MCP servers that run on the user's computer only from
+  Verified organizations, and your organization isn't one, so this version is
+  refused."* 보안 스캔은 이미 통과한 상태였습니다.
+- **Verified는 신청할 수 있는 등급이 아닙니다.** `docs/directory/publish`와
+  `docs/connectors/verification`이 둘 다 *"There's no separate application for
+  the Verified label"*, *"Anthropic decides both during review"* 라고 적습니다.
+  그래서 「Verified를 먼저 받는다」는 길은 **존재하지 않습니다.**
+- 대응은 **번들을 스킬 전용으로** 만드는 것이었습니다(위 「현황」). 그래서 지금
+  제출물에는 로컬 MCP 서버 선언이 한 줄도 없습니다.
+- **열린 문의가 하나 있습니다(미해결).** 문서 세 벌이 서로 어긋납니다 —
+  `docs/directory/publish`는 *"To distribute a local MCP server through the
+  directory, include it in a plugin bundle"* 이라고 **그 방법을 지시**하고,
+  `docs/plugins/pre-submission-checklist`의 로컬 MCP 두 항목은 결말이
+  **`Held for a reviewer`**(거부가 아님)이며 "Verified organization"이라는 말이
+  **한 번도 나오지 않고**, 디렉터리 정책 문서는 로컬 MCP를 「의존성을 최신으로」로만
+  다룹니다. **문서가 지시한 경로를 그대로 따랐는데 거부된 것**이므로, 「Verified가
+  아닌 게시자는 그 경로를 어떻게 따라야 하는가」를 포털로 묻습니다. 답이 오면
+  서버를 번들로 되돌릴 수 있을지가 갈립니다 — **답이 오기 전에는 되돌리지 마십시오.**
+
 #### 등재 뒤의 갱신 — 포털에 다시 들어갈 일은 없습니다
 - **추적 브랜치(`main`)에 푸시하면 디렉터리가 알아서 집어 갑니다.** 위 「절차」의
   1~3번이 곧 릴리스이고, 포털은 **버전이 보류되거나 설정을 바꿀 때만** 엽니다.
@@ -217,10 +243,14 @@ claude plugin details ai-watch-tester@awt   # Skills (1) awt, MCP servers (1) aw
 - 새 버전이 스캔에 걸려도 **이미 게시된 버전은 계속 서비스**됩니다.
 
 ### ⚠️ 주의
-- `.mcp.json`이 서버 선언의 정본입니다. `plugin.json` 안의 인라인 `mcpServers`는
-  이 기기의 Claude Code 2.1.220에서 **반영되지 않는 것을 실측**했으므로 두지 않습니다.
-- 플러그인 폴더는 **저장소 최상위**여야 합니다. 하위 폴더에 두면 비셸 MCP 서버가
-  리뷰 보류 대상이 됩니다.
+- **번들에 로컬 MCP 서버 선언을 되돌려 놓지 마십시오.** `.mcp.json`도,
+  `plugin.json` 안의 인라인 `mcpServers`도, `transport: stdio`인 `server.json`도
+  두지 않습니다. 디렉터리가 그 선언 하나를 근거로 **그 판을 거부**합니다
+  (*"Remove every MCP server that runs on the user's computer, then push a new
+  commit."*). URL로 접속하는 원격 서버는 예외이지만 AWT는 로컬 서버입니다.
+- 플러그인 폴더는 **저장소 최상위**입니다. 그래서 추적되는 **모든 파일이 스캔
+  대상이고 사용자에게 함께 배포**됩니다. 본체용 워크플로·매니페스트를 그 저장소에
+  두면 안 되는 이유입니다.
 - 전역 스킬(`~/.claude/skills/awt/`)을 따로 쓰고 계시면 플러그인과 **중복**됩니다.
   동기화 절차는 `docs/CROSS_SESSION_TESTING.md` §3입니다.
 
@@ -234,11 +264,15 @@ claude plugin details ai-watch-tester@awt   # Skills (1) awt, MCP servers (1) aw
   일원화했기 때문입니다(해당 저장소 이슈 #3950). **PR을 갱신할 대상이 더는
   없으므로, 그쪽에 커밋하거나 코멘트를 달 필요가 없습니다.**
 - 대신 AWT는 Registry에 `io.github.ksgisang/awt`로 등록되어 있습니다.
-- 매니페스트 위치: `awt-skill/server.json` (**하위 모듈**입니다)
+- 매니페스트 위치: **이 저장소의 `server.json`** 입니다. 전에는 `awt-skill`에
+  두었으나, 번들에서 로컬 서버 선언을 내리면서 워크플로와 함께 옮겨 왔습니다.
+  네임스페이스는 영향을 받지 않습니다 — Registry의 OIDC 인증은
+  `repository_owner` 하나만 보므로(`internal/api/handlers/v0/auth/github_oidc.go`),
+  `ksgisang` 소유 저장소라면 어디서든 `io.github.ksgisang/*`를 게시할 수 있습니다.
 
 ### 절차
 
-**게시는 자동입니다.** `awt-skill/.github/workflows/publish-mcp.yml`이
+**게시는 자동입니다.** 이 저장소의 `.github/workflows/publish-mcp.yml`이
 `server.json` 변경이 main에 푸시되면 게시합니다. 인증은 GitHub Actions의 OIDC라
 저장할 비밀값도, 만료되는 로그인도 없습니다. 사람이 할 일은 버전을 올리는 것뿐입니다.
 
@@ -247,24 +281,26 @@ claude plugin details ai-watch-tester@awt   # Skills (1) awt, MCP servers (1) aw
 #    매니페스트가 PyPI 패키지 버전을 가리키므로, 없는 버전을 가리키면 안 됩니다.
 #    (워크플로가 이 조건을 검사해서 어기면 게시를 막습니다.)
 
-# 2. awt-skill/server.json의 두 곳을 모두 새 버전으로 올립니다.
+# 2. server.json의 두 곳을 모두 새 버전으로 올립니다.
 #    - 최상위 "version"
 #    - packages[0]."version"  ← 빠뜨리기 쉬움 (워크플로가 불일치를 잡습니다)
 
-# 3. 하위 모듈에서 커밋·푸시하면 워크플로가 게시합니다.
-git -C awt-skill add server.json && git -C awt-skill commit && git -C awt-skill push
+# 3. 커밋·푸시하면 워크플로가 게시합니다.
+git add server.json && git commit -m "chore: publish awt 1.X.X to the MCP Registry" && git push
 
-# 4. 부모의 하위 모듈 포인터를 올립니다.
-git add awt-skill && git commit -m "chore: move the skill pointer to ..." && git push
-
-# 5. 결과 확인
-gh run list --repo ksgisang/awt-skill --workflow publish-mcp.yml --limit 1
+# 4. 결과 확인
+gh run list --workflow publish-mcp.yml --limit 1
 curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.ksgisang/awt"
 ```
 
+번들 판본(`plugin.json`)과 `server.json`의 판본은 **같을 필요가 없습니다.**
+`server.json`은 PyPI 패키지를 가리키므로 **PyPI에 실제로 올라간 판본**이어야 하고,
+번들은 스킬 문서만 싣기 때문에 PyPI와 무관하게 올릴 수 있습니다.
+
 ### ⚠️ 주의
-- 워크플로가 실패했을 때만 `gh workflow run publish-mcp.yml --repo ksgisang/awt-skill`로
-  다시 돌립니다.
+- 워크플로가 실패했을 때만 `gh workflow run publish-mcp.yml`로 다시 돌립니다.
+- **게시된 판본은 불변입니다.** 같은 판본을 다시 올리려 하면 게시가 실패하므로,
+  워크플로가 먼저 Registry를 조회해 이미 있으면 건너뜁니다.
 - 로컬 `mcp-publisher` 바이너리는 더 이상 필요하지 않습니다(저장소에 커밋되어
   있지도 않습니다). `login github`은 브라우저 인증이라 AI 에이전트가 대신 할 수
   없었고, 토큰이 만료되어 게시를 건너뛰는 일이 실제로 있었습니다. 그래서
@@ -289,7 +325,7 @@ curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.ks
 - [ ] README.ko.md 동기화 (해당 시)
 - [ ] lee-to-kim summary 업데이트 (협업 시)
 - [ ] PyPI 버전 범프 + 태그 (배포 조건 충족 시)
-- [ ] Anthropic Skills PR 동기화 (MCP 변경 시)
+- [ ] 플러그인 번들 동기화 (스킬 문서 변경 시)
 - [ ] MCP Registry 갱신 (MCP 변경 시, PyPI 배포 이후)
 ```
 
